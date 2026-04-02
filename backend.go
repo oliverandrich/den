@@ -1,0 +1,122 @@
+package den
+
+import (
+	"context"
+
+	"github.com/oliverandrich/den/where"
+)
+
+// Backend defines the contract that all storage engines must implement.
+type Backend interface {
+	Get(ctx context.Context, collection, id string) ([]byte, error)
+	Put(ctx context.Context, collection, id string, data []byte) error
+	Delete(ctx context.Context, collection, id string) error
+
+	Query(ctx context.Context, collection string, q *Query) (Iterator, error)
+	Count(ctx context.Context, collection string, q *Query) (int64, error)
+	Exists(ctx context.Context, collection string, q *Query) (bool, error)
+	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
+
+	EnsureIndex(ctx context.Context, collection string, idx IndexDefinition) error
+	DropIndex(ctx context.Context, collection string, name string) error
+
+	EnsureCollection(ctx context.Context, name string, meta CollectionMeta) error
+	DropCollection(ctx context.Context, name string) error
+
+	Begin(ctx context.Context, writable bool) (Transaction, error)
+
+	Encoder() Encoder
+
+	Ping(ctx context.Context) error
+	Close() error
+}
+
+// AggregateOp identifies a SQL aggregate function.
+type AggregateOp string
+
+const (
+	OpSum AggregateOp = "SUM"
+	OpAvg AggregateOp = "AVG"
+	OpMin AggregateOp = "MIN"
+	OpMax AggregateOp = "MAX"
+)
+
+// ReadWriter is the common interface for both Backend and Transaction,
+// providing the core CRUD operations that all write paths need.
+type ReadWriter interface {
+	Get(ctx context.Context, collection, id string) ([]byte, error)
+	Put(ctx context.Context, collection, id string, data []byte) error
+	Delete(ctx context.Context, collection, id string) error
+	Query(ctx context.Context, collection string, q *Query) (Iterator, error)
+	Count(ctx context.Context, collection string, q *Query) (int64, error)
+	Exists(ctx context.Context, collection string, q *Query) (bool, error)
+	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
+}
+
+// Transaction provides CRUD operations within a transaction boundary.
+type Transaction interface {
+	ReadWriter
+	Commit() error
+	Rollback() error
+}
+
+// Iterator provides sequential access to query results.
+type Iterator interface {
+	Next() bool
+	Bytes() []byte
+	ID() string
+	Err() error
+	Close() error
+}
+
+// IndexDefinition describes a secondary index on a collection.
+type IndexDefinition struct {
+	Name   string
+	Fields []string
+	Unique bool
+}
+
+// CollectionMeta holds structural metadata for a registered collection.
+type CollectionMeta struct {
+	Name        string
+	Fields      []FieldMeta
+	Indexes     []IndexDefinition
+	HasSoftBase bool
+}
+
+// FieldMeta describes a single field within a collection.
+type FieldMeta struct {
+	Name      string
+	GoName    string
+	Type      string
+	Indexed   bool
+	Unique    bool
+	FTS       bool
+	IsPointer bool
+}
+
+// SortDirection specifies ascending or descending sort order.
+type SortDirection int
+
+const (
+	Asc SortDirection = iota
+	Desc
+)
+
+// SortEntry defines a single sort criterion.
+type SortEntry struct {
+	Field string
+	Dir   SortDirection
+}
+
+// Query represents an abstract query that backends translate into
+// their native query mechanism.
+type Query struct {
+	Collection string
+	Conditions []where.Condition
+	SortFields []SortEntry
+	LimitN     int // 0 = no limit
+	SkipN      int // 0 = no skip
+	AfterID    string
+	BeforeID   string
+}

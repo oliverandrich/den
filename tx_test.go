@@ -1,0 +1,225 @@
+package den_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/oliverandrich/den"
+	"github.com/oliverandrich/den/dentest"
+	"github.com/oliverandrich/den/where"
+)
+
+func TestRunInTransaction_Commit(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		found, err := den.TxFindByID[Product](tx, p.ID)
+		if err != nil {
+			return err
+		}
+		found.Price = 99.0
+		return den.TxUpdate(tx, found)
+	})
+	require.NoError(t, err)
+
+	found, err := den.FindByID[Product](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 99.0, found.Price, 0.001)
+}
+
+func TestRunInTransaction_Rollback(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		found, err := den.TxFindByID[Product](tx, p.ID)
+		if err != nil {
+			return err
+		}
+		found.Price = 99.0
+		if err := den.TxUpdate(tx, found); err != nil {
+			return err
+		}
+		return errors.New("abort")
+	})
+	require.Error(t, err)
+
+	// Price should be unchanged
+	found, err := den.FindByID[Product](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 10.0, found.Price, 0.001)
+}
+
+func TestTxInsert(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	var insertedID string
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		p := &Product{Name: "InTx", Price: 42.0}
+		if err := den.TxInsert(tx, p); err != nil {
+			return err
+		}
+		insertedID = p.ID
+		return nil
+	})
+	require.NoError(t, err)
+
+	found, err := den.FindByID[Product](ctx, db, insertedID)
+	require.NoError(t, err)
+	assert.Equal(t, "InTx", found.Name)
+}
+
+func TestTxDelete(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "ToDelete", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxDelete(tx, p)
+	})
+	require.NoError(t, err)
+
+	_, err = den.FindByID[Product](ctx, db, p.ID)
+	require.ErrorIs(t, err, den.ErrNotFound)
+}
+
+func TestTxDelete_SoftDelete(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	p := &SoftProduct{Name: "SoftInTx", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxDelete(tx, p)
+	})
+	require.NoError(t, err)
+
+	// Should be soft-deleted, not hard-deleted
+	assert.True(t, p.IsDeleted())
+
+	// FindByID still returns the document
+	found, err := den.FindByID[SoftProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.True(t, found.IsDeleted())
+
+	// Should be hidden from normal queries
+	results, err := den.NewQuery[SoftProduct](ctx, db).All()
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestTxInsert_AfterHooks(t *testing.T) {
+	db := dentest.MustOpen(t, &AfterSaveDoc{})
+	ctx := context.Background()
+
+	d := &AfterSaveDoc{Name: "InTx"}
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxInsert(tx, d)
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "called", d.SavedAt)
+}
+
+func TestTxUpdate_AfterHooks(t *testing.T) {
+	db := dentest.MustOpen(t, &UpdateHookDoc{})
+	ctx := context.Background()
+
+	d := &UpdateHookDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	d.Name = "Updated"
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxUpdate(tx, d)
+	})
+	require.NoError(t, err)
+	assert.True(t, d.BeforeUpdated)
+	assert.True(t, d.AfterUpdated)
+}
+
+func TestTxDelete_AfterHooks(t *testing.T) {
+	db := dentest.MustOpen(t, &DeleteHookDoc{})
+	ctx := context.Background()
+
+	d := &DeleteHookDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxDelete(tx, d)
+	})
+	require.NoError(t, err)
+	assert.True(t, d.BeforeDeleted)
+	assert.True(t, d.AfterDeleted)
+}
+
+func TestTxInsert_Revision(t *testing.T) {
+	db := dentest.MustOpen(t, &RevProduct{})
+	ctx := context.Background()
+
+	p := &RevProduct{Name: "Widget", Price: 10.0}
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxInsert(tx, p)
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, p.Rev, "revision should be set on TxInsert")
+}
+
+func TestDeleteMany_SoftDelete(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	products := []*SoftProduct{
+		{Name: "Keep", Price: 5.0},
+		{Name: "Delete1", Price: 15.0},
+		{Name: "Delete2", Price: 25.0},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, products))
+
+	count, err := den.DeleteMany[SoftProduct](ctx, db, []where.Condition{where.Field("price").Gt(10.0)})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// Soft-deleted should be hidden from normal queries
+	remaining, err := den.NewQuery[SoftProduct](ctx, db).All()
+	require.NoError(t, err)
+	assert.Len(t, remaining, 1)
+	assert.Equal(t, "Keep", remaining[0].Name)
+
+	// But still accessible with IncludeDeleted
+	all, err := den.NewQuery[SoftProduct](ctx, db).IncludeDeleted().All()
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+}
+
+func TestInsertMany_Rollback(t *testing.T) {
+	ctx := context.Background()
+
+	// Use a hook that fails to trigger rollback.
+	// FailBeforeDoc's BeforeInsert always returns error.
+	db := dentest.MustOpen(t, &FailBeforeDoc{})
+	products := []*FailBeforeDoc{
+		{Name: "First"}, // BeforeInsert always fails
+		{Name: "Second"},
+	}
+	err := den.InsertMany(ctx, db, products)
+	require.Error(t, err)
+
+	// No documents should persist after transaction rollback
+	all, err := den.NewQuery[FailBeforeDoc](ctx, db).All()
+	require.NoError(t, err)
+	assert.Empty(t, all, "no documents should persist after transaction rollback")
+}

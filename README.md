@@ -35,6 +35,7 @@ Den provides a MongoDB/Beanie-style document model using native Go structs. Stor
 - **Optimistic concurrency** — revision-based conflict detection with `ErrRevisionConflict`
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically in a transaction
+- **Struct tag validation** — optional `validate:"required,email"` tags via `go-playground/validator`, enabled with `validate.WithValidation()`
 - **Expression indexes** — `den:"index"`, `den:"unique"`, nullable unique for pointer fields
 
 ## Quick Start
@@ -135,6 +136,7 @@ den/
 ├── backend/
 │   ├── sqlite/                     SQLite backend (pure Go, no CGO)
 │   └── postgres/                   PostgreSQL backend (pgx)
+├── validate/                       Optional struct tag validation
 ├── migrate/                        Migration framework
 └── dentest/                        Test helpers
 ```
@@ -177,6 +179,43 @@ where.Field("name").RegExp("^W")      // regular expression
 where.And(cond1, cond2)               // logical combinators
 where.Field("addr.city").Eq("Berlin") // nested fields (dot notation)
 ```
+
+## Validation
+
+Den supports automatic struct tag validation via [`go-playground/validator`](https://github.com/go-playground/validator). Enable it as an option when opening the database:
+
+```go
+import "github.com/oliverandrich/den/validate"
+
+db, err := den.Open(sqlite.Open("./data.db"), validate.WithValidation())
+```
+
+Then add `validate` tags to your document structs:
+
+```go
+type User struct {
+    document.Base
+    Name  string `json:"name"  den:"unique" validate:"required,min=3,max=50"`
+    Email string `json:"email" den:"unique" validate:"required,email"`
+    Age   int    `json:"age"                validate:"gte=0,lte=130"`
+}
+```
+
+Validation runs automatically before every insert and update. Errors wrap `den.ErrValidation` and can be inspected for field-level detail:
+
+```go
+err := den.Insert(ctx, db, &User{Name: "ab"})
+if errors.Is(err, den.ErrValidation) {
+    var ve *validate.Errors
+    if errors.As(err, &ve) {
+        for _, fe := range ve.Fields {
+            fmt.Printf("%s failed on %s\n", fe.Field, fe.Tag)
+        }
+    }
+}
+```
+
+Tag validation and the `Validator` interface coexist — tag validation runs first (structural rules), then `Validate()` (business logic). Without `validate.WithValidation()`, no tag validation occurs (fully backward compatible).
 
 ## Testing
 
@@ -223,6 +262,7 @@ Requires Go 1.25+. Run `just setup` to verify your dev environment.
 | `github.com/goccy/go-json` | Fast JSON encoding |
 | `modernc.org/sqlite` | SQLite backend (pure Go, no CGO) |
 | `github.com/jackc/pgx/v5` | PostgreSQL backend |
+| `github.com/go-playground/validator/v10` | Struct tag validation (optional, via `den/validate`) |
 
 ## License
 

@@ -31,6 +31,12 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		}
 	}
 
+	if db.tagValidator != nil {
+		if err := db.tagValidator(document); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+	}
+
 	if err := runBeforeInsertHooks(ctx, document); err != nil {
 		return err
 	}
@@ -118,6 +124,12 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	id := getID(rv, col.structInfo)
 	if id == "" {
 		return fmt.Errorf("den: cannot update document without ID")
+	}
+
+	if db.tagValidator != nil {
+		if err := db.tagValidator(document); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
 	}
 
 	if err := runBeforeUpdateHooks(ctx, document); err != nil {

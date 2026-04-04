@@ -7,6 +7,9 @@ import (
 	"github.com/oliverandrich/den/internal"
 )
 
+// Option configures a DB during Open.
+type Option func(*DB)
+
 // DB is the main entry point for Den operations.
 // It wraps a Backend and holds the collection registry.
 type DB struct {
@@ -16,6 +19,7 @@ type DB struct {
 	typeCache        sync.Map          // reflect.Type → *collectionInfo (lock-free fast path)
 	encoder          Encoder
 	encoderOnce      sync.Once
+	tagValidator     func(doc any) error
 	mu               sync.RWMutex
 }
 
@@ -34,12 +38,22 @@ type Encoder interface {
 }
 
 // Open creates a new DB using the given backend.
-func Open(backend Backend) (*DB, error) {
-	return &DB{
+func Open(backend Backend, opts ...Option) (*DB, error) {
+	db := &DB{
 		backend:          backend,
 		collections:      make(map[string]*collectionInfo),
 		typeToCollection: make(map[string]string),
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(db)
+	}
+	return db, nil
+}
+
+// SetTagValidator registers a function that validates documents using struct tags.
+// Called automatically before insert and update operations.
+func (db *DB) SetTagValidator(fn func(any) error) {
+	db.tagValidator = fn
 }
 
 // Close closes the database and its underlying backend.

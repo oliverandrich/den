@@ -1,0 +1,29 @@
+# Changelog
+
+All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+
+## Unreleased
+
+## 0.1.0 — 2026-04-04
+
+### Added
+
+- **Core ODM** — document-oriented storage with JSONB encoding, ULID-based IDs, and automatic timestamps
+- **SQLite backend** — embedded, pure Go (`modernc.org/sqlite`), JSONB storage, FTS5 full-text search
+- **PostgreSQL backend** — server-based, native JSONB + GIN indexes, tsvector full-text search
+- **Chainable QuerySet** — `NewQuery[T](ctx, db).Where(...).Sort(...).Limit(n).All()` with lazy evaluation
+- **Range iteration** — `Iter()` returns `iter.Seq2[*T, error]` for memory-efficient streaming
+- **Typed relations** — `Link[T]` for one-to-one, `[]Link[T]` for one-to-many, with cascade write/delete and eager/lazy fetch
+- **Back-references** — `BackLinks[T]` finds all documents referencing a given target
+- **Native aggregation** — `Avg`, `Sum`, `Min`, `Max` pushed down to SQL; `GroupBy` and `Project` for analytics
+- **Full-text search** — FTS5 for SQLite, tsvector for PostgreSQL, same `Search()` API
+- **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces on document structs
+- **Change tracking** — opt-in via `TrackedBase`: `IsChanged`, `GetChanges`, `Rollback` with byte-level snapshots
+- **Soft delete** — embed `SoftBase` instead of `Base`, automatic query filtering, `HardDelete` for permanent removal
+- **Optimistic concurrency** — revision-based conflict detection with `ErrRevisionConflict`
+- **Transactions** — `RunInTransaction` with panic-safe rollback
+- **Migrations** — registry-based, each migration runs atomically in a transaction
+- **Expression indexes** — `den:"index"`, `den:"unique"`, nullable unique for pointer fields
+- **Struct tag validation** — optional `validate:"required,email"` tags via `go-playground/validator`, enabled with `validate.WithValidation()` option
+- **Functional options** — `den.Open(backend, opts...)` pattern for extensible configuration
+- **Test helpers** — `dentest.MustOpen` and `dentest.MustOpenPostgres` with automatic cleanup

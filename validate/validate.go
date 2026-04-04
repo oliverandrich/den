@@ -34,6 +34,15 @@ func (e *Errors) Error() string {
 	return "validation failed: " + strings.Join(parts, "; ")
 }
 
+var defaultValidator = validator.New()
+
+// ValidateStruct validates a struct using its `validate` struct tags.
+// Returns nil if valid, *Errors if validation fails, or an error for
+// invalid input (e.g. nil).
+func ValidateStruct(doc any) error {
+	return validateWithInstance(defaultValidator, doc)
+}
+
 // WithValidation returns a den.Option that enables struct tag validation
 // using go-playground/validator. Documents with `validate:"..."` struct tags
 // are validated automatically before insert and update operations.
@@ -41,17 +50,21 @@ func WithValidation() den.Option {
 	v := validator.New()
 	return func(db *den.DB) {
 		db.SetTagValidator(func(doc any) error {
-			err := v.Struct(doc)
-			if err == nil {
-				return nil
-			}
-			var ve validator.ValidationErrors
-			if errors.As(err, &ve) {
-				return convertErrors(ve)
-			}
-			return err
+			return validateWithInstance(v, doc)
 		})
 	}
+}
+
+func validateWithInstance(v *validator.Validate, doc any) error {
+	err := v.Struct(doc)
+	if err == nil {
+		return nil
+	}
+	var ve validator.ValidationErrors
+	if errors.As(err, &ve) {
+		return convertErrors(ve)
+	}
+	return err
 }
 
 func convertErrors(ve validator.ValidationErrors) *Errors {

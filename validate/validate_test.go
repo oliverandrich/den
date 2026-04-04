@@ -189,6 +189,27 @@ func TestMultipleFieldErrors(t *testing.T) {
 	assert.GreaterOrEqual(t, len(ve.Fields), 3)
 }
 
+func TestValidateStructDirectly(t *testing.T) {
+	doc := &ValidatedDoc{Name: "ab", Email: "bad", Age: -1}
+	err := validate.ValidateStruct(doc)
+	require.Error(t, err)
+
+	var ve *validate.Errors
+	require.ErrorAs(t, err, &ve)
+	assert.GreaterOrEqual(t, len(ve.Fields), 3)
+}
+
+func TestValidateStructValid(t *testing.T) {
+	doc := &ValidatedDoc{Name: "Alice", Email: "alice@example.com", Age: 25}
+	err := validate.ValidateStruct(doc)
+	require.NoError(t, err)
+}
+
+func TestValidateStructNilReturnsError(t *testing.T) {
+	err := validate.ValidateStruct(nil)
+	require.Error(t, err)
+}
+
 func TestErrorsErrorString(t *testing.T) {
 	ve := &validate.Errors{
 		Fields: []validate.FieldError{

@@ -116,6 +116,102 @@ func (d *AfterSaveDoc) AfterSave(_ context.Context) error {
 	return nil
 }
 
+// Error-returning hook types for coverage of error paths.
+
+type FailAfterInsertDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailAfterInsertDoc) AfterInsert(_ context.Context) error {
+	return errors.New("after insert failed")
+}
+
+type FailAfterSaveOnInsertDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailAfterSaveOnInsertDoc) AfterSave(_ context.Context) error {
+	return errors.New("after save failed")
+}
+
+type FailBeforeUpdateDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailBeforeUpdateDoc) BeforeUpdate(_ context.Context) error {
+	return errors.New("before update blocked")
+}
+
+type FailBeforeSaveOnUpdateDoc struct {
+	document.Base
+	Name  string `json:"name"`
+	count int
+}
+
+func (d *FailBeforeSaveOnUpdateDoc) BeforeSave(_ context.Context) error {
+	d.count++
+	if d.count > 1 {
+		return errors.New("before save blocked on update")
+	}
+	return nil
+}
+
+type FailAfterUpdateDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailAfterUpdateDoc) AfterUpdate(_ context.Context) error {
+	return errors.New("after update failed")
+}
+
+type FailAfterSaveOnUpdateDoc struct {
+	document.Base
+	Name  string `json:"name"`
+	count int
+}
+
+func (d *FailAfterSaveOnUpdateDoc) AfterSave(_ context.Context) error {
+	d.count++
+	if d.count > 1 {
+		return errors.New("after save failed on update")
+	}
+	return nil
+}
+
+type FailBeforeDeleteDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailBeforeDeleteDoc) BeforeDelete(_ context.Context) error {
+	return errors.New("before delete blocked")
+}
+
+type FailAfterDeleteDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *FailAfterDeleteDoc) AfterDelete(_ context.Context) error {
+	return errors.New("after delete failed")
+}
+
+type ValidateOnUpdateDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (v *ValidateOnUpdateDoc) Validate() error {
+	if v.Name == "invalid" {
+		return errors.New("name is invalid")
+	}
+	return nil
+}
+
 // --- Tests ---
 
 func TestBeforeSave_Hook(t *testing.T) {
@@ -238,4 +334,113 @@ func TestAfterSave_OnUpdate(t *testing.T) {
 	d.Name = "Updated"
 	require.NoError(t, den.Update(ctx, db, d))
 	assert.Equal(t, "called", d.SavedAt)
+}
+
+func TestAfterInsert_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &FailAfterInsertDoc{})
+	ctx := context.Background()
+
+	d := &FailAfterInsertDoc{Name: "Test"}
+	err := den.Insert(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after insert failed")
+}
+
+func TestAfterSave_ErrorOnInsert(t *testing.T) {
+	db := dentest.MustOpen(t, &FailAfterSaveOnInsertDoc{})
+	ctx := context.Background()
+
+	d := &FailAfterSaveOnInsertDoc{Name: "Test"}
+	err := den.Insert(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after save failed")
+}
+
+func TestBeforeUpdate_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &FailBeforeUpdateDoc{})
+	ctx := context.Background()
+
+	d := &FailBeforeUpdateDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	d.Name = "Updated"
+	err := den.Update(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "before update blocked")
+}
+
+func TestBeforeSave_ErrorOnUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &FailBeforeSaveOnUpdateDoc{})
+	ctx := context.Background()
+
+	d := &FailBeforeSaveOnUpdateDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d)) // count=1, passes
+
+	d.Name = "Updated"
+	err := den.Update(ctx, db, d) // count=2, fails
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "before save blocked on update")
+}
+
+func TestAfterUpdate_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &FailAfterUpdateDoc{})
+	ctx := context.Background()
+
+	d := &FailAfterUpdateDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	d.Name = "Updated"
+	err := den.Update(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after update failed")
+}
+
+func TestAfterSave_ErrorOnUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &FailAfterSaveOnUpdateDoc{})
+	ctx := context.Background()
+
+	d := &FailAfterSaveOnUpdateDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d)) // count=1, passes
+
+	d.Name = "Updated"
+	err := den.Update(ctx, db, d) // count=2, fails
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after save failed on update")
+}
+
+func TestBeforeDelete_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &FailBeforeDeleteDoc{})
+	ctx := context.Background()
+
+	d := &FailBeforeDeleteDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	err := den.Delete(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "before delete blocked")
+}
+
+func TestAfterDelete_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &FailAfterDeleteDoc{})
+	ctx := context.Background()
+
+	d := &FailAfterDeleteDoc{Name: "Test"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	err := den.Delete(ctx, db, d)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after delete failed")
+}
+
+func TestValidateOnUpdate_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &ValidateOnUpdateDoc{})
+	ctx := context.Background()
+
+	d := &ValidateOnUpdateDoc{Name: "valid"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	d.Name = "invalid"
+	err := den.Update(ctx, db, d)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, den.ErrValidation)
 }

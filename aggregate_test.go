@@ -170,6 +170,38 @@ func TestProject_WithFilter(t *testing.T) {
 	assert.Len(t, summaries, 2)
 }
 
+func TestGroupBy_CacheHit(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	type CatStats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	// First call — populates cache
+	var stats1 []CatStats
+	require.NoError(t, den.NewQuery[AggProduct](ctx, db).GroupBy("category").Into(&stats1))
+	require.Len(t, stats1, 2)
+
+	// Second call with same target type — should hit cache
+	var stats2 []CatStats
+	require.NoError(t, den.NewQuery[AggProduct](ctx, db).GroupBy("category").Into(&stats2))
+	require.Len(t, stats2, 2)
+}
+
+func TestProject_InvalidTarget(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	// Not a pointer to slice — should error
+	var single struct{ Name string }
+	err := den.NewQuery[AggProduct](ctx, db).Project(&single)
+	require.Error(t, err)
+}
+
 func TestQuerySet_Count(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})
 	seedAggProducts(t, db)

@@ -75,6 +75,21 @@ func TestBuildSelectSQL_Cursor(t *testing.T) {
 	assert.Contains(t, args, "p5")
 }
 
+func TestBuildSelectSQL_BeforeCursor(t *testing.T) {
+	q := &den.Query{Collection: "products", BeforeID: "p3"}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "id < ?")
+	assert.Contains(t, args, "p3")
+}
+
+func TestBuildSelectSQL_BothCursors(t *testing.T) {
+	q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p5"}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "id > ?")
+	assert.Contains(t, sql, "id < ?")
+	assert.Equal(t, []any{"p1", "p5"}, args)
+}
+
 func TestBuildSelectSQL_IsNil(t *testing.T) {
 	q := &den.Query{
 		Collection: "products",

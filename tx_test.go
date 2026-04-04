@@ -205,6 +205,72 @@ func TestDeleteMany_SoftDelete(t *testing.T) {
 	assert.Len(t, all, 3)
 }
 
+func TestRunInTransaction_PanicRecovery(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	// RunInTransaction catches panics, rolls back, and re-panics
+	assert.Panics(t, func() {
+		_ = den.RunInTransaction(ctx, db, func(_ *den.Tx) error {
+			panic("unexpected panic")
+		})
+	})
+
+	// Data should be unchanged after rollback
+	found, err := den.FindByID[Product](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 10.0, found.Price, 0.001)
+}
+
+func TestTxGet_Direct(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		data, err := den.TxGet(tx, "product", p.ID)
+		if err != nil {
+			return err
+		}
+		assert.Contains(t, string(data), "Widget")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestTxPut_Direct(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.TxPut(tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
+	})
+	require.NoError(t, err)
+
+	found, err := den.FindByID[Product](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Replaced", found.Name)
+}
+
+func TestTxFindByID_NotFound(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxFindByID[Product](tx, "nonexistent")
+		return err
+	})
+	require.ErrorIs(t, err, den.ErrNotFound)
+}
+
 func TestInsertMany_Rollback(t *testing.T) {
 	ctx := context.Background()
 

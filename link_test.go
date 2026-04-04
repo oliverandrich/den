@@ -103,6 +103,41 @@ func TestFetchLink(t *testing.T) {
 	assert.Equal(t, 200, found.Door.Value.Height)
 }
 
+func TestFetchLink_SliceLink(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	w1 := &Window{X: 10, Y: 20}
+	w2 := &Window{X: 30, Y: 40}
+	require.NoError(t, den.Insert(ctx, db, w1))
+	require.NoError(t, den.Insert(ctx, db, w2))
+
+	house := &House{
+		Name:    "Villa",
+		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+	}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	found, err := den.FindByID[House](ctx, db, house.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, den.FetchLink(ctx, db, found, "windows"))
+	require.Len(t, found.Windows, 2)
+	assert.True(t, found.Windows[0].IsLoaded())
+	assert.True(t, found.Windows[1].IsLoaded())
+}
+
+func TestFetchLink_NotFound(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	house := &House{Name: "Empty"}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	err := den.FetchLink(ctx, db, house, "nonexistent")
+	require.Error(t, err)
+}
+
 func TestFetchAllLinks(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()
@@ -413,6 +448,29 @@ func TestWithLinkRule_Delete_HooksOnLinked(t *testing.T) {
 	// Hooks fired on the linked document
 	assert.True(t, hookedPartBeforeDeleteCalled, "BeforeDelete should fire on cascaded linked part")
 	assert.True(t, hookedPartAfterDeleteCalled, "AfterDelete should fire on cascaded linked part")
+}
+
+func TestWithLinkRule_Write_OnUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	house := &House{
+		Name: "Home",
+		Door: den.NewLink(door),
+	}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	// Update door via cascade write
+	house.Door.Value.Height = 250
+	require.NoError(t, den.Update(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+
+	// Door should be updated
+	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 250, foundDoor.Height)
 }
 
 func TestWithLinkRule_DeleteIgnore(t *testing.T) {

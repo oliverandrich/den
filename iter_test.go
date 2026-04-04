@@ -9,6 +9,7 @@ import (
 
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -80,6 +81,40 @@ func TestIter_ExcludesSoftDeleted(t *testing.T) {
 		names = append(names, p.Name)
 	}
 	assert.Equal(t, []string{"Keep"}, names)
+}
+
+type IterLinkedDoc struct {
+	document.Base
+	Name string                `json:"name"`
+	Ref  den.Link[IterRefItem] `json:"ref"`
+}
+
+type IterRefItem struct {
+	document.Base
+	Label string `json:"label"`
+}
+
+func TestIter_WithFetchLinks(t *testing.T) {
+	db := dentest.MustOpen(t, &IterLinkedDoc{}, &IterRefItem{})
+	ctx := context.Background()
+
+	ref := &IterRefItem{Label: "Target"}
+	require.NoError(t, den.Insert(ctx, db, ref))
+
+	docs := []*IterLinkedDoc{
+		{Name: "A", Ref: den.NewLink(ref)},
+		{Name: "B", Ref: den.NewLink(ref)},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, docs))
+
+	count := 0
+	for d, err := range den.NewQuery[IterLinkedDoc](ctx, db).WithFetchLinks().Iter() {
+		require.NoError(t, err)
+		require.True(t, d.Ref.IsLoaded())
+		assert.Equal(t, "Target", d.Ref.Value.Label)
+		count++
+	}
+	assert.Equal(t, 2, count)
 }
 
 func TestIter_WithConditions(t *testing.T) {

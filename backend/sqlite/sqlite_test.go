@@ -229,6 +229,54 @@ func TestTransactionRollback(t *testing.T) {
 	assert.ErrorIs(t, err, den.ErrNotFound)
 }
 
+func TestQuery_BothCursors(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "test_cur", den.CollectionMeta{}))
+	require.NoError(t, b.Put(ctx, "test_cur", "a1", []byte(`{"name":"A"}`)))
+	require.NoError(t, b.Put(ctx, "test_cur", "a2", []byte(`{"name":"B"}`)))
+	require.NoError(t, b.Put(ctx, "test_cur", "a3", []byte(`{"name":"C"}`)))
+
+	q := &den.Query{Collection: "test_cur", AfterID: "a1", BeforeID: "a3"}
+	iter, err := b.Query(ctx, "test_cur", q)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	var ids []string
+	for iter.Next() {
+		ids = append(ids, iter.ID())
+	}
+	require.NoError(t, iter.Err())
+	assert.Equal(t, []string{"a2"}, ids)
+}
+
+func TestQuery_CursorWithConditions(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "test_curc", den.CollectionMeta{}))
+	require.NoError(t, b.Put(ctx, "test_curc", "a1", []byte(`{"price":10}`)))
+	require.NoError(t, b.Put(ctx, "test_curc", "a2", []byte(`{"price":20}`)))
+	require.NoError(t, b.Put(ctx, "test_curc", "a3", []byte(`{"price":30}`)))
+
+	q := &den.Query{
+		Collection: "test_curc",
+		AfterID:    "a1",
+		Conditions: []where.Condition{where.Field("price").Gt(15.0)},
+	}
+	iter, err := b.Query(ctx, "test_curc", q)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	var ids []string
+	for iter.Next() {
+		ids = append(ids, iter.ID())
+	}
+	require.NoError(t, iter.Err())
+	assert.Equal(t, []string{"a2", "a3"}, ids)
+}
+
 func TestDropIndex(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

@@ -2,6 +2,7 @@ package den_test
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -200,6 +201,28 @@ func TestFind_CursorPagination(t *testing.T) {
 	results, err = den.NewQuery[QueryProduct](ctx, db).After("00000000000000000000000000").All()
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
+}
+
+func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	// Get all products sorted by ID to have deterministic ordering
+	all, err := den.NewQuery[QueryProduct](ctx, db).All()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(all), 3)
+
+	// Sort by ID (ULIDs are lexicographically sortable)
+	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+
+	// Both After and Before set — should exclude first and last
+	results, err := den.NewQuery[QueryProduct](ctx, db).
+		After(all[0].ID).
+		Before(all[len(all)-1].ID).
+		All()
+	require.NoError(t, err)
+	assert.Len(t, results, len(all)-2)
 }
 
 func TestFindWithCount(t *testing.T) {

@@ -85,6 +85,56 @@ func TestSearch_WithLimit(t *testing.T) {
 	assert.Equal(t, 2, count)
 }
 
+func TestSearch_WithSkip(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "articles", den.CollectionMeta{}))
+	fts := b.(den.FTSProvider)
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"title"}))
+
+	require.NoError(t, b.Put(ctx, "articles", "a1", []byte(`{"title":"Go one"}`)))
+	require.NoError(t, b.Put(ctx, "articles", "a2", []byte(`{"title":"Go two"}`)))
+	require.NoError(t, b.Put(ctx, "articles", "a3", []byte(`{"title":"Go three"}`)))
+
+	q := &den.Query{Collection: "articles", SkipN: 1}
+	iter, err := fts.Search(ctx, "articles", "Go", q)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	count := 0
+	for iter.Next() {
+		count++
+	}
+	assert.Equal(t, 2, count)
+}
+
+func TestSearch_WithSort(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "articles", den.CollectionMeta{}))
+	fts := b.(den.FTSProvider)
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"title"}))
+
+	require.NoError(t, b.Put(ctx, "articles", "a1", []byte(`{"title":"Go Zebra"}`)))
+	require.NoError(t, b.Put(ctx, "articles", "a2", []byte(`{"title":"Go Alpha"}`)))
+
+	q := &den.Query{
+		Collection: "articles",
+		SortFields: []den.SortEntry{{Field: "title", Dir: den.Asc}},
+	}
+	iter, err := fts.Search(ctx, "articles", "Go", q)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	var ids []string
+	for iter.Next() {
+		ids = append(ids, iter.ID())
+	}
+	assert.Equal(t, []string{"a2", "a1"}, ids)
+}
+
 func TestSearch_UpdatedDoc(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

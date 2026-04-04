@@ -184,6 +184,37 @@ func TestBuildSelectSQL_Not(t *testing.T) {
 	assert.Contains(t, sql, "NOT")
 }
 
+func TestBuildSelectSQL_BothCursors(t *testing.T) {
+	q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p5"}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "id > $1")
+	assert.Contains(t, sql, "id < $2")
+	assert.Equal(t, []any{"p1", "p5"}, args)
+}
+
+func TestBuildSelectSQL_FieldRefComparisons(t *testing.T) {
+	tests := []struct {
+		name string
+		cond where.Condition
+		want string
+	}{
+		{"Eq", where.Field("a").Eq(where.FieldRef("b")), "data->>'a' = data->>'b'"},
+		{"Ne", where.Field("a").Ne(where.FieldRef("b")), "data->>'a' != data->>'b'"},
+		{"Gt", where.Field("a").Gt(where.FieldRef("b")), "data->>'a' > data->>'b'"},
+		{"Gte", where.Field("a").Gte(where.FieldRef("b")), "data->>'a' >= data->>'b'"},
+		{"Lt", where.Field("a").Lt(where.FieldRef("b")), "data->>'a' < data->>'b'"},
+		{"Lte", where.Field("a").Lte(where.FieldRef("b")), "data->>'a' <= data->>'b'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := &den.Query{Collection: "t", Conditions: []where.Condition{tt.cond}}
+			sql, args := buildSelectSQL("t", q)
+			assert.Contains(t, sql, tt.want)
+			assert.Empty(t, args)
+		})
+	}
+}
+
 func TestBuildCountSQL(t *testing.T) {
 	q := &den.Query{
 		Collection: "products",

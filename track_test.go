@@ -82,6 +82,49 @@ func TestGetChanges(t *testing.T) {
 	assert.InDelta(t, 99.0, changes["price"].After, 0.001)
 }
 
+func TestGetChanges_NoSnapshot(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedProduct{})
+
+	p := &TrackedProduct{Name: "New"}
+
+	changes, err := den.GetChanges(db, p)
+	require.NoError(t, err)
+	assert.Nil(t, changes)
+}
+
+func TestGetChanges_NoChanges(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedProduct{})
+	ctx := context.Background()
+
+	p := &TrackedProduct{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+
+	changes, err := den.GetChanges(db, found)
+	require.NoError(t, err)
+	assert.Empty(t, changes)
+}
+
+func TestGetChanges_FieldRemoved(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedProduct{})
+	ctx := context.Background()
+
+	p := &TrackedProduct{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+
+	// Set name to empty — appears as change
+	found.Name = ""
+
+	changes, err := den.GetChanges(db, found)
+	require.NoError(t, err)
+	assert.Contains(t, changes, "name")
+}
+
 func TestUpdate_RefreshesSnapshot(t *testing.T) {
 	db := dentest.MustOpen(t, &TrackedProduct{})
 	ctx := context.Background()

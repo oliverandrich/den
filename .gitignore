@@ -4,6 +4,7 @@
 
 # Test coverage
 coverage.out
+cover.out
 *.coverprofile
 coverage.html
 

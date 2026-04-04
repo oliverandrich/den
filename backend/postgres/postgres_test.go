@@ -1,5 +1,3 @@
-//go:build postgres
-
 package postgres
 
 import (
@@ -18,7 +16,7 @@ func connString(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("DEN_POSTGRES_URL")
 	if url == "" {
-		t.Skip("DEN_POSTGRES_URL not set")
+		url = "postgres://localhost/den_test"
 	}
 	return url
 }

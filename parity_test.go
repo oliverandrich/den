@@ -23,7 +23,8 @@ type ParityProduct struct {
 func parityDBs(t *testing.T) map[string]*den.DB {
 	t.Helper()
 	return map[string]*den.DB{
-		"sqlite": dentest.MustOpen(t, &ParityProduct{}),
+		"sqlite":   dentest.MustOpen(t, &ParityProduct{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParityProduct{}),
 	}
 }
 

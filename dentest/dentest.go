@@ -2,6 +2,7 @@ package dentest
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,10 +11,30 @@ import (
 	sqlitebackend "github.com/oliverandrich/den/backend/sqlite"
 )
 
+// PostgresURL returns the PostgreSQL connection string from the
+// DEN_POSTGRES_URL environment variable, falling back to a local default.
+func PostgresURL() string {
+	url := os.Getenv("DEN_POSTGRES_URL")
+	if url == "" {
+		url = "postgres://localhost/den_test"
+	}
+	return url
+}
+
 // MustOpen creates a file-backed SQLite Den database in a temp directory for testing.
 // It registers the given document types and automatically closes
 // the database when the test ends.
 func MustOpen(t *testing.T, types ...any) *den.DB {
+	return MustOpenWith(t, types, nil)
+}
+
+// MustOpenPostgres creates a PostgreSQL-backed Den database for testing.
+func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
+	return MustOpenPostgresWith(t, connString, types, nil)
+}
+
+// MustOpenWith creates a file-backed SQLite Den database with options.
+func MustOpenWith(t *testing.T, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -22,7 +43,7 @@ func MustOpen(t *testing.T, types ...any) *den.DB {
 		t.Fatalf("dentest: open sqlite: %v", err)
 	}
 
-	db, err := den.Open(backend)
+	db, err := den.Open(backend, opts...)
 	if err != nil {
 		_ = backend.Close()
 		t.Fatalf("dentest: open db: %v", err)
@@ -39,8 +60,9 @@ func MustOpen(t *testing.T, types ...any) *den.DB {
 	return db
 }
 
-// MustOpenPostgres creates a PostgreSQL-backed Den database for testing.
-func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
+// MustOpenPostgresWith creates a PostgreSQL-backed Den database with options.
+// Registered collections are automatically dropped when the test ends.
+func MustOpenPostgresWith(t *testing.T, connString string, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
 	backend, err := pgbackend.Open(connString)
@@ -48,7 +70,7 @@ func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
 		t.Fatalf("dentest: open postgres: %v", err)
 	}
 
-	db, err := den.Open(backend)
+	db, err := den.Open(backend, opts...)
 	if err != nil {
 		_ = backend.Close()
 		t.Fatalf("dentest: open db: %v", err)
@@ -61,6 +83,12 @@ func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
 		}
 	}
 
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, name := range den.Collections(db) {
+			_ = backend.DropCollection(ctx, name)
+		}
+		_ = db.Close()
+	})
 	return db
 }

@@ -52,7 +52,7 @@ jobs:
       - name: Test (SQLite + PostgreSQL)
         env:
           DEN_POSTGRES_URL: postgres://den:den@localhost:5432/den_test?sslmode=disable
-        run: go test ${{ matrix.go-version == '1.26' && '-race' || '' }} -tags postgres ./...
+        run: go test ${{ matrix.go-version == '1.26' && '-race' || '' }} ./...
 
   lint:
     runs-on: ubuntu-latest

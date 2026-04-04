@@ -1,17 +1,10 @@
-# PostgreSQL connection URL (override with: just pg_url="postgres://..." test-all)
-pg_url := env("DEN_POSTGRES_URL", "postgres://localhost/den_test")
-
 # Default recipe: list available commands
 default:
     @just --list
 
-# Run all tests
+# Run all tests (SQLite + PostgreSQL)
 test *args:
     go test -race -json {{args}} ./... | tparse
-
-# Run all tests including PostgreSQL
-test-all *args:
-    DEN_POSTGRES_URL="{{pg_url}}" go test -race -json -tags postgres {{args}} ./... | tparse
 
 # Run linter
 lint:
@@ -22,21 +15,11 @@ fmt:
     gofmt -w .
     goimports -w .
 
-# Run tests with coverage
+# Run tests with coverage (SQLite + PostgreSQL)
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     go test -race -json -coverprofile=coverage.out ./... > test.json
-    tparse -file=test.json
-    rm -f test.json
-    go tool cover -html=coverage.out -o coverage.html
-    echo "Coverage report: coverage.html"
-
-# Run tests with coverage including PostgreSQL
-coverage-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    DEN_POSTGRES_URL="{{pg_url}}" go test -race -json -tags postgres -coverprofile=coverage.out ./... > test.json
     tparse -file=test.json
     rm -f test.json
     go tool cover -html=coverage.out -o coverage.html

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,46 @@ import (
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/where"
 )
+
+func TestBuildDSN_Defaults(t *testing.T) {
+	dsn := buildDSN("/tmp/test.db")
+	assert.Contains(t, dsn, "/tmp/test.db?")
+	assert.Contains(t, dsn, "_txlock=immediate")
+	assert.Contains(t, dsn, "_pragma=journal_mode%28WAL%29")
+	assert.Contains(t, dsn, "_pragma=busy_timeout%285000%29")
+	assert.Contains(t, dsn, "_pragma=synchronous%28NORMAL%29")
+	assert.Contains(t, dsn, "_pragma=foreign_keys%28ON%29")
+	assert.Contains(t, dsn, "_pragma=temp_store%28MEMORY%29")
+	assert.Contains(t, dsn, "_pragma=mmap_size%28134217728%29")
+	assert.Contains(t, dsn, "_pragma=journal_size_limit%2827103364%29")
+	assert.Contains(t, dsn, "_pragma=cache_size%282000%29")
+}
+
+func TestBuildDSN_UserOverride(t *testing.T) {
+	dsn := buildDSN("/tmp/test.db?_pragma=cache_size(5000)")
+	// User's cache_size should be present
+	assert.Contains(t, dsn, "_pragma=cache_size%285000%29")
+	// Default cache_size(2000) should NOT be added
+	assert.NotContains(t, dsn, "cache_size%282000%29")
+	// Other defaults should still be present
+	assert.Contains(t, dsn, "_pragma=journal_mode%28WAL%29")
+}
+
+func TestBuildDSN_UserOverrideTxLock(t *testing.T) {
+	dsn := buildDSN("/tmp/test.db?_txlock=deferred")
+	assert.Contains(t, dsn, "_txlock=deferred")
+	assert.NotContains(t, dsn, "_txlock=immediate")
+}
+
+func TestBuildDSN_NoDoubleQuestionMark(t *testing.T) {
+	dsn := buildDSN("/tmp/test.db?_pragma=cache_size(5000)")
+	assert.Equal(t, 1, strings.Count(dsn, "?"), "DSN should have exactly one ?")
+}
+
+func TestBuildDSN_PlainPath(t *testing.T) {
+	dsn := buildDSN("/tmp/test.db")
+	assert.Equal(t, 1, strings.Count(dsn, "?"), "DSN should have exactly one ?")
+}
 
 func openTestDB(t *testing.T) den.Backend {
 	t.Helper()

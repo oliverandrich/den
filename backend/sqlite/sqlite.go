@@ -6,6 +6,8 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"maps"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -83,13 +85,63 @@ type backend struct {
 }
 
 // Open opens a SQLite database at the given path.
+// The path may include query parameters to override default PRAGMAs,
+// e.g. "/data.db?_pragma=cache_size(5000)".
 func Open(path string) (den.Backend, error) {
-	dsn := path + "?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+	dsn := buildDSN(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
 	}
 	return &backend{db: db}, nil
+}
+
+// defaultPragmas are applied unless the user overrides them in the DSN.
+var defaultPragmas = []string{
+	"journal_mode(WAL)",
+	"busy_timeout(5000)",
+	"synchronous(NORMAL)",
+	"foreign_keys(ON)",
+	"temp_store(MEMORY)",
+	"mmap_size(134217728)",
+	"journal_size_limit(27103364)",
+	"cache_size(2000)",
+}
+
+// buildDSN constructs a SQLite DSN with sensible defaults.
+// User-provided query parameters (e.g. "?_pragma=cache_size(5000)")
+// take precedence over defaults.
+func buildDSN(path string) string {
+	// Split path and query string
+	base, queryStr, _ := strings.Cut(path, "?")
+
+	userParams, _ := url.ParseQuery(queryStr)
+
+	// Collect user-supplied pragma names for override detection
+	userPragmas := make(map[string]bool)
+	for _, p := range userParams["_pragma"] {
+		name, _, _ := strings.Cut(p, "(")
+		userPragmas[strings.ToLower(name)] = true
+	}
+
+	// Build final query params: start with user params
+	params := make(url.Values)
+	maps.Copy(params, userParams)
+
+	// Set _txlock default if not provided
+	if params.Get("_txlock") == "" {
+		params.Set("_txlock", "immediate")
+	}
+
+	// Add default pragmas that the user hasn't overridden
+	for _, pragma := range defaultPragmas {
+		name, _, _ := strings.Cut(pragma, "(")
+		if !userPragmas[strings.ToLower(name)] {
+			params.Add("_pragma", pragma)
+		}
+	}
+
+	return base + "?" + params.Encode()
 }
 
 func (b *backend) Encoder() den.Encoder {

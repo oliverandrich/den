@@ -4,6 +4,16 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.2.1 — 2026-04-05
+
+### Fixed
+
+- **SQLite PRAGMA handling** — user-provided PRAGMAs in the DSN are now preserved; defaults are only applied when not overridden. Previously, passing query parameters caused a malformed DSN with duplicate `?` separators.
+
+### Added
+
+- **SQLite performance PRAGMAs** — added `temp_store(MEMORY)`, `mmap_size(134217728)`, `journal_size_limit(27103364)`, and `cache_size(2000)` as defaults, matching dj-lite and Burrow's recommended configuration
+
 ## 0.2.0 — 2026-04-05
 
 ### Breaking Changes

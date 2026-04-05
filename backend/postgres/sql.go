@@ -224,6 +224,12 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 		return fmt.Sprintf("jsonb_exists(data->'%s', $%d)", field, paramN), []any{value}, paramN + 1
 	case where.OpRegExp:
 		return fmt.Sprintf("%s ~ $%d", jsonPath, paramN), []any{fmt.Sprintf("%v", value)}, paramN + 1
+	case where.OpStartsWith:
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
+	case where.OpEndsWith:
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value))}, paramN + 1
+	case where.OpStringContains:
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
 	default:
 		return "", nil, paramN
 	}
@@ -288,6 +294,14 @@ type rowsIterator struct {
 	id   string
 	rows pgx.Rows
 	err  error
+}
+
+// escapeLike escapes LIKE special characters (%, _, \) in a value.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 func (it *rowsIterator) Next() bool {

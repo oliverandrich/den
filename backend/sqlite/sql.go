@@ -234,6 +234,12 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 		return fmt.Sprintf("json_type(data, '$.%s.%s') IS NOT NULL", field, sanitizeFieldName(key)), nil
 	case where.OpRegExp:
 		return fmt.Sprintf("%s REGEXP ?", jsonPath), []any{fmt.Sprintf("%v", value)}
+	case where.OpStartsWith:
+		return fmt.Sprintf("%s LIKE ? ESCAPE '\\'", jsonPath), []any{escapeLike(fmt.Sprintf("%v", value)) + "%"}
+	case where.OpEndsWith:
+		return fmt.Sprintf("%s LIKE ? ESCAPE '\\'", jsonPath), []any{"%" + escapeLike(fmt.Sprintf("%v", value))}
+	case where.OpStringContains:
+		return fmt.Sprintf("%s LIKE ? ESCAPE '\\'", jsonPath), []any{"%" + escapeLike(fmt.Sprintf("%v", value)) + "%"}
 	default:
 		return "", nil
 	}
@@ -300,6 +306,14 @@ func (it *rowsIterator) Next() bool {
 		return false
 	}
 	return true
+}
+
+// escapeLike escapes LIKE special characters (%, _, \) in a value.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 func (it *rowsIterator) Bytes() []byte { return it.data }

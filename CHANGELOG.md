@@ -4,6 +4,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Added
+
+- **String matching operators** — `StringContains(substr)`, `StartsWith(prefix)`, `EndsWith(suffix)` for LIKE-based substring matching on string fields, with proper escaping of special characters
+
 ## 0.2.1 — 2026-04-05
 
 ### Fixed

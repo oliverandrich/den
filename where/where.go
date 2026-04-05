@@ -19,6 +19,9 @@ const (
 	OpContainsAll
 	OpRegExp
 	OpHasKey
+	OpStartsWith
+	OpEndsWith
+	OpStringContains
 )
 
 // FieldRef references another field for field-vs-field comparisons.
@@ -102,6 +105,21 @@ func (fb FieldBuilder) ContainsAny(values ...any) Condition {
 
 func (fb FieldBuilder) ContainsAll(values ...any) Condition {
 	return &fieldCondition{field: fb.name, op: OpContainsAll, values: values}
+}
+
+// StartsWith matches string fields that start with the given prefix.
+func (fb FieldBuilder) StartsWith(prefix string) Condition {
+	return &fieldCondition{field: fb.name, op: OpStartsWith, value: prefix}
+}
+
+// EndsWith matches string fields that end with the given suffix.
+func (fb FieldBuilder) EndsWith(suffix string) Condition {
+	return &fieldCondition{field: fb.name, op: OpEndsWith, value: suffix}
+}
+
+// StringContains matches string fields that contain the given substring.
+func (fb FieldBuilder) StringContains(substr string) Condition {
+	return &fieldCondition{field: fb.name, op: OpStringContains, value: substr}
 }
 
 // HasKey checks whether a map field contains the given key.

@@ -377,6 +377,65 @@ func TestQuerySet_Update(t *testing.T) {
 	assert.Len(t, results, 2)
 }
 
+func TestStringContains(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	// "Alpha" and "Gamma" both contain "a"
+	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("lpha")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1) // Alpha
+
+	// "elt" matches Delta and Epsilon? No — only Delta
+	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("elt")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1) // Delta
+}
+
+func TestStartsWith(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StartsWith("Al")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1) // Alpha
+
+	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StartsWith("Ep")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1) // Epsilon
+}
+
+func TestEndsWith(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").EndsWith("ta")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 2) // Beta, Delta
+}
+
+func TestStringContains_EscapesSpecialChars(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	// Insert a product with LIKE special characters in the name
+	p := &QueryProduct{Name: "100% off_sale", Price: 5.0, Category: "A"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	// Search for literal "%" — should not match everything
+	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("%")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+
+	// Search for literal "_" — should not match single chars
+	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("_")).All()
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+}
+
 func TestQuerySet_Update_NoMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()

@@ -67,11 +67,7 @@ func main() {
 
 ## Quick Links
 
-<div class="grid cards" markdown>
-
-- [:material-download: **Installation**](getting-started/installation.md) — Get Den into your project
-- [:material-rocket-launch: **Quick Start**](getting-started/quickstart.md) — Build your first app
-- [:material-file-document: **Documents**](guide/documents.md) — Struct embedding, tags, and base types
-- [:material-book-open-variant: **API Reference**](reference/api.md) — Complete API overview
-
-</div>
+- [**Installation**](getting-started/installation.md) — Get Den into your project
+- [**Quick Start**](getting-started/quickstart.md) — Build your first app
+- [**Documents**](guide/documents.md) — Struct embedding, tags, and base types
+- [**API Reference**](reference/api.md) — Complete API overview

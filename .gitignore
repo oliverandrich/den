@@ -25,6 +25,11 @@ CLAUDE.md
 AGENTS.md
 .claude/
 
+# Docs (auto-generated)
+docs/changelog.md
+docs/third-party-licenses.md
+site/
+
 # Beans
 .beans.yml
 .beans/

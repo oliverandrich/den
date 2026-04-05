@@ -1,0 +1,91 @@
+site_name: Den
+site_description: An ODM for Go with SQLite and PostgreSQL backends
+site_url: https://den.readthedocs.io/
+repo_url: https://github.com/oliverandrich/den
+repo_name: oliverandrich/den
+copyright: "&copy; 2026 Oliver Andrich. All rights reserved."
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/oliverandrich/den
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Backends: getting-started/backends.md
+  - Guide:
+      - Core:
+          - Documents: guide/documents.md
+          - CRUD Operations: guide/crud.md
+          - Queries: guide/queries.md
+          - Relations: guide/relations.md
+      - Features:
+          - Aggregations: guide/aggregations.md
+          - Full-Text Search: guide/full-text-search.md
+          - Transactions: guide/transactions.md
+          - Lifecycle Hooks: guide/hooks.md
+      - Data Integrity:
+          - Soft Delete: guide/soft-delete.md
+          - Change Tracking: guide/change-tracking.md
+          - Revision Control: guide/revision-control.md
+          - Validation: guide/validation.md
+      - Operations:
+          - Migrations: guide/migrations.md
+          - Testing: guide/testing.md
+  - Reference:
+      - API Reference: reference/api.md
+      - Where Operators: reference/operators.md
+      - Error Types: reference/errors.md
+      - Struct Tags: reference/struct-tags.md
+      - Configuration: reference/configuration.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
+  - License: license.md

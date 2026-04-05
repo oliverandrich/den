@@ -4,6 +4,15 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.4.1 — 2026-04-05
+
+### Added
+
+- **Documentation site** — full MkDocs documentation with Material theme, hosted on ReadTheDocs. Covers getting started, guides (CRUD, queries, relations, aggregations, FTS, transactions, hooks, soft delete, change tracking, revision control, validation, migrations, testing), and API reference
+- **Third-party licenses** — `scripts/generate-licenses.sh` for automated license generation via `go-licenses`
+- **justfile targets** — `just docs` (serve locally), `just docs-build` (static build), `just licenses` (regenerate third-party licenses)
+- **ReadTheDocs configuration** — `.readthedocs.yaml` for automated builds via Zensical
+
 ## 0.4.0 — 2026-04-05
 
 ### Added

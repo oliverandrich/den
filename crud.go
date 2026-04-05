@@ -394,19 +394,21 @@ func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, is
 		}
 	}
 
+	nowVal := reflect.ValueOf(now)
+
 	if isInsert {
 		createdField := info.FieldByName("_created_at")
 		if createdField != nil {
 			fv := v.FieldByIndex(createdField.Index)
 			if fv.IsZero() {
-				fv.Set(reflect.ValueOf(now))
+				fv.Set(nowVal)
 			}
 		}
 	}
 
 	updatedField := info.FieldByName("_updated_at")
 	if updatedField != nil {
-		v.FieldByIndex(updatedField.Index).Set(reflect.ValueOf(now))
+		v.FieldByIndex(updatedField.Index).Set(nowVal)
 	}
 }
 

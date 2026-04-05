@@ -95,7 +95,11 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 
 // All executes the query and returns all matching documents.
 func (qs QuerySet[T]) All() ([]*T, error) {
+	// Pre-allocate when limit is known to avoid repeated slice growth.
 	var results []*T
+	if qs.limitN > 0 {
+		results = make([]*T, 0, qs.limitN)
+	}
 	for doc, err := range qs.Iter() {
 		if err != nil {
 			return nil, err

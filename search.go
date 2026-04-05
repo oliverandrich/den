@@ -33,6 +33,9 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 	defer func() { _ = iter.Close() }()
 
 	var results []*T
+	if qs.limitN > 0 {
+		results = make([]*T, 0, qs.limitN)
+	}
 	for iter.Next() {
 		doc := new(T)
 		if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {

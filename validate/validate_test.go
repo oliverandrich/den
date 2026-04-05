@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/oliverandrich/den"
-	"github.com/oliverandrich/den/backend/sqlite"
+	_ "github.com/oliverandrich/den/backend/sqlite"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/validate"
 	"github.com/stretchr/testify/assert"
@@ -40,11 +40,8 @@ func (d *CustomValidatorDoc) Validate() error {
 
 func mustOpenSQLite(t *testing.T, opts ...den.Option) *den.DB {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	backend, err := sqlite.Open(dbPath)
-	require.NoError(t, err)
-
-	db, err := den.Open(backend, opts...)
+	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
+	db, err := den.OpenURL(dsn, opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db

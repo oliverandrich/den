@@ -4,6 +4,15 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING**: `den.Open(backend)` replaced by `den.OpenURL(dsn)` — URL-based opening with scheme detection
+  - `sqlite:///path/to/db` for SQLite
+  - `sqlite://:memory:` for in-memory SQLite
+  - `postgres://user:pass@host/db` for PostgreSQL
+  - Backend packages register via `init()` — import with `_` for side effects
+  - `den.Open` is now unexported (`open`)
+
 ## 0.1.0 — 2026-04-04
 
 ### Added

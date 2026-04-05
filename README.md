@@ -55,7 +55,7 @@ import (
     "log"
 
     "github.com/oliverandrich/den"
-    "github.com/oliverandrich/den/backend/sqlite"
+    _ "github.com/oliverandrich/den/backend/sqlite" // register sqlite:// scheme
     "github.com/oliverandrich/den/document"
     "github.com/oliverandrich/den/where"
 )
@@ -70,7 +70,7 @@ func main() {
     ctx := context.Background()
 
     // Open a SQLite database
-    db, err := den.Open(sqlite.Open("./products.db"))
+    db, err := den.OpenURL("sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -109,12 +109,12 @@ func main() {
 }
 ```
 
-To use PostgreSQL instead, change one line:
+To use PostgreSQL instead, change the DSN and the import:
 
 ```go
-import "github.com/oliverandrich/den/backend/postgres"
+import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
 
-db, err := den.Open(postgres.Open("postgres://user:pass@localhost/mydb"))
+db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
 ```
 
 ## Architecture

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 
 	"modernc.org/sqlite"
@@ -22,6 +23,15 @@ var (
 )
 
 func init() {
+	den.RegisterBackend("sqlite", func(dsn string) (den.Backend, error) {
+		path := dsn
+		// Strip sqlite:// prefix if present
+		if after, ok := strings.CutPrefix(dsn, "sqlite://"); ok {
+			path = strings.TrimPrefix(after, "/")
+		}
+		return Open(path)
+	})
+
 	sqlite.MustRegisterScalarFunction("regexp", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 		pattern, ok1 := args[0].(string)
 		value, ok2 := args[1].(string)

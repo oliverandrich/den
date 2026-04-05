@@ -37,8 +37,8 @@ type Encoder interface {
 	Decode(data []byte, v any) error
 }
 
-// Open creates a new DB using the given backend.
-func Open(backend Backend, opts ...Option) (*DB, error) {
+// open creates a new DB using the given backend. Use OpenURL for the public API.
+func open(backend Backend, opts ...Option) (*DB, error) {
 	db := &DB{
 		backend:          backend,
 		collections:      make(map[string]*collectionInfo),

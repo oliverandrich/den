@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/oliverandrich/den"
-	pgbackend "github.com/oliverandrich/den/backend/postgres"
-	sqlitebackend "github.com/oliverandrich/den/backend/sqlite"
+	_ "github.com/oliverandrich/den/backend/postgres" // register postgres:// scheme
+	_ "github.com/oliverandrich/den/backend/sqlite"   // register sqlite:// scheme
 )
 
 // PostgresURL returns the PostgreSQL connection string from the
@@ -37,16 +37,10 @@ func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
 func MustOpenWith(t *testing.T, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	backend, err := sqlitebackend.Open(dbPath)
+	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
+	db, err := den.OpenURL(dsn, opts...)
 	if err != nil {
 		t.Fatalf("dentest: open sqlite: %v", err)
-	}
-
-	db, err := den.Open(backend, opts...)
-	if err != nil {
-		_ = backend.Close()
-		t.Fatalf("dentest: open db: %v", err)
 	}
 
 	if len(types) > 0 {
@@ -65,15 +59,9 @@ func MustOpenWith(t *testing.T, types []any, opts []den.Option) *den.DB {
 func MustOpenPostgresWith(t *testing.T, connString string, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
-	backend, err := pgbackend.Open(connString)
+	db, err := den.OpenURL(connString, opts...)
 	if err != nil {
 		t.Fatalf("dentest: open postgres: %v", err)
-	}
-
-	db, err := den.Open(backend, opts...)
-	if err != nil {
-		_ = backend.Close()
-		t.Fatalf("dentest: open db: %v", err)
 	}
 
 	if len(types) > 0 {
@@ -86,7 +74,7 @@ func MustOpenPostgresWith(t *testing.T, connString string, types []any, opts []d
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, name := range den.Collections(db) {
-			_ = backend.DropCollection(ctx, name)
+			_ = db.Backend().DropCollection(ctx, name)
 		}
 		_ = db.Close()
 	})

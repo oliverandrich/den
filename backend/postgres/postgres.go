@@ -14,6 +14,11 @@ import (
 	"github.com/oliverandrich/den"
 )
 
+func init() {
+	den.RegisterBackend("postgres", func(dsn string) (den.Backend, error) { return Open(dsn) })
+	den.RegisterBackend("postgresql", func(dsn string) (den.Backend, error) { return Open(dsn) })
+}
+
 type sqlSet struct {
 	get    string
 	put    string

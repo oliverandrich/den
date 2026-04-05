@@ -4,14 +4,24 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
-### Changed
+## 0.2.0 — 2026-04-05
 
-- **BREAKING**: `den.Open(backend)` replaced by `den.OpenURL(dsn)` — URL-based opening with scheme detection
+### Breaking Changes
+
+- **`den.Open(backend)` replaced by `den.OpenURL(dsn)`** — URL-based opening with automatic scheme detection. Backend packages now register via `init()` and are imported with `_` for side effects. `den.Open` is unexported.
   - `sqlite:///path/to/db` for SQLite
   - `sqlite://:memory:` for in-memory SQLite
   - `postgres://user:pass@host/db` for PostgreSQL
-  - Backend packages register via `init()` — import with `_` for side effects
-  - `den.Open` is now unexported (`open`)
+
+### Added
+
+- **Benchmark suite** — per-operation benchmarks for both backends covering Insert, FindByID, QueryAll, QueryIter, Update, Delete, and QueryWithCondition with `just bench` recipe
+
+### Changed
+
+- **Reduced allocations on hot paths** — cached `reflect.ValueOf(now)` in setBaseFields (-1 alloc/op on Insert/Update), pre-allocated result slices in `All()`/`Search()` when Limit is set (-4 allocs on limited queries), consolidated row decode pattern into `decodeIterRow` eliminating double-copy for Trackable documents
+- **`dentest` helpers accept `testing.TB`** — benchmark tests can now reuse `MustOpen`/`MustOpenPostgres`
+- **PostgreSQL tests always run** — removed `//go:build postgres` tag and `DEN_POSTGRES_URL` skip guard, PG is always available
 
 ## 0.1.0 — 2026-04-04
 

@@ -4,8 +4,16 @@ import (
 	"context"
 	"sync"
 
+	"github.com/oliverandrich/den/id"
 	"github.com/oliverandrich/den/internal"
 )
+
+// NewID generates a new ULID string. ULIDs are lexicographically sortable
+// and timestamp-ordered. Use this for document IDs, worker IDs, or any
+// unique identifier.
+func NewID() string {
+	return id.New()
+}
 
 // Option configures a DB during Open.
 type Option func(*DB)

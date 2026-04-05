@@ -4,6 +4,12 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.4.0 — 2026-04-05
+
+### Added
+
+- **`den/id` package** — public leaf package for ULID generation (`id.New()`), no framework dependencies. `den.NewID()` and `document.NewID()` both delegate to it. Useful for generating IDs outside of document contexts (e.g. worker IDs, correlation IDs).
+
 ## 0.3.0 — 2026-04-05
 
 ### Added

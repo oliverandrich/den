@@ -1,10 +1,9 @@
 package document
 
 import (
-	"crypto/rand"
 	"time"
 
-	"github.com/oklog/ulid/v2"
+	"github.com/oliverandrich/den/id"
 )
 
 // Base provides the standard fields for all Den documents.
@@ -17,9 +16,8 @@ type Base struct {
 }
 
 // NewID generates a new ULID string suitable for document IDs.
-// ULIDs are lexicographically sortable and timestamp-ordered.
 func NewID() string {
-	return ulid.MustNew(ulid.Now(), rand.Reader).String()
+	return id.New()
 }
 
 // Trackable is implemented by documents that support change tracking.

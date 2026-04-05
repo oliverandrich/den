@@ -25,6 +25,10 @@ coverage:
     go tool cover -html=coverage.out -o coverage.html
     echo "Coverage report: coverage.html"
 
+# Run benchmarks (use count=N for statistical significance)
+bench count="1":
+    go test -bench=. -benchmem -count={{count}} -run='^$$' .
+
 # Tidy module dependencies
 tidy:
     go mod tidy

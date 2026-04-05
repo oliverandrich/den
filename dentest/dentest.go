@@ -24,17 +24,17 @@ func PostgresURL() string {
 // MustOpen creates a file-backed SQLite Den database in a temp directory for testing.
 // It registers the given document types and automatically closes
 // the database when the test ends.
-func MustOpen(t *testing.T, types ...any) *den.DB {
+func MustOpen(t testing.TB, types ...any) *den.DB {
 	return MustOpenWith(t, types, nil)
 }
 
 // MustOpenPostgres creates a PostgreSQL-backed Den database for testing.
-func MustOpenPostgres(t *testing.T, connString string, types ...any) *den.DB {
+func MustOpenPostgres(t testing.TB, connString string, types ...any) *den.DB {
 	return MustOpenPostgresWith(t, connString, types, nil)
 }
 
 // MustOpenWith creates a file-backed SQLite Den database with options.
-func MustOpenWith(t *testing.T, types []any, opts []den.Option) *den.DB {
+func MustOpenWith(t testing.TB, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
 	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
@@ -56,7 +56,7 @@ func MustOpenWith(t *testing.T, types []any, opts []den.Option) *den.DB {
 
 // MustOpenPostgresWith creates a PostgreSQL-backed Den database with options.
 // Registered collections are automatically dropped when the test ends.
-func MustOpenPostgresWith(t *testing.T, connString string, types []any, opts []den.Option) *den.DB {
+func MustOpenPostgresWith(t testing.TB, connString string, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
 	db, err := den.OpenURL(connString, opts...)

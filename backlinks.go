@@ -26,13 +26,10 @@ func BackLinks[T any](ctx context.Context, db *DB, linkField string, targetID st
 
 	var results []*T
 	for iter.Next() {
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
 		doc := new(T)
-		if err := db.decode(rawBytes, doc); err != nil {
+		if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
 		}
-		captureSnapshot(rawBytes, doc)
 		results = append(results, doc)
 	}
 	if err := iter.Err(); err != nil {

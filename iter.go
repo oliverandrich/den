@@ -31,17 +31,13 @@ func (qs QuerySet[T]) Iter() iter.Seq2[*T, error] {
 		defer func() { _ = it.Close() }()
 
 		for it.Next() {
-			rawBytes := make([]byte, len(it.Bytes()))
-			copy(rawBytes, it.Bytes())
-
 			doc := new(T)
-			if err := qs.db.decode(rawBytes, doc); err != nil {
+			if err := decodeIterRow(qs.db, it.Bytes(), doc); err != nil {
 				if !yield(nil, fmt.Errorf("decode: %w", err)) {
 					return
 				}
 				continue
 			}
-			captureSnapshot(rawBytes, doc)
 
 			if qs.fetchLinks {
 				if err := fetchAllLinksOnDoc(qs.ctx, qs.db, doc, qs.nestDepth); err != nil {

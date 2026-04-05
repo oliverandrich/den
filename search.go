@@ -34,13 +34,10 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 
 	var results []*T
 	for iter.Next() {
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
 		doc := new(T)
-		if err := qs.db.decode(rawBytes, doc); err != nil {
+		if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
 		}
-		captureSnapshot(rawBytes, doc)
 
 		if qs.fetchLinks {
 			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, doc, qs.nestDepth); err != nil {

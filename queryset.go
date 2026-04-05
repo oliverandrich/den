@@ -189,14 +189,11 @@ func (qs QuerySet[T]) Update(fields SetFields) (int64, error) {
 		}
 
 		for iter.Next() {
-			rawBytes := make([]byte, len(iter.Bytes()))
-			copy(rawBytes, iter.Bytes())
 			doc := new(T)
-			if err := qs.db.decode(rawBytes, doc); err != nil {
+			if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {
 				_ = iter.Close()
 				return fmt.Errorf("decode: %w", err)
 			}
-			captureSnapshot(rawBytes, doc)
 
 			rv := reflect.ValueOf(doc).Elem()
 			for fieldName, newVal := range fields {

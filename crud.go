@@ -266,13 +266,11 @@ func FindOneAndUpdate[T any](ctx context.Context, db *DB, fields SetFields, cond
 		}
 
 		doc := new(T)
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
+		iterBytes := iter.Bytes()
 		_ = iter.Close()
-		if err := db.decode(rawBytes, doc); err != nil {
+		if err := decodeIterRow(db, iterBytes, doc); err != nil {
 			return fmt.Errorf("decode: %w", err)
 		}
-		captureSnapshot(rawBytes, doc)
 
 		rv := reflect.ValueOf(doc).Elem()
 		for fieldName, newVal := range fields {
@@ -337,10 +335,8 @@ func DeleteMany[T any](ctx context.Context, db *DB, conditions []where.Condition
 		defer func() { _ = it.Close() }()
 
 		for it.Next() {
-			rawBytes := make([]byte, len(it.Bytes()))
-			copy(rawBytes, it.Bytes())
 			doc := new(T)
-			if err := db.decode(rawBytes, doc); err != nil {
+			if err := decodeIterRow(db, it.Bytes(), doc); err != nil {
 				return fmt.Errorf("decode: %w", err)
 			}
 			if err := TxDelete(tx, doc, opts...); err != nil {

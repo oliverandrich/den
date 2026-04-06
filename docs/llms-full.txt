@@ -1,0 +1,2860 @@
+# Den
+
+> Den is an ODM (Object-Document Mapper) for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine. Part of the Burrow ecosystem.
+
+- Module: `github.com/oliverandrich/den`
+- Go version: 1.25+
+- License: MIT
+
+## Features
+
+- **Two backends, one API** — SQLite (embedded, pure Go, no CGO) and PostgreSQL (server-based, JSONB + GIN indexes)
+- **Chainable QuerySet** — fluent builder with lazy evaluation: `Where`, `Sort`, `Limit`, `Skip`, `All`, `First`, `Count`
+- **Range iteration** — `Iter()` returns `iter.Seq2[*T, error]` for memory-efficient streaming
+- **Typed relations** — `Link[T]` and `[]Link[T]` with cascade write/delete and eager/lazy fetch
+- **Full-text search** — FTS5 (SQLite), tsvector (PostgreSQL), unified `Search()` API
+- **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
+- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Rollback`
+- **Soft delete** — embed `SoftBase`, automatic query filtering, `HardDelete` for permanent removal
+- **Optimistic concurrency** — revision-based conflict detection
+- **Transactions** — `RunInTransaction` with panic-safe rollback
+- **Migrations** — registry-based, each migration runs atomically
+- **Struct tag validation** — optional `validate` tags via `go-playground/validator`
+
+## Quick Example
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/oliverandrich/den"
+    _ "github.com/oliverandrich/den/backend/sqlite"
+    "github.com/oliverandrich/den/document"
+    "github.com/oliverandrich/den/where"
+)
+
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+
+func main() {
+    ctx := context.Background()
+
+    db, err := den.OpenURL("sqlite:///products.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    den.Register(ctx, db, &Product{})
+    den.Insert(ctx, db, &Product{Name: "Widget", Price: 9.99})
+
+    products, _ := den.NewQuery[Product](ctx, db,
+        where.Field("price").Lt(20.0),
+    ).Sort("name", den.Asc).All()
+
+    for _, p := range products {
+        fmt.Printf("%s — $%.2f\n", p.Name, p.Price)
+    }
+}
+```
+
+---
+
+# Installation
+
+## Prerequisites
+
+- **Go 1.25** or later
+
+## Install Den
+
+```bash
+go get github.com/oliverandrich/den@latest
+```
+
+## Backend Imports
+
+Den requires at least one backend. Backends register themselves via side-effect imports — you import the package with a blank identifier (`_`) and the backend becomes available to `den.OpenURL`.
+
+**SQLite:**
+
+```go
+import _ "github.com/oliverandrich/den/backend/sqlite"
+```
+
+The SQLite backend is pure Go (no CGO required). It compiles into your binary with zero external dependencies.
+
+**PostgreSQL:**
+
+```go
+import _ "github.com/oliverandrich/den/backend/postgres"
+```
+
+The PostgreSQL backend uses pgx and requires a running PostgreSQL instance.
+
+**Both:**
+
+```go
+import (
+    _ "github.com/oliverandrich/den/backend/sqlite"
+    _ "github.com/oliverandrich/den/backend/postgres"
+)
+```
+
+Import both when your application needs to support either backend at runtime.
+
+Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(dsn)`, Den matches the scheme to the registered backend and opens the connection.
+
+## Verify Installation
+
+```bash
+go build ./...
+```
+
+If the build succeeds, Den is installed and ready to use.
+
+---
+
+# Quick Start
+
+This guide walks through a complete working example: defining a document, storing it, and querying it back.
+
+## Create a Project
+
+```bash
+mkdir myapp && cd myapp
+go mod init myapp
+go get github.com/oliverandrich/den@latest
+```
+
+## Define a Document
+
+Every document struct embeds `document.Base`, which provides `ID`, `Rev`, `CreatedAt`, and `UpdatedAt` fields. Use `json` tags for field names and `den` tags for index metadata.
+
+```go
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+```
+
+## Full Example
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/oliverandrich/den"
+    _ "github.com/oliverandrich/den/backend/sqlite" // register sqlite:// scheme
+    "github.com/oliverandrich/den/document"
+    "github.com/oliverandrich/den/where"
+)
+
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+
+func main() {
+    ctx := context.Background()
+
+    // Open a SQLite database
+    db, err := den.OpenURL("sqlite:///products.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    // Register document types — creates collections and indexes
+    if err := den.Register(ctx, db, &Product{}); err != nil {
+        log.Fatal(err)
+    }
+
+    // Insert a document
+    p := &Product{Name: "Widget", Price: 9.99}
+    if err := den.Insert(ctx, db, p); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
+
+    // Query with conditions
+    products, err := den.NewQuery[Product](ctx, db,
+        where.Field("price").Lt(20.0),
+    ).Sort("name", den.Asc).All()
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, prod := range products {
+        fmt.Printf("  %s — $%.2f\n", prod.Name, prod.Price)
+    }
+
+    // Iterate (streaming, memory-efficient)
+    for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+        if err != nil {
+            log.Fatal(err)
+        }
+        fmt.Printf("  %s\n", doc.Name)
+    }
+}
+```
+
+## Switching to PostgreSQL
+
+Change the import and the DSN — the rest of your code stays identical.
+
+```go
+import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
+
+db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
+```
+
+Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
+
+---
+
+# Backends
+
+Den supports two storage backends behind a unified API. Both store documents as JSONB and provide full-text search, indexing, and transactions.
+
+## Comparison
+
+| | SQLite | PostgreSQL |
+|---|---|---|
+| **Type** | Embedded | Server-based |
+| **CGO required** | No (pure Go via `modernc.org/sqlite`) | No (`pgx` is pure Go) |
+| **External dependencies** | None | Running PostgreSQL instance |
+| **JSON storage** | JSONB | JSONB + GIN indexes |
+| **Full-text search** | FTS5 | tsvector |
+| **Concurrency** | Single-writer, multiple readers | Full MVCC |
+| **Best for** | CLI tools, single-binary deployments, dev/test | Multi-user apps, replication, scale |
+
+## When to Use Which
+
+**Choose SQLite when:**
+
+- You want a single binary with no external services
+- Your application has a single writer (CLI tools, desktop apps, APIs with low write concurrency)
+- You need a zero-config development or testing setup
+
+**Choose PostgreSQL when:**
+
+- Multiple processes or services write concurrently
+- You need replication, backups, or high availability
+- You are already running PostgreSQL in your infrastructure
+
+Since both backends share the same API, you can prototype with SQLite and move to PostgreSQL when your requirements grow. The switch is a one-line change.
+
+## DSN Formats
+
+**SQLite:**
+
+```go
+// File-based database
+db, err := den.OpenURL("sqlite:///path/to/data.db")
+
+// Relative path
+db, err := den.OpenURL("sqlite:///./local.db")
+```
+
+The path after `sqlite:///` is passed directly to the SQLite driver. Use an absolute path for production and a relative path for development.
+
+**PostgreSQL:**
+
+```go
+// Standard connection string
+db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+
+// With SSL mode
+db, err := den.OpenURL("postgres://user:pass@localhost/mydb?sslmode=disable")
+
+// Unix socket
+db, err := den.OpenURL("postgres:///mydb?host=/var/run/postgresql")
+```
+
+The DSN follows the libpq connection string format supported by pgx.
+
+## Backend-Specific Behavior
+
+While the API is identical, some internal behaviors differ:
+
+| Feature | SQLite | PostgreSQL |
+|---|---|---|
+| **Array index queries** | JSON `each()` | GIN `@>` operator |
+| **FTS indexing** | FTS5 virtual table with `MATCH` | tsvector column with `@@` |
+| **Regex** | `REGEXP` function | `~` operator |
+| **Unique nulls** | Handled via partial index | Handled via partial index |
+
+These differences are transparent to your application code. The `where` package and `Search()` API abstract them away.
+
+---
+
+# Documents
+
+## Base Types
+
+Every Den document embeds one of four base types from the `document` package. Choose based on the features you need:
+
+| Base Type | Change Tracking | Soft Delete | Use Case |
+|---|---|---|---|
+| `document.Base` | No | No | Simple documents without audit needs |
+| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Rollback` |
+| `document.SoftBase` | No | Yes | Documents that should never be permanently deleted by default |
+| `document.TrackedSoftBase` | Yes | Yes | Full audit trail with recoverability |
+
+```go
+package document
+
+type Base struct {
+    ID        string    `json:"_id"`
+    CreatedAt time.Time `json:"_created_at"`
+    UpdatedAt time.Time `json:"_updated_at"`
+    Rev       string    `json:"_rev,omitempty"` // populated when UseRevision is enabled
+}
+
+type TrackedBase struct {
+    Base
+    snapshot []byte // internal, not serialized
+}
+
+type SoftBase struct {
+    Base
+    DeletedAt *time.Time `json:"_deleted_at,omitempty"`
+}
+
+type TrackedSoftBase struct {
+    SoftBase
+    snapshot []byte // internal, not serialized
+}
+```
+
+## Struct Tag Syntax
+
+Den uses two struct tags with distinct responsibilities:
+
+- **`json`** -- Sets the serialized field name (the key stored in JSONB). Standard Go `encoding/json` rules apply.
+- **`den`** -- Carries Den-specific metadata only. No field name, just options.
+
+Available `den` tag options:
+
+| Option | Effect |
+|---|---|
+| `index` | Creates a secondary index on this field |
+| `unique` | Creates a unique index on this field |
+| `fts` | Includes this field in full-text search |
+| `omitempty` | Omits the field from storage when it has a zero value |
+
+```go
+type Product struct {
+    document.Base
+    Name  string   `json:"name"  den:"index"`
+    SKU   string   `json:"sku"   den:"unique"`
+    Price float64  `json:"price" den:"index"`
+    Body  string   `json:"body"  den:"fts"`
+    Tags  []string `json:"tags"  den:"index,omitempty"`
+}
+```
+
+The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries index, unique, fts, and omitempty options.
+
+## Collection Naming
+
+Den derives collection names automatically: lowercase struct name, no pluralization.
+
+| Struct | Collection Name |
+|---|---|
+| `Product` | `product` |
+| `Category` | `category` |
+| `AuditLog` | `auditlog` |
+
+Override the default by implementing `DenSettings()`:
+
+```go
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{
+        CollectionName: "products",
+    }
+}
+```
+
+## ID Generation
+
+Den uses ULID for document IDs -- lexicographically sortable, timestamp-ordered, 26 characters.
+
+```go
+p := &Product{Name: "Widget", Price: 9.99}
+den.Insert(ctx, db, p)
+fmt.Println(p.ID) // "01HQ3K8V2X..."
+```
+
+ULIDs are preferred over UUIDs because they sort chronologically, which benefits B-tree indexes in both SQLite and PostgreSQL -- improving write and scan performance.
+
+You can set an ID manually before insert. If `ID` is empty, Den generates a ULID automatically:
+
+```go
+p := &Product{Name: "Widget"}
+p.ID = "my-custom-id"
+den.Insert(ctx, db, p) // uses "my-custom-id"
+```
+
+## DenSettings Interface
+
+Implement `DenSettings()` on your document struct to configure collection-level behavior:
+
+```go
+type DenSettable interface {
+    DenSettings() den.Settings
+}
+
+type Settings struct {
+    CollectionName       string            // override auto-derived name
+    OmitEmpty            bool              // omit zero-value fields by default
+    UseRevision          bool              // enable optimistic concurrency control
+    NestingDepthPerField map[string]int    // per-field nesting depth overrides
+    Indexes              []IndexDefinition // compound indexes
+}
+```
+
+Example with multiple settings:
+
+```go
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{
+        CollectionName: "products",
+        UseRevision:    true,
+        OmitEmpty:      true,
+        Indexes: []den.IndexDefinition{
+            {Name: "idx_category_price", Fields: []string{"category", "price"}},
+        },
+    }
+}
+```
+
+## Index Definitions
+
+### Via Struct Tags
+
+Single-field indexes are defined directly on the struct:
+
+```go
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`   // secondary index
+    SKU   string  `json:"sku"   den:"unique"`  // unique index
+    Price float64 `json:"price" den:"index"`   // secondary index
+}
+```
+
+### Via Settings (Compound Indexes)
+
+For multi-field indexes, use `DenSettings()`:
+
+```go
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{
+        Indexes: []den.IndexDefinition{
+            {Name: "idx_category_price", Fields: []string{"category", "price"}},
+        },
+    }
+}
+```
+
+Struct tag indexes are best for single-field indexes. Use `DenSettings().Indexes` when you need compound indexes spanning multiple fields.
+
+## Nullable Unique Constraints
+
+When a pointer field is tagged with `den:"unique"`, Den creates a partial unique index. Uniqueness is only enforced for non-nil values -- multiple documents can have `nil` for that field.
+
+```go
+type User struct {
+    document.Base
+    Username string  `json:"username" den:"unique"`         // always required, always unique
+    Email    *string `json:"email,omitempty" den:"unique"`  // optional, unique when set
+}
+
+// Both users have nil Email -- no conflict:
+den.Insert(ctx, db, &User{Username: "alice"})  // Email: nil
+den.Insert(ctx, db, &User{Username: "bob"})    // Email: nil
+
+// But duplicate non-nil values are rejected:
+den.Insert(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) // ok
+den.Insert(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
+```
+
+Nullable unique constraints require pointer fields (`*string`, `*int`, etc.). Value-type fields with `den:"unique"` always enforce uniqueness, including for zero values.
+
+---
+
+# CRUD Operations
+
+All document types must be registered with `den.Register()` before any CRUD operation. Attempting to use an unregistered type returns `ErrNotRegistered`.
+
+```go
+err := den.Register(ctx, db,
+    &Product{},
+    &Category{},
+)
+```
+
+## Insert
+
+```go
+p := &Product{Name: "Widget", Price: 9.99}
+err := den.Insert(ctx, db, p)
+// p.ID is now set (auto-generated ULID if it was empty)
+// p.CreatedAt and p.UpdatedAt are set automatically
+```
+
+Insert triggers the full lifecycle hook chain: `Validate` -> `BeforeInsert` -> `BeforeSave` -> write -> `AfterInsert` -> `AfterSave`. If any `Before*` hook returns an error, the insert is aborted.
+
+### InsertMany
+
+Insert multiple documents in a single batch:
+
+```go
+products := []*Product{
+    {Name: "Widget", Price: 9.99},
+    {Name: "Gadget", Price: 19.99},
+    {Name: "Doohickey", Price: 4.99},
+}
+err := den.InsertMany(ctx, db, products)
+```
+
+## FindByID / FindByIDs
+
+Direct key lookup -- the fastest query path:
+
+```go
+product, err := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
+if errors.Is(err, den.ErrNotFound) {
+    // document does not exist
+}
+```
+
+Fetch multiple documents by their IDs:
+
+```go
+ids := []string{"01HQ3K8V2X...", "01HQ3K9A1Y...", "01HQ3KBC3Z..."}
+products, err := den.FindByIDs[Product](ctx, db, ids)
+```
+
+## Update
+
+Update performs a full document write. The document must have an ID.
+
+```go
+product, _ := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
+product.Price = 29.99
+err := den.Update(ctx, db, product)
+```
+
+When revision control is enabled (`UseRevision: true` in `DenSettings`), Update checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
+
+```go
+err := den.Update(ctx, db, product)
+if errors.Is(err, den.ErrRevisionConflict) {
+    // another process modified this document -- re-read and retry
+}
+
+// Force-write regardless of revision:
+err := den.Update(ctx, db, product, den.IgnoreRevision())
+```
+
+## Bulk Update via QuerySet
+
+Update specific fields on all documents matching a query. Returns the number of modified documents:
+
+```go
+count, err := den.NewQuery[Product](ctx, db,
+    where.Field("category").Eq("old"),
+).Update(den.SetFields{"category": "new"})
+// count = number of documents updated
+```
+
+Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
+
+## FindOneAndUpdate
+
+Atomic find-and-modify in a single transaction. Finds the first document matching the conditions, applies the field updates, and returns the modified document.
+
+```go
+job, err := den.FindOneAndUpdate[Job](ctx, db,
+    den.SetFields{
+        "status":     "running",
+        "started_at": time.Now(),
+    },
+    where.Field("status").Eq("pending"),
+    where.Field("scheduled_at").Lte(time.Now()),
+)
+if errors.Is(err, den.ErrNotFound) {
+    // no pending jobs available
+}
+```
+
+This is the idiomatic pattern for implementing a job queue. Multiple workers can call `FindOneAndUpdate` concurrently -- each one atomically claims a different job, preventing double-processing:
+
+```go
+// Worker loop
+for {
+    job, err := den.FindOneAndUpdate[Job](ctx, db,
+        den.SetFields{
+            "status":    "running",
+            "worker_id": workerID,
+        },
+        where.Field("status").Eq("pending"),
+        where.Field("scheduled_at").Lte(time.Now()),
+    )
+    if errors.Is(err, den.ErrNotFound) {
+        time.Sleep(time.Second)
+        continue
+    }
+    if err != nil {
+        log.Printf("error claiming job: %v", err)
+        continue
+    }
+
+    processJob(job)
+}
+```
+
+## Delete
+
+Delete a specific document:
+
+```go
+err := den.Delete(ctx, db, &product)
+```
+
+If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Use `den.HardDelete` to permanently remove a soft-deleted document.
+
+```go
+// Soft-delete (sets DeletedAt, document remains in storage)
+err := den.Delete(ctx, db, &product)
+
+// Permanent removal
+err := den.HardDelete(ctx, db, &product)
+```
+
+### DeleteMany
+
+Delete all documents matching conditions. Returns the number of deleted documents:
+
+```go
+count, err := den.DeleteMany[Product](ctx, db,
+    []where.Condition{where.Field("status").Eq("archived")},
+)
+```
+
+With link cascade -- delete the documents and all their linked documents:
+
+```go
+count, err := den.DeleteMany[Product](ctx, db,
+    []where.Condition{where.Field("status").Eq("archived")},
+    den.WithLinkRule(den.LinkDelete),
+)
+```
+
+## Refresh
+
+Re-read a document from the database, replacing all field values with the current stored state. Useful when another goroutine or process may have modified the document:
+
+```go
+product, _ := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
+
+// ... time passes, another process may have updated the document ...
+
+err := den.Refresh(ctx, db, product)
+// product now reflects the latest state in the database
+```
+
+If the document has been deleted, `Refresh` returns `ErrNotFound`.
+
+---
+
+# Queries
+
+## QuerySet
+
+`den.NewQuery[T]` returns a chainable, lazy query builder. No database call is made until you invoke an execution method (`All`, `First`, `Count`, etc.):
+
+```go
+products, err := den.NewQuery[Product](ctx, db,
+    where.Field("price").Gte(10.0),
+    where.Field("category.name").Eq("Electronics"),
+).Sort("price", den.Asc).Limit(20).Skip(10).All()
+```
+
+## Execution Methods
+
+| Method | Return Type | Description |
+|---|---|---|
+| `All()` | `[]*T, error` | All matching documents |
+| `First()` | `*T, error` | First matching document (`ErrNotFound` if none) |
+| `Count()` | `int64, error` | Number of matching documents |
+| `Exists()` | `bool, error` | Whether any document matches |
+| `AllWithCount()` | `[]*T, int64, error` | Documents plus total count (for offset pagination) |
+
+```go
+// First matching document
+product, err := den.NewQuery[Product](ctx, db,
+    where.Field("name").Eq("Widget"),
+).First()
+
+// Count
+count, err := den.NewQuery[Product](ctx, db,
+    where.Field("price").Gt(100),
+).Count()
+
+// Exists
+exists, err := den.NewQuery[Product](ctx, db,
+    where.Field("sku").Eq("ABC123"),
+).Exists()
+
+// All with total count (for pagination UI)
+notes, total, err := den.NewQuery[Note](ctx, db,
+    where.Field("user").Eq(userID),
+).Sort("_created_at", den.Desc).Limit(20).Skip(40).AllWithCount()
+// total = 347 -> compute TotalPages, HasMore
+```
+
+## Iter -- Streaming Results
+
+`Iter()` returns a Go range-compatible iterator that streams documents without loading them all into memory:
+
+```go
+for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+    if err != nil {
+        return err
+    }
+    fmt.Println(doc.Name)
+}
+```
+
+Use `Iter()` for large result sets or migrations where loading all documents into memory at once would be impractical.
+
+## Where Conditions
+
+Import the `where` package and build conditions with `Field()`:
+
+```go
+import "github.com/oliverandrich/den/where"
+```
+
+### Comparison Operators
+
+```go
+where.Field("price").Eq(10)    // field == value
+where.Field("price").Ne(10)    // field != value
+where.Field("price").Gt(10)    // field > value
+where.Field("price").Gte(10)   // field >= value
+where.Field("price").Lt(10)    // field < value
+where.Field("price").Lte(10)   // field <= value
+```
+
+### Null Checks
+
+```go
+where.Field("read_at").IsNil()      // field is null / not set
+where.Field("read_at").IsNotNil()   // field is not null / is set
+```
+
+### Set Operators
+
+```go
+where.Field("status").In("active", "pending")   // value in set
+where.Field("status").NotIn("deleted")           // value not in set
+```
+
+### Array Operators
+
+```go
+where.Field("tags").Contains("golang")              // array contains value
+where.Field("tags").ContainsAny("golang", "go")     // array contains any of these
+where.Field("tags").ContainsAll("golang", "go")      // array contains all of these
+```
+
+### Map / Object Operators
+
+```go
+where.Field("metadata").HasKey("version")   // object has key
+```
+
+### Pattern Matching
+
+```go
+where.Field("name").RegExp("^Wid.*")   // regex match
+```
+
+### String Operators
+
+```go
+where.Field("name").StringContains("get")    // field contains substring
+where.Field("name").StartsWith("Wid")        // field starts with prefix
+where.Field("name").EndsWith("get")          // field ends with suffix
+```
+
+### Logical Combinators
+
+Combine conditions with `And`, `Or`, and `Not`:
+
+```go
+// AND -- all conditions must match
+where.And(
+    where.Field("price").Gt(10),
+    where.Field("price").Lt(100),
+)
+
+// OR -- at least one condition must match
+where.Or(
+    where.Field("status").Eq("active"),
+    where.Field("featured").Eq(true),
+)
+
+// NOT -- negate a condition
+where.Not(where.Field("deleted").Eq(true))
+```
+
+Multiple conditions passed to `NewQuery` are implicitly combined with `AND`. Use `where.Or()` explicitly when you need disjunction.
+
+### Nested Field Access
+
+Use dot notation to query fields in embedded objects:
+
+```go
+where.Field("address.city").Eq("Berlin")
+where.Field("category.name").Eq("Electronics")
+where.Field("tags.0").Eq("featured")   // array index access
+```
+
+## Sort, Limit, Skip
+
+```go
+den.NewQuery[Product](ctx, db).
+    Sort("price", den.Asc).    // ascending by price
+    Sort("name", den.Desc).    // then descending by name
+    Limit(20).                 // at most 20 results
+    Skip(40).                  // skip the first 40
+    All()
+```
+
+## Cursor-Based Pagination
+
+For large result sets, cursor-based pagination with `After` / `Before` is more efficient than `Skip`:
+
+```go
+// First page
+page1, err := den.NewQuery[Entry](ctx, db,
+    where.Field("read_at").IsNil(),
+).Sort("published", den.Desc).Limit(20).All()
+
+// Next page: pass the last document's ID as cursor
+lastID := page1[len(page1)-1].ID
+page2, err := den.NewQuery[Entry](ctx, db,
+    where.Field("read_at").IsNil(),
+).Sort("published", den.Desc).After(lastID).Limit(20).All()
+
+// Previous page (backward pagination)
+firstID := page2[0].ID
+prevPage, err := den.NewQuery[Entry](ctx, db,
+    where.Field("read_at").IsNil(),
+).Sort("published", den.Desc).Before(firstID).Limit(20).All()
+```
+
+`Skip(n)` works for small offsets but degrades at high page numbers (O(n) skip cost). `After` / `Before` use row-value comparisons like `WHERE (sort_field, id) < (?, ?)`, giving O(log n) performance regardless of position. Always prefer cursor-based pagination for user-facing paginated lists.
+
+## Projections
+
+When you only need a subset of fields, projections reduce I/O and decode cost. Define a projection struct with `den` tags:
+
+```go
+type ProductSummary struct {
+    Name  string  `json:"name"`
+    Price float64 `json:"price"`
+}
+
+var summaries []ProductSummary
+err := den.NewQuery[Product](ctx, db,
+    where.Field("category.name").Eq("Chocolate"),
+).Project(&summaries)
+```
+
+For projections that extract nested fields, use `den:"from:..."`:
+
+```go
+type ProductView struct {
+    Name         string `json:"name"`
+    CategoryName string `den:"from:category.name"` // extract nested field
+}
+
+var views []ProductView
+err := den.NewQuery[Product](ctx, db).Project(&views)
+```
+
+## Query Options
+
+### WithFetchLinks
+
+Eagerly resolve all `Link[T]` fields during the query:
+
+```go
+houses, err := den.NewQuery[House](ctx, db).WithFetchLinks().All()
+// houses[0].Door.Value != nil
+// houses[0].Windows[0].Value != nil
+```
+
+### WithNestingDepth
+
+Control how deep link resolution recurses (default: 3):
+
+```go
+houses, err := den.NewQuery[House](ctx, db).
+    WithFetchLinks().WithNestingDepth(1).All()
+```
+
+### IncludeDeleted
+
+Include soft-deleted documents in results (only relevant for types embedding `document.SoftBase`):
+
+```go
+all, err := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+```
+
+## Full-Text Search
+
+For fields tagged with `den:"fts"`, use the `Search` method:
+
+```go
+results, err := den.NewQuery[Article](ctx, db).Search("golang concurrency")
+```
+
+SQLite translates to FTS5 `MATCH` queries against a virtual table. PostgreSQL translates to `tsvector` / `tsquery` operations with GIN index acceleration.
+
+## Aggregations
+
+### Scalar Aggregations
+
+```go
+avgPrice, err := den.NewQuery[Product](ctx, db,
+    where.Field("category.name").Eq("Chocolate"),
+).Avg("price")
+
+totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
+cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
+mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+```
+
+### GroupBy
+
+Collect grouped aggregations into a user-defined struct:
+
+```go
+type CategoryStats struct {
+    Category string  `den:"group_key"`
+    AvgPrice float64 `den:"avg:price"`
+    Total    float64 `den:"sum:price"`
+    Count    int64   `den:"count"`
+    MinPrice float64 `den:"min:price"`
+    MaxPrice float64 `den:"max:price"`
+}
+
+var results []CategoryStats
+err := den.NewQuery[Product](ctx, db,
+    where.Field("status").Eq("active"),
+).GroupBy("category.name").Into(&results)
+```
+
+The `den` tag on the stats struct declares the aggregation function:
+
+| Tag | Meaning |
+|---|---|
+| `den:"group_key"` | Receives the group key value |
+| `den:"avg:field"` | Average of `field` within the group |
+| `den:"sum:field"` | Sum of `field` within the group |
+| `den:"min:field"` | Minimum of `field` within the group |
+| `den:"max:field"` | Maximum of `field` within the group |
+| `den:"count"` | Number of documents in the group |
+
+---
+
+# Relations
+
+Den models relations via the generic `Link[T]` type, inspired by Beanie's `Link[Document]`. Links store only an ID in the database -- the referenced document is fetched on demand or eagerly during queries.
+
+## Link Type
+
+```go
+type Link[T any] struct {
+    ID     string // persisted to storage
+    Value  *T     // resolved document (nil until fetched)
+    Loaded bool   // internal
+}
+
+// NewLink creates a Link from an existing document, extracting its ID.
+func NewLink[T any](doc *T) Link[T]
+
+// IsLoaded reports whether the linked document has been fetched.
+func (l Link[T]) IsLoaded() bool
+```
+
+## Relation Patterns
+
+### One-to-One
+
+```go
+type House struct {
+    document.Base
+    Name string    `json:"name"`
+    Door Link[Door] `json:"door"`
+}
+```
+
+### One-to-Many
+
+```go
+type House struct {
+    document.Base
+    Name    string         `json:"name"`
+    Door    Link[Door]     `json:"door"`
+    Windows []Link[Window] `json:"windows"`
+}
+```
+
+Many-to-many relations are not directly supported. Model them with an intermediary document that holds links to both sides.
+
+## Serialization
+
+When a document is written to storage, `Link[T]` fields serialize to their ID only. The `Value` and `Loaded` fields are transient:
+
+```go
+// Stored JSON for a House document:
+{
+    "_id": "01HQ3...",
+    "name": "Lakehouse",
+    "door": "01HQ4...",
+    "windows": ["01HQ5...", "01HQ6..."]
+}
+```
+
+## Creating Links
+
+Use `NewLink` to create a link from an existing document:
+
+```go
+door := &Door{Height: 200, Width: 90}
+den.Insert(ctx, db, door)
+
+house := &House{
+    Name: "Lakehouse",
+    Door: den.NewLink(door),
+    Windows: []Link[Window]{
+        den.NewLink(&Window{X: 100, Y: 50}),
+        den.NewLink(&Window{X: 120, Y: 60}),
+    },
+}
+```
+
+## Fetch Modes
+
+### Lazy (Default)
+
+Links contain only IDs. No additional queries are performed:
+
+```go
+houses, err := den.NewQuery[House](ctx, db,
+    where.Field("name").Eq("Lakehouse"),
+).All()
+
+houses[0].Door.ID        // "01HQ4..."
+houses[0].Door.Value     // nil
+houses[0].Door.IsLoaded() // false
+```
+
+### Eager (WithFetchLinks)
+
+Resolve all links during the query. Additional lookups happen within the same transaction for read consistency:
+
+```go
+houses, err := den.NewQuery[House](ctx, db,
+    where.Field("name").Eq("Lakehouse"),
+).WithFetchLinks().All()
+
+houses[0].Door.Value     // *Door{Height: 200, Width: 90}
+houses[0].Door.IsLoaded() // true
+houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
+```
+
+### On-Demand (FetchLink / FetchAllLinks)
+
+Fetch individual link fields or all link fields after the initial query:
+
+```go
+house, _ := den.NewQuery[House](ctx, db,
+    where.Field("name").Eq("Lakehouse"),
+).First()
+
+// Fetch a single link field
+err := den.FetchLink(ctx, db, house, "door")
+house.Door.IsLoaded() // true
+
+// Fetch all link fields at once
+err := den.FetchAllLinks(ctx, db, house)
+```
+
+## Write Rules
+
+Control whether linked documents are automatically saved when the parent is inserted or updated.
+
+### LinkIgnore (Default)
+
+Only the root document is written. Linked documents must already exist in the database:
+
+```go
+err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
+// Saves only the House -- Door and Windows must already be inserted
+```
+
+### LinkWrite
+
+Cascades write operations to all linked documents. New linked documents are inserted, existing ones are replaced:
+
+```go
+house := &House{
+    Name: "Lakehouse",
+    Door: den.NewLink(&Door{Height: 200, Width: 90}),
+    Windows: []Link[Window]{
+        den.NewLink(&Window{X: 100, Y: 50}),
+    },
+}
+
+err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+// Saves House, Door, and all Windows in one operation
+```
+
+This also works with `Update`:
+
+```go
+house.Door = den.NewLink(&Door{Height: 210, Width: 95})
+err := den.Update(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+// Updates the House and inserts/replaces the new Door
+```
+
+## Delete Rules
+
+Control whether linked documents are deleted when the parent is deleted.
+
+### LinkIgnore (Default)
+
+Linked documents are kept when the parent is deleted:
+
+```go
+err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
+// Deletes only the House -- Door and Windows remain
+```
+
+### LinkDelete
+
+Cascades deletion to all linked documents:
+
+```go
+err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete))
+// Deletes the House, its Door, and all its Windows
+```
+
+`LinkDelete` cascades recursively. If a Door has its own links, those are also deleted. Be mindful of the nesting depth and your document graph when using cascade delete.
+
+## BackLinks -- Reverse Queries
+
+Find all documents of a given type that reference a specific document via a link field:
+
+```go
+// Find all Houses that reference a specific Door
+houses, err := den.BackLinks[House](ctx, db, "door", doorID)
+```
+
+This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
+
+## Nesting Depth
+
+When documents link to documents that themselves contain links, eager fetching can cause deep recursion or infinite loops with circular references. Den limits the maximum nesting depth.
+
+The default maximum nesting depth is **3 levels**.
+
+### Global Override via DenSettings
+
+```go
+func (h House) DenSettings() den.Settings {
+    return den.Settings{
+        MaxNestingDepth: 2, // fetch at most 2 levels deep
+    }
+}
+```
+
+### Per-Field Override
+
+```go
+func (h House) DenSettings() den.Settings {
+    return den.Settings{
+        MaxNestingDepth: 3,
+        NestingDepthPerField: map[string]int{
+            "door":    1, // door links are shallow
+            "windows": 2, // windows can go 2 levels deep
+        },
+    }
+}
+```
+
+### Per-Query Override
+
+```go
+houses, err := den.NewQuery[House](ctx, db).
+    WithFetchLinks().WithNestingDepth(1).All()
+```
+
+When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved -- they contain the ID but `Value` is `nil` and `IsLoaded()` returns `false`. This prevents infinite loops and bounds resource consumption.
+
+## Complete Example
+
+A full House/Door/Window example demonstrating links, cascade write, eager fetch, and back-links:
+
+```go
+type Door struct {
+    document.Base
+    Height int `json:"height"`
+    Width  int `json:"width"`
+}
+
+type Window struct {
+    document.Base
+    X int `json:"x"`
+    Y int `json:"y"`
+}
+
+type House struct {
+    document.Base
+    Name    string         `json:"name"`
+    Door    Link[Door]     `json:"door"`
+    Windows []Link[Window] `json:"windows"`
+}
+
+func main() {
+    db, _ := den.OpenURL("sqlite:///data.db")
+    defer db.Close()
+
+    ctx := context.Background()
+    den.Register(ctx, db, &House{}, &Door{}, &Window{})
+
+    // Create and insert with cascade
+    house := &House{
+        Name: "Lakehouse",
+        Door: den.NewLink(&Door{Height: 200, Width: 90}),
+        Windows: []Link[Window]{
+            den.NewLink(&Window{X: 100, Y: 50}),
+            den.NewLink(&Window{X: 120, Y: 60}),
+        },
+    }
+    den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+
+    // Query with eager fetch
+    found, _ := den.NewQuery[House](ctx, db,
+        where.Field("name").Eq("Lakehouse"),
+    ).WithFetchLinks().First()
+
+    fmt.Println(found.Door.Value.Height)      // 200
+    fmt.Println(found.Windows[0].Value.X)      // 100
+
+    // Back-links: find houses referencing this door
+    houses, _ := den.BackLinks[House](ctx, db, "door", found.Door.ID)
+    fmt.Println(len(houses)) // 1
+
+    // Cascade delete
+    den.Delete(ctx, db, found, den.WithLinkRule(den.LinkDelete))
+}
+```
+
+---
+
+# Aggregations
+
+Den supports scalar aggregations, grouped aggregations, and projections. Scalar aggregations (Avg, Sum, Min, Max, Count) are pushed down to the database engine via SQL. GroupBy and Project operate in Go memory -- they query matching documents and accumulate or map results in application code.
+
+## Scalar Aggregations
+
+Scalar aggregations return a single value computed over matching documents.
+
+```go
+// Average price of chocolate products
+avgPrice, err := den.NewQuery[Product](ctx, db,
+    where.Field("category.name").Eq("Chocolate"),
+).Avg("price")
+
+// Sum over the entire collection
+totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
+
+// Min / Max
+cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
+mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+```
+
+All scalar aggregations accept the same chainable filters as regular queries:
+
+```go
+// Average price of active products above $10
+avg, err := den.NewQuery[Product](ctx, db,
+    where.Field("status").Eq("active"),
+    where.Field("price").Gt(10),
+).Avg("price")
+```
+
+**Return types:**
+
+| Method | Return type |
+|--------|-------------|
+| `Avg`  | `float64`   |
+| `Sum`  | `float64`   |
+| `Min`  | `float64`   |
+| `Max`  | `float64`   |
+| `Count`| `int64`     |
+
+## Count
+
+Count works with or without filter conditions.
+
+```go
+// Total documents in the collection
+total, err := den.NewQuery[Product](ctx, db).Count()
+
+// Filtered count
+activeCount, err := den.NewQuery[Product](ctx, db,
+    where.Field("status").Eq("active"),
+).Count()
+```
+
+When you need both results and a total count (e.g. for pagination), use `AllWithCount()` instead of issuing separate `All()` and `Count()` calls.
+
+## GroupBy
+
+`GroupBy` computes aggregations per group and maps results into a user-defined struct. The struct uses `den` tags to declare which aggregation function applies to which document field.
+
+```go
+type CategoryStats struct {
+    Category string  `den:"group_key"`
+    AvgPrice float64 `den:"avg:price"`
+    Total    float64 `den:"sum:price"`
+    Count    int64   `den:"count"`
+    MinPrice float64 `den:"min:price"`
+    MaxPrice float64 `den:"max:price"`
+}
+
+var results []CategoryStats
+
+err := den.NewQuery[Product](ctx, db,
+    where.Field("status").Eq("active"),
+).GroupBy("category.name").Into(&results)
+```
+
+### GroupBy Struct Tag Reference
+
+| Tag | Meaning |
+|-----|---------|
+| `den:"group_key"` | Receives the group key value |
+| `den:"avg:field"` | Average of `field` within the group |
+| `den:"sum:field"` | Sum of `field` within the group |
+| `den:"min:field"` | Minimum of `field` within the group |
+| `den:"max:field"` | Maximum of `field` within the group |
+| `den:"count"` | Number of documents in the group |
+
+The `field` in each tag refers to the JSON field name on the source document (e.g. `price`, `quantity`). Dot notation for nested fields is supported (e.g. `sum:details.amount`).
+
+GroupBy queries all matching documents and accumulates results in memory. For large result sets, consider applying filters to reduce the number of documents processed. Scalar aggregations (Avg, Sum, Min, Max, Count) are executed as SQL queries in the database engine without loading documents into memory.
+
+## Projections
+
+When you need a subset of fields rather than full documents, use `Project()` to reduce I/O and decode overhead.
+
+```go
+type ProductSummary struct {
+    Name  string  `json:"name"`
+    Price float64 `json:"price"`
+}
+
+var summaries []ProductSummary
+
+err := den.NewQuery[Product](ctx, db,
+    where.Field("category.name").Eq("Chocolate"),
+).Project(&summaries)
+```
+
+For nested fields or field renaming, use the `from:` prefix in the `den` tag:
+
+```go
+type ProductView struct {
+    Name         string `json:"name"`
+    CategoryName string `den:"from:category.name"`
+}
+
+var views []ProductView
+
+err := den.NewQuery[Product](ctx, db).Project(&views)
+```
+
+Projections fetch full documents from the database and map the requested fields in Go memory. They reduce decode overhead for downstream code but do not reduce I/O at the SQL level.
+
+---
+
+# Full-Text Search
+
+Den provides full-text search as an opt-in feature. Both backends use their native FTS engine, but the user-facing API is identical.
+
+## Enabling FTS
+
+Mark string fields for full-text indexing with the `den:"fts"` struct tag:
+
+```go
+type Article struct {
+    document.Base
+    Title string `json:"title" den:"fts"`
+    Body  string `json:"body"  den:"fts"`
+    Tags  string `json:"tags"`
+}
+```
+
+When `den.Register()` processes this struct, it automatically creates the FTS infrastructure (virtual tables, generated columns, indexes, triggers) for every field tagged with `fts`.
+
+If no fields carry `den:"fts"`, no FTS infrastructure is created. There is zero overhead for collections that do not use full-text search.
+
+## Search API
+
+```go
+// Basic full-text search
+articles, err := den.NewQuery[Article](ctx, db).Limit(20).Search("golang embedded database")
+```
+
+`Search` is a terminal method -- it executes the query and returns `([]*T, error)` directly. Results are ranked by relevance (FTS5 `rank` on SQLite, `ts_rank` on PostgreSQL).
+
+### Combined FTS + Conditions
+
+Full-text search can be combined with regular where conditions and query options:
+
+```go
+articles, err := den.NewQuery[Article](ctx, db,
+    where.Field("tags").Eq("tutorial"),
+).Sort("_created_at", den.Desc).Search("golang")
+```
+
+The FTS filter and the where conditions are applied together -- the database engine intersects both result sets using its query planner.
+
+## Backend Implementations
+
+**SQLite** uses FTS5 virtual tables with content-sync triggers:
+
+```sql
+-- FTS5 virtual table (external content, synced via triggers)
+CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+    title, body, content=articles, content_rowid=rowid
+);
+```
+
+Den automatically creates triggers to keep the FTS index in sync on insert, update, and delete.
+
+**PostgreSQL** uses a tsvector generated column with a GIN index:
+
+```sql
+-- Generated column combining all FTS-tagged fields
+ALTER TABLE articles ADD COLUMN _fts_vector tsvector
+    GENERATED ALWAYS AS (
+        to_tsvector('english',
+            coalesce(data->>'title','') || ' ' ||
+            coalesce(data->>'body','')
+        )
+    ) STORED;
+
+-- GIN index for fast lookups
+CREATE INDEX idx_articles_fts ON articles USING GIN(_fts_vector);
+```
+
+## Trade-offs
+
+| Aspect | SQLite (FTS5) | PostgreSQL (tsvector) |
+|--------|---------------|----------------------|
+| Stemming | No language-aware stemming (requires ICU extension) | Full stemming support via language dictionaries |
+| Ranking | BM25-based `rank` column | `ts_rank` with configurable weights |
+| Phrase search | Supported via FTS5 syntax | Native phrase support via `phraseto_tsquery` |
+| Index sync | Trigger-based (atomic) | Generated column (automatic) |
+| Dependencies | None (built into SQLite) | None (built into PostgreSQL) |
+
+SQLite FTS5 does not support language-aware stemming out of the box. If your application requires stemming (e.g. matching "running" when searching for "run"), use the PostgreSQL backend or supply an external tokenizer.
+
+---
+
+# Transactions
+
+Den provides explicit transactions for operations that must be atomic across multiple documents or collections.
+
+## RunInTransaction
+
+All transactional work is wrapped in `den.RunInTransaction`. Return `nil` to commit, return an error to roll back.
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    sender, err := den.TxFindByID[Account](tx, senderID)
+    if err != nil {
+        return err // rolls back
+    }
+
+    receiver, err := den.TxFindByID[Account](tx, receiverID)
+    if err != nil {
+        return err // rolls back
+    }
+
+    sender.Balance -= amount
+    receiver.Balance += amount
+
+    if err := den.TxUpdate(tx, sender); err != nil {
+        return err // rolls back
+    }
+    if err := den.TxUpdate(tx, receiver); err != nil {
+        return err // rolls back
+    }
+
+    return nil // commits
+})
+```
+
+## Transaction Functions
+
+Inside a transaction closure, use the `Tx`-prefixed variants of Den's CRUD functions:
+
+| Standard API | Transaction API |
+|---|---|
+| `den.FindByID[T](ctx, db, id)` | `den.TxFindByID[T](tx, id)` |
+| `den.Insert(ctx, db, &doc)` | `den.TxInsert(tx, &doc)` |
+| `den.Update(ctx, db, &doc)` | `den.TxUpdate(tx, &doc)` |
+| `den.Delete(ctx, db, &doc)` | `den.TxDelete(tx, &doc)` |
+
+These functions operate on the `*den.Tx` instead of the `*den.DB`, ensuring all reads and writes go through the same underlying database transaction.
+
+## Commit and Rollback
+
+The commit/rollback behavior is controlled entirely by the return value of the closure:
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    if somethingWentWrong {
+        return fmt.Errorf("aborting: %w", err) // transaction rolls back
+    }
+    return nil // transaction commits
+})
+```
+
+If a panic occurs inside the closure, Den recovers it and rolls back the transaction.
+
+## Backend Behavior
+
+**SQLite:** SQLite serializes all writers. Only one goroutine can hold a write transaction at a time; others block until the writer commits or rolls back. Readers are never blocked (WAL mode).
+
+**PostgreSQL:** PostgreSQL uses MVCC (Multi-Version Concurrency Control). Multiple writers can run concurrently. Conflicts are detected at commit time if rows overlap.
+
+Use revision control (`den.Settings{UseRevision: true}`) for application-level conflict detection that works identically across both backends.
+
+## Example: Job Queue
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    job, err := den.TxFindByID[Job](tx, jobID)
+    if err != nil {
+        return err
+    }
+
+    if job.Status != "pending" {
+        return fmt.Errorf("job already claimed")
+    }
+
+    job.Status = "running"
+    job.StartedAt = time.Now()
+
+    return den.TxUpdate(tx, job)
+})
+```
+
+For single-document atomic updates, consider `den.FindOneAndUpdate` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
+
+---
+
+# Lifecycle Hooks
+
+Documents can implement hook interfaces to run logic before or after database operations. Hooks are called within the same transaction as the operation itself.
+
+## Hook Interfaces
+
+Implement any combination of these interfaces on your document struct:
+
+```go
+type BeforeInserter interface {
+    BeforeInsert(ctx context.Context) error
+}
+
+type AfterInserter interface {
+    AfterInsert(ctx context.Context) error
+}
+
+type BeforeUpdater interface {
+    BeforeUpdate(ctx context.Context) error
+}
+
+type AfterUpdater interface {
+    AfterUpdate(ctx context.Context) error
+}
+
+type BeforeDeleter interface {
+    BeforeDelete(ctx context.Context) error
+}
+
+type AfterDeleter interface {
+    AfterDelete(ctx context.Context) error
+}
+
+type BeforeSaver interface {
+    BeforeSave(ctx context.Context) error
+}
+
+type AfterSaver interface {
+    AfterSave(ctx context.Context) error
+}
+
+type Validator interface {
+    Validate() error
+}
+```
+
+`BeforeSaver` and `AfterSaver` are called by both `Insert` and `Update`. Use them for logic that applies to every write, regardless of whether the document is new or existing.
+
+## Execution Order
+
+### Insert
+
+```
+Validate() -> BeforeInsert() -> BeforeSave() -> [write to DB] -> AfterInsert() -> AfterSave()
+```
+
+### Update
+
+```
+Validate() -> BeforeUpdate() -> BeforeSave() -> [write to DB] -> AfterUpdate() -> AfterSave()
+```
+
+### Delete
+
+```
+BeforeDelete() -> [delete from DB] -> AfterDelete()
+```
+
+If any `Before*` hook or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
+
+## Example: Article with Hooks
+
+```go
+type Article struct {
+    document.Base
+    Title     string `json:"title"      den:"index"`
+    Slug      string `json:"slug"       den:"unique"`
+    Body      string `json:"body"       den:"fts"`
+    WordCount int    `json:"word_count"`
+}
+
+// BeforeSave runs on both Insert and Update.
+func (a *Article) BeforeSave(ctx context.Context) error {
+    a.Slug = slugify(a.Title)
+    a.WordCount = len(strings.Fields(a.Body))
+    return nil
+}
+
+// Validate ensures required fields are present before any write.
+func (a *Article) Validate() error {
+    if a.Title == "" {
+        return errors.New("title is required")
+    }
+    if a.Body == "" {
+        return errors.New("body is required")
+    }
+    return nil
+}
+```
+
+## Aborting an Operation
+
+Return an error from any `Before*` hook to prevent the write:
+
+```go
+func (a *Article) BeforeDelete(ctx context.Context) error {
+    if a.Protected {
+        return errors.New("cannot delete a protected article")
+    }
+    return nil
+}
+```
+
+## Hooks and Transactions
+
+All hooks run within the same database transaction as the operation. This means:
+
+- A `BeforeSaver` that modifies fields is part of the atomic write.
+- An `AfterInserter` that fails causes the entire insert (including the document write) to roll back.
+- Inside `RunInTransaction`, hooks execute within the outer transaction.
+
+Avoid performing long-running or external operations (HTTP calls, file I/O) inside hooks. Hooks hold the database transaction open for their entire duration. On SQLite, this blocks all other writers.
+
+---
+
+# Soft Delete
+
+## Enabling Soft Delete
+
+Embed `document.SoftBase` instead of `document.Base` to opt into soft delete:
+
+```go
+import "github.com/oliverandrich/den/document"
+
+type Product struct {
+    document.SoftBase
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+```
+
+`SoftBase` extends `Base` with a `DeletedAt` timestamp:
+
+```go
+type SoftBase struct {
+    Base
+    DeletedAt *time.Time `json:"_deleted_at,omitempty"`
+}
+```
+
+## Behavior
+
+When you call `den.Delete` on a soft-delete document, Den sets `DeletedAt` to the current time instead of removing the row from storage:
+
+```go
+err := den.Delete(ctx, db, product)
+product.IsDeleted() // true
+```
+
+All standard queries automatically exclude soft-deleted documents:
+
+```go
+// Returns only non-deleted products
+products, _ := den.NewQuery[Product](ctx, db).All()
+```
+
+## Including Deleted Documents
+
+Use `IncludeDeleted()` to bypass the automatic filter:
+
+```go
+all, _ := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+```
+
+## Permanent Removal
+
+Use `HardDelete` to permanently remove a document from storage:
+
+```go
+err := den.HardDelete(ctx, db, product)
+```
+
+`HardDelete` is irreversible. The document is permanently removed from the backend.
+
+## Checking Delete Status
+
+`SoftBase` provides an `IsDeleted()` helper:
+
+```go
+if product.IsDeleted() {
+    fmt.Println("Product was deleted at", product.DeletedAt)
+}
+```
+
+## Combining with Change Tracking
+
+For documents that need both soft delete and change tracking, embed `document.TrackedSoftBase`:
+
+```go
+type AuditLog struct {
+    document.TrackedSoftBase
+    Action string `json:"action"`
+    Detail string `json:"detail"`
+}
+```
+
+This gives you `IsChanged`, `GetChanges`, and `Rollback` alongside soft delete behavior.
+
+## How It Works
+
+When Den detects that a document type embeds `SoftBase` (via reflection at registration time), it:
+
+1. Rewrites `Delete()` to set `DeletedAt = time.Now()` and update the document instead of removing the row
+2. Injects an automatic `where.Field("_deleted_at").IsNil()` condition into all queries for that collection
+3. Provides `HardDelete()` for actual permanent deletion
+4. Provides `IncludeDeleted()` to bypass the automatic filter
+
+---
+
+# Change Tracking
+
+## Enabling Change Tracking
+
+Embed `document.TrackedBase` instead of `document.Base`:
+
+```go
+import "github.com/oliverandrich/den/document"
+
+type Product struct {
+    document.TrackedBase
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+```
+
+Den automatically captures a byte-level snapshot of the serialized document after every load or write operation (`Insert`, `Update`, `FindByID`, query iteration).
+
+## Detecting Changes
+
+Use `den.IsChanged` to check if a document has been modified since it was last loaded or saved:
+
+```go
+p, _ := den.NewQuery[Product](ctx, db, where.Field("name").Eq("Widget")).First()
+
+changed, _ := den.IsChanged(db, p) // false
+
+p.Price = 29.99
+
+changed, _ = den.IsChanged(db, p) // true
+```
+
+## Inspecting Changes
+
+Use `den.GetChanges` to get a field-by-field diff:
+
+```go
+p.Price = 29.99
+
+changes, _ := den.GetChanges(db, p)
+// map[string]FieldChange{
+//     "price": {Before: 19.99, After: 29.99},
+// }
+```
+
+Only modified fields appear in the map. If nothing changed, the map is empty.
+
+## Rolling Back Changes
+
+Use `den.Rollback` to restore a document to its last-saved state:
+
+```go
+p.Price = 29.99
+p.Name = "New Name"
+
+den.Rollback(db, p)
+
+// p.Price and p.Name are back to their original values
+changed, _ = den.IsChanged(db, p) // false
+```
+
+`Rollback` deserializes the stored snapshot back into the struct, undoing all local modifications.
+
+`den.Rollback` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
+
+## Combining with Soft Delete
+
+For documents that need both change tracking and soft delete, embed `document.TrackedSoftBase`:
+
+```go
+type AuditLog struct {
+    document.TrackedSoftBase
+    Action string `json:"action"`
+    Detail string `json:"detail"`
+}
+```
+
+## How It Works
+
+When a document implements the `Trackable` interface (which `TrackedBase` and `TrackedSoftBase` satisfy), Den stores a snapshot of the serialized JSON after every database operation:
+
+- **`IsChanged`** re-encodes the current struct state and compares bytes against the snapshot
+- **`GetChanges`** diffs the two JSON representations to produce a per-field change map
+- **`Rollback`** deserializes the stored snapshot back into the struct
+
+---
+
+# Revision Control
+
+Revision control provides optimistic concurrency, preventing silent data loss when multiple processes update the same document concurrently.
+
+## Enabling Revision Control
+
+Implement `DenSettings()` on your document type with `UseRevision: true`:
+
+```go
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`
+    Price float64 `json:"price" den:"index"`
+}
+
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{UseRevision: true}
+}
+```
+
+## How It Works
+
+When revision control is enabled:
+
+1. Each document stores a `_rev` field (a random string, regenerated on every write)
+2. On `Update`, Den checks that the document's `_rev` matches what is currently stored in the backend
+3. If the revision does not match (another process updated the document since you read it), `den.ErrRevisionConflict` is returned
+4. The check-and-write happens atomically within a single backend transaction
+
+```go
+p, _ := den.FindByID[Product](ctx, db, "prod_001")
+p.Price = 29.99
+
+// If someone else updated this document since we read it:
+err := den.Update(ctx, db, p)
+// err == den.ErrRevisionConflict
+```
+
+## Handling Conflicts
+
+A typical conflict-handling pattern is to re-read and retry:
+
+```go
+p, _ := den.FindByID[Product](ctx, db, "prod_001")
+p.Price = 29.99
+
+err := den.Update(ctx, db, p)
+if errors.Is(err, den.ErrRevisionConflict) {
+    latest, _ := den.FindByID[Product](ctx, db, p.ID)
+    latest.Price = 29.99
+    err = den.Update(ctx, db, latest)
+}
+```
+
+## Force-Writing
+
+Use `den.IgnoreRevision()` to bypass the revision check and force-write:
+
+```go
+err := den.Update(ctx, db, p, den.IgnoreRevision())
+```
+
+`IgnoreRevision()` overwrites the document regardless of concurrent modifications. Use it only when you intentionally want to discard any changes made by other processes.
+
+## Pessimistic Locking with Transactions
+
+Revision control is *optimistic* -- it detects conflicts after the fact. When you need to *prevent* conflicts entirely, combine transactions with revision control:
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    p, err := den.TxFindByID[Product](tx, id)
+    if err != nil {
+        return err
+    }
+
+    p.Price = 29.99
+
+    return den.TxUpdate(tx, p)
+})
+```
+
+## When to Use Revision Control
+
+Revision control is useful when:
+
+- Multiple users or processes can modify the same document
+- Silent data loss from concurrent writes is unacceptable
+- You need application-level conflict detection independent of the backend's transaction isolation
+
+Revision control is orthogonal to transactions. Transactions provide isolation at the database level. Revision control provides conflict detection at the application level, across separate request cycles.
+
+---
+
+# Validation
+
+Den supports two validation mechanisms that can be used independently or combined.
+
+## Validator Interface
+
+Implement the `Validate() error` method on your document struct for custom business logic validation:
+
+```go
+type Article struct {
+    document.Base
+    Title string `json:"title"`
+    Body  string `json:"body"`
+}
+
+func (a *Article) Validate() error {
+    if a.Title == "" {
+        return errors.New("title is required")
+    }
+    if len(a.Body) < 10 {
+        return errors.New("body must be at least 10 characters")
+    }
+    return nil
+}
+```
+
+The `Validate()` hook is called automatically before every `Insert` and `Update`. If it returns an error, the write is aborted.
+
+## Struct Tag Validation
+
+For structural validation rules, Den integrates with go-playground/validator via the `validate` package. Enable it with `validate.WithValidation()` when opening the database:
+
+```go
+import "github.com/oliverandrich/den/validate"
+
+db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+```
+
+Then add `validate` tags to your struct fields:
+
+```go
+type User struct {
+    document.Base
+    Username string `json:"username" den:"unique" validate:"required,min=3,max=50"`
+    Email    string `json:"email"    den:"unique" validate:"required,email"`
+    Age      int    `json:"age"                   validate:"gte=0,lte=150"`
+    Website  string `json:"website"               validate:"omitempty,url"`
+}
+```
+
+Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag validation is opt-in for backward compatibility.
+
+## Execution Order
+
+When both mechanisms are enabled, they run in this order during `Insert` and `Update`:
+
+1. Struct tag validation (`validate` tags)
+2. `Validate()` hook (business logic)
+
+If tag validation fails, the `Validate()` hook is not called.
+
+## Error Handling
+
+Validation errors are wrapped with `den.ErrValidation`:
+
+```go
+err := den.Insert(ctx, db, &user)
+if errors.Is(err, den.ErrValidation) {
+    fmt.Println("Validation failed:", err)
+}
+```
+
+For field-level details from tag validation, use `errors.As`:
+
+```go
+var validationErr *validate.ValidationError
+if errors.As(err, &validationErr) {
+    for _, fe := range validationErr.FieldErrors {
+        fmt.Printf("Field %s failed on %s\n", fe.Field, fe.Tag)
+    }
+}
+```
+
+---
+
+# Migrations
+
+## When to Use Migrations
+
+Documents in Den are schema-flexible: adding new fields with zero values works without any migration. Explicit migrations are needed for:
+
+- **Field renames** (e.g., `name` to `title`)
+- **Type changes** (e.g., `string` to `int`)
+- **Data transformations** (e.g., splitting a full name into first/last)
+
+## Running Migrations at Startup
+
+Migrations do not run automatically. Call `r.Up()` after opening the database and registering document types:
+
+```go
+func main() {
+    ctx := context.Background()
+
+    db, err := den.OpenURL("sqlite:///data.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    if err := den.Register(ctx, db, &Note{}, &User{}); err != nil {
+        log.Fatal(err)
+    }
+
+    r := setupMigrations()
+    if err := r.Up(ctx, db); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+`r.Up()` is idempotent -- it skips migrations that have already been applied. It is safe to call on every startup.
+
+## Defining Migrations
+
+Migrations are Go functions registered with a version identifier:
+
+```go
+import "github.com/oliverandrich/den/migrate"
+
+func setupMigrations() *migrate.Registry {
+    r := migrate.NewRegistry()
+
+    r.Register("20250402_001_rename_name_to_title", migrate.Migration{
+        Forward: func(ctx context.Context, tx *den.Tx) error {
+            for note, err := range den.NewQuery[OldNote](ctx, db).Iter() {
+                if err != nil {
+                    return err
+                }
+                note.Title = note.Name
+                if err := den.TxUpdate(tx, note); err != nil {
+                    return err
+                }
+            }
+            return nil
+        },
+        Backward: func(ctx context.Context, tx *den.Tx) error {
+            for note, err := range den.NewQuery[Note](ctx, db).Iter() {
+                if err != nil {
+                    return err
+                }
+                note.Name = note.Title
+                if err := den.TxUpdate(tx, note); err != nil {
+                    return err
+                }
+            }
+            return nil
+        },
+    })
+
+    return r
+}
+```
+
+Use a timestamp-based naming convention like `YYYYMMDD_NNN_description` for migration versions.
+
+## Running Migrations
+
+```go
+r := setupMigrations()
+
+// Run all pending forward migrations
+err := r.Up(ctx, db)
+
+// Run one forward migration
+err := r.UpOne(ctx, db)
+
+// Roll back one migration
+err := r.DownOne(ctx, db)
+
+// Roll back all migrations
+err := r.Down(ctx, db)
+```
+
+## Migration Tracking
+
+Den stores migration state in a `_den_migrations` table. Each applied migration is recorded with its version string and timestamp. `r.Up()` compares registered migrations against this log to determine which are pending.
+
+## Transaction Safety
+
+Each migration runs within a Den transaction:
+
+- If the migration function returns `nil`, the transaction is committed
+- If it returns an error, the transaction is rolled back and the migration is marked as failed
+- Subsequent migrations are not executed after a failure
+
+If a migration fails, fix the issue and re-run `r.Up()`. Den will retry only the failed and pending migrations.
+
+## Error Handling
+
+Migration errors are wrapped with `den.ErrMigrationFailed`:
+
+```go
+err := r.Up(ctx, db)
+if errors.Is(err, den.ErrMigrationFailed) {
+    log.Fatal("Migration failed:", err)
+}
+```
+
+---
+
+# Testing
+
+## SQLite Test Helper
+
+The `dentest` package provides a one-liner to create a file-backed SQLite database in a temporary directory, pre-register document types, and auto-close when the test ends:
+
+```go
+import (
+    "context"
+    "testing"
+
+    "github.com/oliverandrich/den"
+    "github.com/oliverandrich/den/dentest"
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+
+func TestProductInsert(t *testing.T) {
+    db := dentest.MustOpen(t, &Product{}, &Category{})
+
+    ctx := context.Background()
+    p := &Product{Name: "Widget", Price: 9.99}
+    err := den.Insert(ctx, db, p)
+    require.NoError(t, err)
+    assert.NotEmpty(t, p.ID)
+
+    found, err := den.FindByID[Product](ctx, db, p.ID)
+    require.NoError(t, err)
+    assert.Equal(t, "Widget", found.Name)
+    assert.Equal(t, 9.99, found.Price)
+}
+```
+
+`dentest.MustOpen` creates a real SQLite database file inside `t.TempDir()` and registers `t.Cleanup` to close it automatically.
+
+## PostgreSQL Test Helper
+
+For testing against PostgreSQL, use `dentest.MustOpenPostgres`:
+
+```go
+func TestProductInsertPG(t *testing.T) {
+    connStr := "postgres://user:pass@localhost/testdb"
+    db := dentest.MustOpenPostgres(t, connStr, &Product{}, &Category{})
+
+    ctx := context.Background()
+    p := &Product{Name: "Widget", Price: 9.99}
+    err := den.Insert(ctx, db, p)
+    require.NoError(t, err)
+
+    found, err := den.FindByID[Product](ctx, db, p.ID)
+    require.NoError(t, err)
+    assert.Equal(t, "Widget", found.Name)
+}
+```
+
+`MustOpenPostgres` requires a running PostgreSQL instance. It creates a fresh schema for each test run and cleans up via `t.Cleanup`.
+
+## Complete Test Example
+
+A test that inserts, queries, updates, and deletes:
+
+```go
+func TestProductLifecycle(t *testing.T) {
+    db := dentest.MustOpen(t, &Product{})
+    ctx := context.Background()
+
+    // Insert
+    p := &Product{Name: "Gadget", Price: 19.99}
+    require.NoError(t, den.Insert(ctx, db, p))
+    assert.NotEmpty(t, p.ID)
+
+    // Query
+    products, err := den.NewQuery[Product](ctx, db,
+        where.Field("price").Gt(10.0),
+    ).All()
+    require.NoError(t, err)
+    assert.Len(t, products, 1)
+    assert.Equal(t, "Gadget", products[0].Name)
+
+    // Update
+    p.Price = 24.99
+    require.NoError(t, den.Update(ctx, db, p))
+
+    refreshed, err := den.FindByID[Product](ctx, db, p.ID)
+    require.NoError(t, err)
+    assert.Equal(t, 24.99, refreshed.Price)
+
+    // Delete
+    require.NoError(t, den.Delete(ctx, db, p))
+
+    _, err = den.FindByID[Product](ctx, db, p.ID)
+    assert.ErrorIs(t, err, den.ErrNotFound)
+}
+```
+
+Use testify for assertions. `require` aborts the test on failure (use for setup steps), `assert` records the failure and continues (use for verification steps).
+
+---
+
+# API Reference
+
+Complete reference of all public functions in the `den` package, organized by category.
+
+Module: `github.com/oliverandrich/den`
+
+## Database
+
+| Function | Signature | Description |
+|---|---|---|
+| `OpenURL` | `OpenURL(dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import) |
+| `Register` | `Register(ctx context.Context, db *DB, docs ...any) error` | Register document types; creates collections and indexes |
+| `db.Close` | `(db *DB) Close() error` | Close the database connection |
+| `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
+
+## CRUD
+
+### Insert
+
+| Function | Signature | Description |
+|---|---|---|
+| `Insert[T]` | `Insert[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
+| `InsertMany[T]` | `InsertMany[T](ctx context.Context, db *DB, docs []*T) error` | Insert multiple documents in a single batch |
+
+### Read
+
+| Function | Signature | Description |
+|---|---|---|
+| `FindByID[T]` | `FindByID[T](ctx context.Context, db *DB, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
+| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, db *DB, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
+
+### Update
+
+| Function | Signature | Description |
+|---|---|---|
+| `Update[T]` | `Update[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
+| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, db *DB, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
+| `Refresh[T]` | `Refresh[T](ctx context.Context, db *DB, doc *T) error` | Re-read the document from storage, replacing all field values |
+
+### Delete
+
+| Function | Signature | Description |
+|---|---|---|
+| `Delete[T]` | `Delete[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
+| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
+| `HardDelete[T]` | `HardDelete[T](ctx context.Context, db *DB, doc *T) error` | Permanently remove a document, bypassing soft-delete |
+
+## Query
+
+### Creating a Query
+
+```go
+q := den.NewQuery[T](ctx, db, conditions...)
+```
+
+### Chainable Methods
+
+| Method | Signature | Description |
+|---|---|---|
+| `Where` | `Where(conditions ...where.Condition) QuerySet[T]` | Add additional filter conditions |
+| `Sort` | `Sort(field string, dir SortDirection) QuerySet[T]` | Sort results by field (`den.Asc` or `den.Desc`) |
+| `Limit` | `Limit(n int) QuerySet[T]` | Limit the number of results |
+| `Skip` | `Skip(n int) QuerySet[T]` | Skip the first n results (offset-based pagination) |
+| `After` | `After(id string) QuerySet[T]` | Cursor-based pagination: fetch results after this ID |
+| `Before` | `Before(id string) QuerySet[T]` | Cursor-based pagination: fetch results before this ID |
+| `WithFetchLinks` | `WithFetchLinks() QuerySet[T]` | Eagerly resolve all `Link[T]` fields on results |
+| `WithNestingDepth` | `WithNestingDepth(n int) QuerySet[T]` | Override max link-fetching depth for this query |
+| `IncludeDeleted` | `IncludeDeleted() QuerySet[T]` | Include soft-deleted documents in results |
+
+### Terminal Methods
+
+| Method | Signature | Description |
+|---|---|---|
+| `All` | `All() ([]*T, error)` | Execute query, return all matching documents |
+| `First` | `First() (*T, error)` | Execute query, return the first matching document |
+| `Count` | `Count() (int64, error)` | Count matching documents |
+| `Exists` | `Exists() (bool, error)` | Check whether at least one matching document exists |
+| `AllWithCount` | `AllWithCount() ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
+| `Iter` | `Iter() iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range` |
+| `Update` | `Update(fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
+| `Search` | `Search(query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL) |
+
+## Aggregation
+
+### Scalar Aggregations
+
+| Method | Signature | Description |
+|---|---|---|
+| `Avg` | `Avg(field string) (float64, error)` | Average of a numeric field across matching documents |
+| `Sum` | `Sum(field string) (float64, error)` | Sum of a numeric field across matching documents |
+| `Min` | `Min(field string) (float64, error)` | Minimum value of a field across matching documents |
+| `Max` | `Max(field string) (float64, error)` | Maximum value of a field across matching documents |
+
+### Grouped Aggregations
+
+| Method | Signature | Description |
+|---|---|---|
+| `GroupBy` | `GroupBy(field string) *GroupByBuilder[T]` | Group results by a field |
+| `Into` | `Into(dest any) error` | Execute grouped aggregation into a target slice of structs |
+| `Project` | `Project(dest any) error` | Project query results into a struct with a subset of fields |
+
+## Relations
+
+| Function | Signature | Description |
+|---|---|---|
+| `NewLink[T]` | `NewLink[T any](doc *T) Link[T]` | Create a Link from an existing document, extracting its ID |
+| `FetchLink[T]` | `FetchLink[T](ctx context.Context, db *DB, doc *T, field string) error` | Fetch and resolve a single link field on a document |
+| `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, db *DB, doc *T) error` | Fetch and resolve all link fields on a document |
+| `BackLinks[T]` | `BackLinks[T](ctx context.Context, db *DB, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
+| `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
+
+### Link Rules
+
+| Rule | Value | Description |
+|---|---|---|
+| `LinkIgnore` | `0` | No cascading -- only the root document is written/deleted |
+| `LinkWrite` | `1` | Cascade writes to all linked documents (insert new, update existing) |
+| `LinkDelete` | `2` | Cascade deletion to all linked documents |
+
+## Change Tracking
+
+Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instead of `document.Base`.
+
+| Function | Signature | Description |
+|---|---|---|
+| `IsChanged[T]` | `IsChanged[T](db *DB, doc *T) (bool, error)` | Check whether the document has been modified since last load/save |
+| `GetChanges[T]` | `GetChanges[T](db *DB, doc *T) (map[string]FieldChange, error)` | Get a map of changed fields with before/after values |
+| `Rollback` | `Rollback(db *DB, doc any) error` | Restore the document to its last-saved state. Returns `ErrNoSnapshot` if no snapshot exists |
+
+## Transactions
+
+| Function | Signature | Description |
+|---|---|---|
+| `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
+| `TxFindByID[T]` | `TxFindByID[T](tx *Tx, id string) (*T, error)` | Find a document by ID within a transaction |
+| `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
+| `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
+| `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |
+| `TxGet` | `TxGet(tx *Tx, collection string, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction |
+| `TxPut` | `TxPut(tx *Tx, collection string, id string, data []byte) error` | Put raw document bytes by collection and ID within a transaction |
+
+## Metadata
+
+| Function | Signature | Description |
+|---|---|---|
+| `Meta[T]` | `Meta[T](db *DB) (CollectionMeta, error)` | Get metadata for a registered collection (fields, indexes, links, settings) |
+| `Collections` | `Collections(db *DB) []string` | List all registered collection names |
+
+## Migrations
+
+Located in the `migrate` sub-package (`github.com/oliverandrich/den/migrate`).
+
+| Function | Signature | Description |
+|---|---|---|
+| `NewRegistry` | `NewRegistry() *Registry` | Create a new migration registry |
+| `Register` | `(r *Registry) Register(version string, m Migration)` | Register a migration with a version string |
+| `Up` | `(r *Registry) Up(ctx context.Context, db *den.DB) error` | Run all pending forward migrations |
+| `UpOne` | `(r *Registry) UpOne(ctx context.Context, db *den.DB) error` | Run one forward migration |
+| `Down` | `(r *Registry) Down(ctx context.Context, db *den.DB) error` | Roll back all migrations |
+| `DownOne` | `(r *Registry) DownOne(ctx context.Context, db *den.DB) error` | Roll back one migration |
+
+## Testing Helpers
+
+Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
+
+| Function | Signature | Description |
+|---|---|---|
+| `MustOpen` | `MustOpen(t testing.TB, docs ...any) *den.DB` | Open a file-backed SQLite database in a temp directory; auto-registers docs and cleans up after test |
+| `MustOpenPostgres` | `MustOpenPostgres(t testing.TB, connStr string, docs ...any) *den.DB` | Open a PostgreSQL database for testing; auto-registers docs |
+
+## Key Types
+
+| Type | Description |
+|---|---|
+| `DB` | Database handle; holds the backend and collection registry |
+| `Tx` | Transaction handle; wraps a backend transaction |
+| `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
+| `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate` and bulk `Update` |
+| `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |
+| `QuerySet[T]` | Chainable, lazy query builder |
+| `SortDirection` | Sort direction: `den.Asc` or `den.Desc` |
+| `LinkRule` | Cascade behavior for link operations |
+| `Option` | Functional option for `Open`/`OpenURL` |
+| `CRUDOption` | Functional option for write operations (e.g., `WithLinkRule`) |
+| `FieldChange` | Represents a changed field with `Before` and `After` values |
+| `CollectionMeta` | Metadata about a collection: fields, indexes, links, settings |
+| `IndexDefinition` | Index specification: name, fields, unique flag |
+
+---
+
+# Where Operators
+
+Complete reference of all query operators in the `where` sub-package.
+
+Import: `github.com/oliverandrich/den/where`
+
+## Usage
+
+```go
+import "github.com/oliverandrich/den/where"
+
+// Single condition
+results, err := den.NewQuery[Product](ctx, db,
+    where.Field("price").Gt(10.0),
+).All()
+
+// Multiple conditions (implicit AND)
+results, err := den.NewQuery[Product](ctx, db,
+    where.Field("price").Gte(10),
+    where.Field("category").Eq("Electronics"),
+).All()
+
+// Nested field access via dot notation
+results, err := den.NewQuery[Product](ctx, db,
+    where.Field("address.city").Eq("Berlin"),
+).All()
+```
+
+## Comparison Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `Eq` | `Field("name").Eq("Widget")` | Equal to value |
+| `Ne` | `Field("status").Ne("deleted")` | Not equal to value |
+| `Gt` | `Field("price").Gt(10)` | Greater than value |
+| `Gte` | `Field("price").Gte(10)` | Greater than or equal |
+| `Lt` | `Field("price").Lt(100)` | Less than value |
+| `Lte` | `Field("price").Lte(100)` | Less than or equal |
+
+## Null Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `IsNil` | `Field("read_at").IsNil()` | Field is null / not set |
+| `IsNotNil` | `Field("read_at").IsNotNil()` | Field is not null |
+
+## Set Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `In` | `Field("status").In("active", "pending")` | Value is one of the given values |
+| `NotIn` | `Field("status").NotIn("deleted", "banned")` | Value is not one of the given values |
+
+## Array Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `Contains` | `Field("tags").Contains("golang")` | Array contains the value |
+| `ContainsAny` | `Field("tags").ContainsAny("go", "rust")` | Array contains any of the values |
+| `ContainsAll` | `Field("tags").ContainsAll("go", "web")` | Array contains all of the values |
+
+## Map / Object Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `HasKey` | `Field("metadata").HasKey("color")` | Map/object contains the given key |
+
+## String Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `StringContains` | `Field("name").StringContains("alpha")` | Field contains the substring |
+| `StartsWith` | `Field("name").StartsWith("Al")` | Field starts with the prefix |
+| `EndsWith` | `Field("name").EndsWith("ta")` | Field ends with the suffix |
+
+String operators automatically escape special SQL characters (`%`, `_`, `\`) in the search term.
+
+## Pattern Matching
+
+| Operator | Example | Description |
+|---|---|---|
+| `RegExp` | `Field("name").RegExp("^W.+t$")` | Match field against a regular expression |
+
+## Logical Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `And` | `where.And(cond1, cond2, ...)` | All conditions must match |
+| `Or` | `where.Or(cond1, cond2, ...)` | At least one condition must match |
+| `Not` | `where.Not(cond)` | Negate a condition |
+
+Multiple conditions passed to `NewQuery` are implicitly combined with `AND`. Use `where.Or()` explicitly when you need disjunction.
+
+## Nested Fields
+
+Use dot notation to access nested fields in embedded objects:
+
+```go
+where.Field("address.city").Eq("Berlin")
+where.Field("category.parent.name").Eq("Root")
+where.Field("tags.0").Eq("featured")
+```
+
+---
+
+# Error Types
+
+All Den errors are typed sentinel values that support `errors.Is()` and `errors.As()` for reliable error handling.
+
+Import: `github.com/oliverandrich/den`
+
+## Error Reference
+
+| Error | Description | When Returned |
+|---|---|---|
+| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh` when no matching document exists |
+| `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
+| `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision |
+| `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
+| `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when `Validate()` or struct tag validation fails |
+| `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
+| `ErrNoSnapshot` | No stored snapshot for rollback | `Rollback` when the document was never loaded from the database or does not embed `TrackedBase` |
+| `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails |
+
+## Usage with errors.Is
+
+```go
+product, err := den.FindByID[Product](ctx, db, "nonexistent-id")
+if errors.Is(err, den.ErrNotFound) {
+    log.Println("product not found")
+}
+```
+
+```go
+err := den.Insert(ctx, db, &product)
+if errors.Is(err, den.ErrDuplicate) {
+    log.Println("a product with that SKU already exists")
+}
+```
+
+```go
+err := den.Update(ctx, db, &product)
+if errors.Is(err, den.ErrRevisionConflict) {
+    log.Println("document was modified by another process")
+}
+```
+
+## Validation Errors
+
+When using the `validate` sub-package, validation errors can be unwrapped to access per-field details:
+
+```go
+err := den.Insert(ctx, db, &user)
+if errors.Is(err, den.ErrValidation) {
+    var ve *validate.Errors
+    if errors.As(err, &ve) {
+        for _, fieldErr := range ve.Fields {
+            log.Printf("field %s: %s", fieldErr.Field, fieldErr.Message)
+        }
+    }
+}
+```
+
+## Error Wrapping
+
+All Den errors can be wrapped with additional context. The original sentinel remains matchable via `errors.Is()`:
+
+```go
+return fmt.Errorf("insert into %s: %w", collection, den.ErrDuplicate)
+
+errors.Is(err, den.ErrDuplicate) // true
+```
+
+---
+
+# Struct Tags
+
+Den uses two struct tags: `json` for serialization and `den` for index and metadata options. An optional `validate` tag integrates with `go-playground/validator`.
+
+## Tag Overview
+
+| Tag | Purpose | Example |
+|---|---|---|
+| `json` | Sets the serialized field name (the key stored in JSONB) | `json:"name"` |
+| `den` | Den-specific options: indexing, uniqueness, FTS, omitempty | `den:"index"` |
+| `validate` | Struct tag validation rules (requires `validate.WithValidation()`) | `validate:"required,email"` |
+
+## The `json` Tag
+
+The `json` tag controls how a field is serialized to JSON. Standard Go `encoding/json` tag.
+
+- The value becomes the field's key in the stored JSONB document
+- Use `json:"field,omitempty"` to omit zero-value fields
+- Use `json:"-"` to exclude a field from serialization
+
+## The `den` Tag
+
+The `den` tag carries Den-specific metadata. It does not set the field name.
+
+| Option | Description |
+|---|---|
+| `index` | Create a secondary index on this field |
+| `unique` | Create a unique index on this field |
+| `fts` | Include this field in full-text search |
+| `omitempty` | Omit this field from storage when zero-valued |
+
+Options can be combined: `den:"index,omitempty"`
+
+### Nullable Unique Fields
+
+Pointer fields with `unique` create a nullable unique constraint. Multiple documents can have `nil` without violating the constraint. Both backends implement this as a partial unique index (`WHERE ... IS NOT NULL`).
+
+## The `validate` Tag
+
+When `validate.WithValidation()` is passed as an option to `den.OpenURL()`, Den validates documents using `go-playground/validator` struct tags before insert and update.
+
+## Aggregation Struct Tags
+
+Used with `GroupBy().Into()`:
+
+| Tag | Description |
+|---|---|
+| `den:"group_key"` | Receives the group key value |
+| `den:"avg:fieldname"` | Average of `fieldname` within the group |
+| `den:"sum:fieldname"` | Sum of `fieldname` within the group |
+| `den:"min:fieldname"` | Minimum of `fieldname` within the group |
+| `den:"max:fieldname"` | Maximum of `fieldname` within the group |
+| `den:"count"` | Number of documents in the group |
+
+## Projection Struct Tags
+
+Used with `Project()`:
+
+| Tag | Description |
+|---|---|
+| `json:"fieldname"` | Map to a top-level document field |
+| `den:"from:nested.field"` | Extract a value from a nested field path |
+
+## Document Base Types
+
+| Base Type | Features |
+|---|---|
+| `document.Base` | ID, CreatedAt, UpdatedAt, Rev |
+| `document.TrackedBase` | Base + change tracking (IsChanged, GetChanges, Rollback) |
+| `document.SoftBase` | Base + soft delete (DeletedAt, IsDeleted) |
+| `document.TrackedSoftBase` | Both change tracking and soft delete |
+
+---
+
+# Configuration
+
+How to open a Den database, configure backends, and customize document behavior.
+
+## Opening a Database
+
+### OpenURL (recommended)
+
+`OpenURL` accepts a URL-style DSN. Backend packages must be imported for side-effect registration.
+
+```go
+import (
+    "github.com/oliverandrich/den"
+    _ "github.com/oliverandrich/den/backend/sqlite"
+    _ "github.com/oliverandrich/den/backend/postgres"
+)
+
+// SQLite: file-backed
+db, err := den.OpenURL("sqlite:///path/to/data.db")
+
+// SQLite: in-memory
+db, err := den.OpenURL("sqlite://:memory:")
+
+// PostgreSQL
+db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+
+// PostgreSQL (alias scheme)
+db, err := den.OpenURL("postgresql://user:pass@localhost/mydb")
+```
+
+### Options
+
+```go
+import "github.com/oliverandrich/den/validate"
+
+db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+```
+
+| Option | Package | Description |
+|---|---|---|
+| `validate.WithValidation()` | `den/validate` | Enable struct tag validation using `go-playground/validator` |
+
+## DSN Formats
+
+| Backend | Scheme | Format | Example |
+|---|---|---|---|
+| SQLite (file) | `sqlite` | `sqlite:///path/to/file.db` | `sqlite:///data/myapp.db` |
+| SQLite (memory) | `sqlite` | `sqlite://:memory:` | `sqlite://:memory:` |
+| PostgreSQL | `postgres` | `postgres://user:pass@host:port/dbname` | `postgres://admin:secret@localhost:5432/myapp` |
+| PostgreSQL | `postgresql` | `postgresql://user:pass@host:port/dbname` | `postgresql://admin:secret@db.example.com/myapp` |
+
+## Registering Document Types
+
+All document types must be registered before use. Registration creates the collection table and indexes.
+
+```go
+err := den.Register(ctx, db,
+    &Product{},
+    &Category{},
+    &User{},
+)
+```
+
+Registration performs:
+
+1. Reflection-based analysis of the struct (fields, types, tags)
+2. Collection table creation (or verification if it already exists)
+3. Index creation based on `den` struct tags (additive)
+
+## DenSettings
+
+Document types can customize their behavior by implementing the `DenSettable` interface:
+
+```go
+type DenSettable interface {
+    DenSettings() den.Settings
+}
+```
+
+### Settings Fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `CollectionName` | `string` | lowercase struct name | Override the auto-derived collection name |
+| `OmitEmpty` | `bool` | `false` | When true, zero-value fields are omitted from storage by default |
+| `UseRevision` | `bool` | `false` | Enable optimistic concurrency control via `_rev` field |
+| `NestingDepthPerField` | `map[string]int` | `nil` | Per-field override for link nesting depth |
+| `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes) |
+
+## Collection Naming
+
+By default: lowercase, no pluralization. `Product` becomes `product`. Override via `DenSettings().CollectionName`.
+
+## Index Definition
+
+### Via Struct Tags
+
+```go
+type Product struct {
+    document.Base
+    Name  string  `json:"name"  den:"index"`   // secondary index
+    SKU   string  `json:"sku"   den:"unique"`  // unique index
+    Body  string  `json:"body"  den:"fts"`     // full-text search index
+}
+```
+
+### Via Settings (compound indexes)
+
+```go
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{
+        Indexes: []den.IndexDefinition{
+            {Name: "idx_category_price", Fields: []string{"category", "price"}},
+        },
+    }
+}
+```
+
+Both approaches are additive. Struct tag indexes and Settings indexes are created together during registration.

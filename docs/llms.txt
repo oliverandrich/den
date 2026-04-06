@@ -1,0 +1,47 @@
+# Den
+
+> Den is an ODM (Object-Document Mapper) for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine. Part of the Burrow ecosystem.
+
+- Module: `github.com/oliverandrich/den`
+- Go version: 1.25+
+- License: MIT
+
+## Getting Started
+
+- [Installation](https://den-odm.readthedocs.io/getting-started/installation/): Install Den and import a backend (SQLite or PostgreSQL) via side-effect imports
+- [Quick Start](https://den-odm.readthedocs.io/getting-started/quickstart/): Complete working example — define a document, store it, query it back
+- [Backends](https://den-odm.readthedocs.io/getting-started/backends/): Backend comparison, DSN formats, and when to use SQLite vs PostgreSQL
+
+## Guide — Core
+
+- [Documents](https://den-odm.readthedocs.io/guide/documents/): Base types (Base, TrackedBase, SoftBase, TrackedSoftBase), struct tags, collection naming, ULID IDs, DenSettings interface
+- [CRUD Operations](https://den-odm.readthedocs.io/guide/crud/): Insert, InsertMany, FindByID, FindByIDs, Update, bulk Update, FindOneAndUpdate, Delete, DeleteMany, HardDelete, Refresh
+- [Queries](https://den-odm.readthedocs.io/guide/queries/): Chainable QuerySet with lazy evaluation, where conditions, sort/limit/skip, cursor-based pagination, projections, streaming with Iter()
+- [Relations](https://den-odm.readthedocs.io/guide/relations/): Generic Link[T] type for one-to-one and one-to-many, lazy/eager/on-demand fetch, cascade write/delete rules, BackLinks, nesting depth
+
+## Guide — Features
+
+- [Aggregations](https://den-odm.readthedocs.io/guide/aggregations/): Scalar aggregations (Avg, Sum, Min, Max), GroupBy with typed result structs, projections for field subsetting
+- [Full-Text Search](https://den-odm.readthedocs.io/guide/full-text-search/): FTS via den:"fts" tag, unified Search() API, FTS5 on SQLite, tsvector on PostgreSQL
+- [Transactions](https://den-odm.readthedocs.io/guide/transactions/): RunInTransaction with Tx-prefixed CRUD variants, commit/rollback via return value, backend concurrency differences
+- [Lifecycle Hooks](https://den-odm.readthedocs.io/guide/hooks/): BeforeInsert, AfterUpdate, Validate, and more via interfaces; execution order; hooks within transactions
+
+## Guide — Data Integrity
+
+- [Soft Delete](https://den-odm.readthedocs.io/guide/soft-delete/): Embed SoftBase for non-destructive deletion, IncludeDeleted(), HardDelete for permanent removal
+- [Change Tracking](https://den-odm.readthedocs.io/guide/change-tracking/): Embed TrackedBase for IsChanged, GetChanges, Rollback; byte-level snapshot comparison
+- [Revision Control](https://den-odm.readthedocs.io/guide/revision-control/): Optimistic concurrency via _rev field, ErrRevisionConflict, IgnoreRevision(), pessimistic locking pattern
+- [Validation](https://den-odm.readthedocs.io/guide/validation/): Validate() interface for custom logic, go-playground/validator struct tags, combined execution order
+
+## Guide — Operations
+
+- [Migrations](https://den-odm.readthedocs.io/guide/migrations/): Registry-based migrations for field renames, type changes, data transformations; atomic execution; Up/Down/UpOne/DownOne
+- [Testing](https://den-odm.readthedocs.io/guide/testing/): dentest.MustOpen for SQLite, dentest.MustOpenPostgres for PostgreSQL; auto-registration and cleanup
+
+## Reference
+
+- [API Reference](https://den-odm.readthedocs.io/reference/api/): Complete reference of all public functions organized by category
+- [Where Operators](https://den-odm.readthedocs.io/reference/operators/): All query operators — comparison, null, set, array, map, string, regex, logical combinators
+- [Error Types](https://den-odm.readthedocs.io/reference/errors/): Sentinel errors (ErrNotFound, ErrDuplicate, ErrRevisionConflict, etc.) with errors.Is/As support
+- [Struct Tags](https://den-odm.readthedocs.io/reference/struct-tags/): json, den, and validate tag syntax and options; aggregation and projection tags
+- [Configuration](https://den-odm.readthedocs.io/reference/configuration/): OpenURL, DSN formats, DenSettings interface, index definitions

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 
 	"github.com/oliverandrich/den/internal"
 )
@@ -25,10 +26,11 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 		meta := buildCollectionMeta(info)
 		settings := getSettings(docType)
 
-		// Apply custom collection name before creating backend resources
+		// Apply custom settings before creating backend resources
 		if settings.CollectionName != "" {
 			meta.Name = settings.CollectionName
 		}
+		meta.Indexes = append(meta.Indexes, settings.Indexes...)
 
 		if err := db.backend.EnsureCollection(ctx, meta.Name, meta); err != nil {
 			return fmt.Errorf("ensure collection %s: %w", meta.Name, err)
@@ -150,5 +152,44 @@ func buildCollectionMeta(info *internal.StructInfo) CollectionMeta {
 		}
 	}
 
+	// Collect unique_together and index_together groups
+	uniqueGroups := make(map[string][]string)
+	indexGroups := make(map[string][]string)
+	for _, f := range info.Fields {
+		if f.Options.UniqueTogether != "" {
+			uniqueGroups[f.Options.UniqueTogether] = append(uniqueGroups[f.Options.UniqueTogether], f.JSONName)
+		}
+		if f.Options.IndexTogether != "" {
+			indexGroups[f.Options.IndexTogether] = append(indexGroups[f.Options.IndexTogether], f.JSONName)
+		}
+	}
+
+	// Create composite unique indexes (sorted group names for deterministic order)
+	for _, name := range sortedKeys(uniqueGroups) {
+		meta.Indexes = append(meta.Indexes, IndexDefinition{
+			Name:   "idx_" + info.CollectionName + "_" + name,
+			Fields: uniqueGroups[name],
+			Unique: true,
+		})
+	}
+
+	// Create composite non-unique indexes
+	for _, name := range sortedKeys(indexGroups) {
+		meta.Indexes = append(meta.Indexes, IndexDefinition{
+			Name:   "idx_" + info.CollectionName + "_" + name,
+			Fields: indexGroups[name],
+			Unique: false,
+		})
+	}
+
 	return meta
+}
+
+func sortedKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

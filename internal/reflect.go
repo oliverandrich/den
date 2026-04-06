@@ -8,9 +8,11 @@ import (
 
 // TagOptions holds the parsed options from a den struct tag.
 type TagOptions struct {
-	Index  bool
-	Unique bool
-	FTS    bool
+	Index          bool
+	Unique         bool
+	FTS            bool
+	UniqueTogether string // group name for composite unique index
+	IndexTogether  string // group name for composite non-unique index
 }
 
 // FieldInfo describes a single field in a document struct.
@@ -70,13 +72,18 @@ func ParseDenTag(tag string) TagOptions {
 		return opts
 	}
 	for part := range strings.SplitSeq(tag, ",") {
-		switch strings.TrimSpace(part) {
-		case "index":
+		trimmed := strings.TrimSpace(part)
+		switch {
+		case trimmed == "index":
 			opts.Index = true
-		case "unique":
+		case trimmed == "unique":
 			opts.Unique = true
-		case "fts":
+		case trimmed == "fts":
 			opts.FTS = true
+		case strings.HasPrefix(trimmed, "unique_together:"):
+			opts.UniqueTogether = strings.TrimPrefix(trimmed, "unique_together:")
+		case strings.HasPrefix(trimmed, "index_together:"):
+			opts.IndexTogether = strings.TrimPrefix(trimmed, "index_together:")
 		}
 	}
 	return opts

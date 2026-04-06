@@ -52,6 +52,8 @@ Available `den` tag options:
 | `unique` | Creates a unique index on this field |
 | `fts` | Includes this field in full-text search |
 | `omitempty` | Omits the field from storage when it has a zero value |
+| `unique_together:group` | Groups fields into a composite unique index by group name |
+| `index_together:group` | Groups fields into a composite non-unique index by group name |
 
 ```go
 type Product struct {
@@ -65,7 +67,7 @@ type Product struct {
 ```
 
 !!! note
-    The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries index, unique, fts, and omitempty options.
+    The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries options.
 
 ## Collection Naming
 
@@ -175,22 +177,66 @@ type Product struct {
         ON product(((data->>'sku')));
     ```
 
+### Via Struct Tags (Compound Indexes)
+
+For multi-field indexes, use `unique_together` or `index_together` with a shared group name. Fields with the same group name are combined into a single composite index:
+
+```go
+type Entry struct {
+    document.Base
+    Feed string `json:"feed" den:"unique_together:feed_guid"`
+    GUID string `json:"guid" den:"unique_together:feed_guid"`
+    Body string `json:"body"`
+}
+```
+
+This creates a composite unique index on `(feed, guid)` -- the combination must be unique, but individual values can repeat. The group name (`feed_guid`) becomes part of the index name: `idx_entry_feed_guid`.
+
+For non-unique composite indexes, use `index_together`:
+
+```go
+type Event struct {
+    document.Base
+    UserID string `json:"user_id" den:"index_together:user_date"`
+    Date   string `json:"date"    den:"index_together:user_date"`
+}
+```
+
+=== "SQLite"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_feed_guid
+        ON entry(json_extract(data, '$.feed'), json_extract(data, '$.guid'))
+        WHERE json_extract(data, '$.feed') IS NOT NULL
+          AND json_extract(data, '$.guid') IS NOT NULL;
+    ```
+
+=== "PostgreSQL"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_feed_guid
+        ON entry((data->>'feed'), (data->>'guid'))
+        WHERE data->>'feed' IS NOT NULL
+          AND data->>'guid' IS NOT NULL;
+    ```
+
 ### Via Settings (Compound Indexes)
 
-For multi-field indexes, use `DenSettings()`:
+Alternatively, use `DenSettings()` for programmatic index definitions:
 
 ```go
 func (p Product) DenSettings() den.Settings {
     return den.Settings{
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
+            {Name: "idx_tenant_sku", Fields: []string{"tenant_id", "sku"}, Unique: true},
         },
     }
 }
 ```
 
 !!! tip
-    Struct tag indexes are best for single-field indexes. Use `DenSettings().Indexes` when you need compound indexes spanning multiple fields.
+    Prefer `unique_together`/`index_together` struct tags for most cases -- they're declarative and co-located with the fields. Use `DenSettings().Indexes` when you need full control over index names or when the index definition doesn't map cleanly to struct fields.
 
 ## Nullable Unique Constraints
 

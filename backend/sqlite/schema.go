@@ -34,10 +34,14 @@ func createExpressionIndex(ctx context.Context, db *sql.DB, collection string, i
 		uniqueStr = "UNIQUE "
 	}
 
-	// For nullable unique indexes, add a WHERE clause
+	// For unique indexes, add a WHERE clause excluding NULLs
 	whereClause := ""
-	if idx.Unique && len(idx.Fields) == 1 {
-		whereClause = fmt.Sprintf(" WHERE json_extract(data, '$.%s') IS NOT NULL", idx.Fields[0])
+	if idx.Unique {
+		parts := make([]string, len(idx.Fields))
+		for i, f := range idx.Fields {
+			parts[i] = fmt.Sprintf("json_extract(data, '$.%s') IS NOT NULL", f)
+		}
+		whereClause = " WHERE " + strings.Join(parts, " AND ")
 	}
 
 	query := fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %q ON %q(%s)%s",

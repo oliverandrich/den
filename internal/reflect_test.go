@@ -35,6 +35,14 @@ type noTagDoc struct {
 	Count int
 }
 
+type compositeDoc struct {
+	testBase
+	UserID string `json:"user_id" den:"unique_together:user_name"`
+	Name   string `json:"name" den:"unique_together:user_name"`
+	FeedID string `json:"feed_id" den:"index_together:feed_date"`
+	Date   string `json:"date" den:"index_together:feed_date"`
+}
+
 type softBase struct {
 	DeletedAt *time.Time `json:"_deleted_at,omitempty"`
 	testBase
@@ -57,6 +65,11 @@ func TestParseDenTag(t *testing.T) {
 		{"fts", "fts", TagOptions{FTS: true}},
 		{"multiple", "index,fts", TagOptions{Index: true, FTS: true}},
 		{"all", "index,unique,fts", TagOptions{Index: true, Unique: true, FTS: true}},
+		{"unique_together", "unique_together:feed_guid", TagOptions{UniqueTogether: "feed_guid"}},
+		{"index_together", "index_together:user_feed", TagOptions{IndexTogether: "user_feed"}},
+		{"unique_together with index", "index,unique_together:composite", TagOptions{Index: true, UniqueTogether: "composite"}},
+		{"index_together with fts", "fts,index_together:group1", TagOptions{FTS: true, IndexTogether: "group1"}},
+		{"unknown tag ignored", "nonsense", TagOptions{}},
 	}
 
 	for _, tt := range tests {
@@ -185,6 +198,32 @@ func TestAnalyzeStruct(t *testing.T) {
 		unique := info.UniqueFields()
 		assert.Len(t, unique, 1)
 		assert.Equal(t, "sku", unique[0].JSONName)
+	})
+
+	t.Run("unique_together fields", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[compositeDoc]())
+		require.NoError(t, err)
+
+		userIDField := info.FieldByName("user_id")
+		require.NotNil(t, userIDField)
+		assert.Equal(t, "user_name", userIDField.Options.UniqueTogether)
+
+		nameField := info.FieldByName("name")
+		require.NotNil(t, nameField)
+		assert.Equal(t, "user_name", nameField.Options.UniqueTogether)
+	})
+
+	t.Run("index_together fields", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[compositeDoc]())
+		require.NoError(t, err)
+
+		feedIDField := info.FieldByName("feed_id")
+		require.NotNil(t, feedIDField)
+		assert.Equal(t, "feed_date", feedIDField.Options.IndexTogether)
+
+		dateField := info.FieldByName("date")
+		require.NotNil(t, dateField)
+		assert.Equal(t, "feed_date", dateField.Options.IndexTogether)
 	})
 }
 

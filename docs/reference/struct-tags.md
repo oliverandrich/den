@@ -45,6 +45,8 @@ The `den` tag carries Den-specific metadata. It does **not** set the field name 
 | `unique` | Create a unique index on this field | `den:"unique"` |
 | `fts` | Include this field in full-text search | `den:"fts"` |
 | `omitempty` | Omit this field from storage when zero-valued | `den:"omitempty"` |
+| `unique_together:group` | Composite unique index — fields with the same group name | `den:"unique_together:feed_guid"` |
+| `index_together:group` | Composite index (non-unique) — fields with the same group name | `den:"index_together:user_date"` |
 
 Options can be combined with commas:
 
@@ -78,6 +80,33 @@ type User struct {
 ```
 
 Both backends implement this as a partial unique index (`WHERE ... IS NOT NULL`).
+
+### Composite Unique Constraints
+
+Use `unique_together` to enforce uniqueness across multiple fields. Fields sharing the same group name form a single composite unique index:
+
+```go
+type Entry struct {
+    document.Base
+    Feed string `json:"feed" den:"unique_together:feed_guid"`
+    GUID string `json:"guid" den:"unique_together:feed_guid"`
+    Body string `json:"body"`
+}
+```
+
+The combination `(feed, guid)` must be unique, but individual values can repeat. The group name (`feed_guid`) becomes part of the index name: `idx_entry_feed_guid`.
+
+For non-unique composite indexes, use `index_together`:
+
+```go
+type Event struct {
+    document.Base
+    UserID string `json:"user_id" den:"index_together:user_date"`
+    Date   string `json:"date"    den:"index_together:user_date"`
+}
+```
+
+Composite unique indexes include a `WHERE ... IS NOT NULL` clause for all participating fields, matching the behavior of single-field nullable unique constraints.
 
 ---
 

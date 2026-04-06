@@ -4,6 +4,13 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.5.0 — 2026-04-06
+
+### Added
+
+- **Composite indexes via struct tags** — `den:"unique_together:group"` and `den:"index_together:group"` allow declarative multi-field indexes. Fields sharing a group name are combined into a single composite index. Both SQLite and PostgreSQL backends generate correct partial indexes with NULL-exclusion WHERE clauses
+- **Settings.Indexes now wired up** — `DenSettings().Indexes` was previously declared but never applied during `Register()`. Custom `IndexDefinition` entries are now merged into the collection metadata and created as actual database indexes
+
 ## 0.4.2 — 2026-04-06
 
 ### Added

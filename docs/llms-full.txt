@@ -355,6 +355,8 @@ Available `den` tag options:
 | `unique` | Creates a unique index on this field |
 | `fts` | Includes this field in full-text search |
 | `omitempty` | Omits the field from storage when it has a zero value |
+| `unique_together:group` | Groups fields into a composite unique index by group name |
+| `index_together:group` | Groups fields into a composite non-unique index by group name |
 
 ```go
 type Product struct {
@@ -457,21 +459,36 @@ type Product struct {
 }
 ```
 
+### Via Struct Tags (Compound Indexes)
+
+For multi-field indexes, use `unique_together` or `index_together` with a shared group name:
+
+```go
+type Entry struct {
+    document.Base
+    Feed string `json:"feed" den:"unique_together:feed_guid"`
+    GUID string `json:"guid" den:"unique_together:feed_guid"`
+}
+```
+
+This creates a composite unique index on `(feed, guid)`. The group name becomes part of the index name: `idx_entry_feed_guid`. For non-unique composite indexes, use `index_together`.
+
 ### Via Settings (Compound Indexes)
 
-For multi-field indexes, use `DenSettings()`:
+Alternatively, use `DenSettings()` for programmatic index definitions:
 
 ```go
 func (p Product) DenSettings() den.Settings {
     return den.Settings{
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
+            {Name: "idx_tenant_sku", Fields: []string{"tenant_id", "sku"}, Unique: true},
         },
     }
 }
 ```
 
-Struct tag indexes are best for single-field indexes. Use `DenSettings().Indexes` when you need compound indexes spanning multiple fields.
+Prefer `unique_together`/`index_together` struct tags for most cases. Use `DenSettings().Indexes` when you need full control over index names.
 
 ## Nullable Unique Constraints
 
@@ -2845,6 +2862,18 @@ type Product struct {
 }
 ```
 
+### Via Struct Tags (compound indexes)
+
+```go
+type Entry struct {
+    document.Base
+    Feed string `json:"feed" den:"unique_together:feed_guid"`
+    GUID string `json:"guid" den:"unique_together:feed_guid"`
+}
+```
+
+Fields sharing a group name are combined into one composite index. Use `index_together:group` for non-unique composites.
+
 ### Via Settings (compound indexes)
 
 ```go
@@ -2852,9 +2881,10 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
+            {Name: "idx_tenant_sku", Fields: []string{"tenant_id", "sku"}, Unique: true},
         },
     }
 }
 ```
 
-Both approaches are additive. Struct tag indexes and Settings indexes are created together during registration.
+All approaches are additive. Struct tag indexes, composite tag indexes, and Settings indexes are created together during registration.

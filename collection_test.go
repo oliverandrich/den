@@ -109,6 +109,122 @@ func TestRegister_CustomCollectionName(t *testing.T) {
 	assert.Contains(t, names, "custom_docs")
 }
 
+// -- Composite index tests --
+
+type CompositeUniqueDoc struct {
+	document.Base
+	UserID string `json:"user_id" den:"unique_together:user_name"`
+	Name   string `json:"name" den:"unique_together:user_name"`
+}
+
+type CompositeIndexDoc struct {
+	document.Base
+	FeedID string `json:"feed_id" den:"index_together:feed_date"`
+	Date   string `json:"date" den:"index_together:feed_date"`
+}
+
+type SettingsIndexDoc struct {
+	document.Base
+	TenantID string `json:"tenant_id"`
+	Email    string `json:"email"`
+}
+
+func (d SettingsIndexDoc) DenSettings() den.Settings {
+	return den.Settings{
+		Indexes: []den.IndexDefinition{{
+			Name:   "idx_settingsindexdoc_tenant_email",
+			Fields: []string{"tenant_id", "email"},
+			Unique: true,
+		}},
+	}
+}
+
+func TestRegister_CompositeUniqueIndex(t *testing.T) {
+	db := dentest.MustOpen(t, &CompositeUniqueDoc{})
+
+	meta, err := den.Meta[CompositeUniqueDoc](db)
+	require.NoError(t, err)
+
+	// Should have one composite unique index
+	var found *den.IndexDefinition
+	for i := range meta.Indexes {
+		if meta.Indexes[i].Name == "idx_compositeuniquedoc_user_name" {
+			found = &meta.Indexes[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "composite unique index should exist")
+	assert.True(t, found.Unique)
+	assert.Equal(t, []string{"user_id", "name"}, found.Fields)
+}
+
+func TestRegister_CompositeUniqueIndex_EnforcesDuplicates(t *testing.T) {
+	db := dentest.MustOpen(t, &CompositeUniqueDoc{})
+	ctx := context.Background()
+
+	doc1 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
+	require.NoError(t, den.Insert(ctx, db, doc1))
+
+	// Same composite key → ErrDuplicate
+	doc2 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
+	err := den.Insert(ctx, db, doc2)
+	require.ErrorIs(t, err, den.ErrDuplicate)
+
+	// Different user, same name → OK
+	doc3 := &CompositeUniqueDoc{UserID: "user2", Name: "alice"}
+	require.NoError(t, den.Insert(ctx, db, doc3))
+
+	// Same user, different name → OK
+	doc4 := &CompositeUniqueDoc{UserID: "user1", Name: "bob"}
+	require.NoError(t, den.Insert(ctx, db, doc4))
+}
+
+func TestRegister_CompositeNonUniqueIndex(t *testing.T) {
+	db := dentest.MustOpen(t, &CompositeIndexDoc{})
+
+	meta, err := den.Meta[CompositeIndexDoc](db)
+	require.NoError(t, err)
+
+	var found *den.IndexDefinition
+	for i := range meta.Indexes {
+		if meta.Indexes[i].Name == "idx_compositeindexdoc_feed_date" {
+			found = &meta.Indexes[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "composite non-unique index should exist")
+	assert.False(t, found.Unique)
+	assert.Equal(t, []string{"feed_id", "date"}, found.Fields)
+}
+
+func TestRegister_SettingsIndexes(t *testing.T) {
+	db := dentest.MustOpen(t, &SettingsIndexDoc{})
+	ctx := context.Background()
+
+	meta, err := den.Meta[SettingsIndexDoc](db)
+	require.NoError(t, err)
+
+	// Should have the custom composite unique index from Settings
+	var found *den.IndexDefinition
+	for i := range meta.Indexes {
+		if meta.Indexes[i].Name == "idx_settingsindexdoc_tenant_email" {
+			found = &meta.Indexes[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "settings-defined composite index should exist")
+	assert.True(t, found.Unique)
+	assert.Equal(t, []string{"tenant_id", "email"}, found.Fields)
+
+	// Enforce uniqueness
+	doc1 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
+	require.NoError(t, den.Insert(ctx, db, doc1))
+
+	doc2 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
+	err = den.Insert(ctx, db, doc2)
+	require.ErrorIs(t, err, den.ErrDuplicate)
+}
+
 func TestPing(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{})
 	err := db.Ping(context.Background())

@@ -44,8 +44,12 @@ func createExpressionIndex(ctx context.Context, pool *pgxpool.Pool, collection s
 	}
 
 	whereClause := ""
-	if idx.Unique && len(idx.Fields) == 1 {
-		whereClause = fmt.Sprintf(" WHERE data->>'%s' IS NOT NULL", idx.Fields[0])
+	if idx.Unique {
+		parts := make([]string, len(idx.Fields))
+		for i, f := range idx.Fields {
+			parts[i] = fmt.Sprintf("data->>'%s' IS NOT NULL", f)
+		}
+		whereClause = " WHERE " + strings.Join(parts, " AND ")
 	}
 
 	query := fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %s ON %s(%s)%s",

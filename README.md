@@ -8,9 +8,11 @@
 
 <p align="center">
   <a href="https://github.com/oliverandrich/den/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/oliverandrich/den/ci.yml?branch=main&label=CI&style=for-the-badge" alt="CI"></a>
+  <a href="https://github.com/oliverandrich/den/releases"><img src="https://img.shields.io/github/v/release/oliverandrich/den?style=for-the-badge" alt="Release"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/github/go-mod/go-version/oliverandrich/den?style=for-the-badge" alt="Go Version"></a>
   <a href="https://goreportcard.com/report/github.com/oliverandrich/den"><img src="https://goreportcard.com/badge/github.com/oliverandrich/den?style=for-the-badge" alt="Go Report Card"></a>
   <a href="/LICENSE"><img src="https://img.shields.io/github/license/oliverandrich/den?style=for-the-badge" alt="License"></a>
+  <a href="https://den-odm.readthedocs.io/"><img src="https://img.shields.io/badge/docs-den--odm.readthedocs.io-blue?style=for-the-badge" alt="Docs"></a>
 </p>
 
 An ODM for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine.

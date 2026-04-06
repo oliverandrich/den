@@ -46,6 +46,49 @@ func TestOpen_InvalidURL(t *testing.T) {
 	}
 }
 
+func TestCheckVersion(t *testing.T) {
+	b := openTestDB(t)
+	pg := b.(*backend)
+
+	ver, err := serverVersion(context.Background(), pg.pool)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, ver, minPGVersion, "local PostgreSQL must be >= %d", minPGVersion)
+}
+
+func TestCheckVersion_TooOld(t *testing.T) {
+	err := checkMinVersion(120004)
+	require.ErrorContains(t, err, "den requires PostgreSQL 13 or later")
+	require.ErrorContains(t, err, "got 12.4")
+}
+
+func TestCheckVersion_Minimum(t *testing.T) {
+	assert.NoError(t, checkMinVersion(130000))
+}
+
+func TestCheckVersion_Newer(t *testing.T) {
+	assert.NoError(t, checkMinVersion(160002))
+}
+
+func TestParseVersionNum(t *testing.T) {
+	tests := []struct {
+		num        int
+		wantMajor  int
+		wantMinor  int
+		wantString string
+	}{
+		{130005, 13, 5, "13.5"},
+		{160002, 16, 2, "16.2"},
+		{120004, 12, 4, "12.4"},
+		{100023, 10, 23, "10.23"},
+	}
+	for _, tt := range tests {
+		major, minor := parseVersionNum(tt.num)
+		assert.Equal(t, tt.wantMajor, major)
+		assert.Equal(t, tt.wantMinor, minor)
+		assert.Equal(t, tt.wantString, formatVersion(major, minor))
+	}
+}
+
 func TestGetNotFound(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

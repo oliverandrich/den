@@ -31,11 +31,24 @@ type backend struct {
 }
 
 // Open connects to a PostgreSQL database using the given connection string.
+// It verifies that the server version meets the minimum requirement.
 func Open(connString string) (den.Backend, error) {
-	pool, err := pgxpool.New(context.Background(), connString)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("postgres open: %w", err)
 	}
+
+	versionNum, err := serverVersion(ctx, pool)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres open: %w", err)
+	}
+	if err := checkMinVersion(versionNum); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres open: %w", err)
+	}
+
 	return &backend{pool: pool}, nil
 }
 

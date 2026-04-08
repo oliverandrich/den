@@ -49,16 +49,18 @@ type Validator interface {
 
 ## Execution Order
 
+Mutating hooks always run **before** validation so that a hook can populate default values, compute derived fields, or normalize inputs before any constraint check. Validation then sees the final document that will actually be persisted.
+
 ### Insert
 
 ```
-Validate() -> BeforeInsert() -> BeforeSave() -> [write to DB] -> AfterInsert() -> AfterSave()
+BeforeInsert() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB] -> AfterInsert() -> AfterSave()
 ```
 
 ### Update
 
 ```
-Validate() -> BeforeUpdate() -> BeforeSave() -> [write to DB] -> AfterUpdate() -> AfterSave()
+BeforeUpdate() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB] -> AfterUpdate() -> AfterSave()
 ```
 
 ### Delete
@@ -67,7 +69,10 @@ Validate() -> BeforeUpdate() -> BeforeSave() -> [write to DB] -> AfterUpdate() -
 BeforeDelete() -> [delete from DB] -> AfterDelete()
 ```
 
-If any `Before*` hook or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
+If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
+
+!!! note
+    Tag validation (configured via `validate.WithValidation()`) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
 
 ## Example: Article with Hooks
 
@@ -109,13 +114,34 @@ article := &Article{
 }
 
 err := den.Insert(ctx, db, article)
-// 1. Validate() -- checks title and body are non-empty
-// 2. BeforeInsert() -- not implemented, skipped
-// 3. BeforeSave() -- sets slug="getting-started-with-den", word_count=6
+// 1. BeforeInsert() -- not implemented, skipped
+// 2. BeforeSave() -- sets slug="getting-started-with-den", word_count=6
+// 3. Validate() -- checks title and body are non-empty (sees the final document)
 // 4. Write to database
 // 5. AfterInsert() -- not implemented, skipped
 // 6. AfterSave() -- not implemented, skipped
 ```
+
+### Defaulting before validation
+
+Because mutating hooks run before validation, you can use `BeforeInsert` to populate a default value for a field that validation requires:
+
+```go
+type Page struct {
+    document.Base
+    Title string `json:"title"`
+    Slug  string `json:"slug" validate:"required"`
+}
+
+func (p *Page) BeforeInsert(ctx context.Context) error {
+    if p.Slug == "" {
+        p.Slug = slugify(p.Title)
+    }
+    return nil
+}
+```
+
+A `Page` can be inserted with only `Title` set — the hook populates `Slug`, then tag validation passes because `Slug` is now non-empty.
 
 ## Aborting an Operation
 

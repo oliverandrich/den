@@ -31,13 +31,23 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		}
 	}
 
+	// Mutating hooks run first so they can populate defaults, compute
+	// derived fields, and normalize values before validation sees them.
+	if err := runBeforeInsertHooks(ctx, document); err != nil {
+		return err
+	}
+
+	// Tag-based validation runs after the mutating hooks so declarative
+	// constraints are checked against the final document state.
 	if db.tagValidator != nil {
 		if err := db.tagValidator(document); err != nil {
 			return fmt.Errorf("%w: %w", ErrValidation, err)
 		}
 	}
 
-	if err := runBeforeInsertHooks(ctx, document); err != nil {
+	// Custom Validator.Validate() runs last so it can perform cross-field
+	// checks against the same post-hook state.
+	if err := runValidationHooks(ctx, document); err != nil {
 		return err
 	}
 
@@ -126,13 +136,23 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		return fmt.Errorf("den: cannot update document without ID")
 	}
 
+	// Mutating hooks run first so they can populate defaults, compute
+	// derived fields, and normalize values before validation sees them.
+	if err := runBeforeUpdateHooks(ctx, document); err != nil {
+		return err
+	}
+
+	// Tag-based validation runs after the mutating hooks so declarative
+	// constraints are checked against the final document state.
 	if db.tagValidator != nil {
 		if err := db.tagValidator(document); err != nil {
 			return fmt.Errorf("%w: %w", ErrValidation, err)
 		}
 	}
 
-	if err := runBeforeUpdateHooks(ctx, document); err != nil {
+	// Custom Validator.Validate() runs last so it can perform cross-field
+	// checks against the same post-hook state.
+	if err := runValidationHooks(ctx, document); err != nil {
 		return err
 	}
 

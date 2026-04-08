@@ -53,12 +53,20 @@ type User struct {
 
 ## Execution Order
 
-When both mechanisms are enabled, they run in this order during `Insert` and `Update`:
+Both validation mechanisms run **after** any mutating `BeforeInsert` / `BeforeUpdate` / `BeforeSave` hook, so hooks can populate default values, compute derived fields, or normalize inputs before the constraints are checked.
 
-1. Struct tag validation (`validate` tags)
-2. `Validate()` hook (business logic)
+The full order during `Insert` and `Update`:
 
-If tag validation fails, the `Validate()` hook is not called.
+1. `BeforeInsert` / `BeforeUpdate` hook (mutating)
+2. `BeforeSave` hook (mutating, runs on both insert and update)
+3. Struct tag validation (`validate` tags)
+4. `Validate()` hook (custom business logic)
+5. Write to the database
+
+If tag validation fails, the `Validate()` hook is not called. Either step aborts the write and rolls back the transaction.
+
+!!! note
+    This is the same pattern used by ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state. It lets you write things like "`BeforeInsert` generates the slug from the title; tag validation then requires the slug to be non-empty" without fighting the framework.
 
 ## Error Handling
 

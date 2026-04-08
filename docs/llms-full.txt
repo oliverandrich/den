@@ -534,7 +534,7 @@ err := den.Insert(ctx, db, p)
 // p.CreatedAt and p.UpdatedAt are set automatically
 ```
 
-Insert triggers the full lifecycle hook chain: `Validate` -> `BeforeInsert` -> `BeforeSave` -> write -> `AfterInsert` -> `AfterSave`. If any `Before*` hook returns an error, the insert is aborted.
+Insert triggers the full lifecycle hook chain: `BeforeInsert` -> `BeforeSave` -> tag validation -> `Validate` -> write -> `AfterInsert` -> `AfterSave`. Mutating hooks run before validation so they can populate defaults. If any hook or validation step returns an error, the insert is aborted.
 
 ### InsertMany
 
@@ -1659,16 +1659,18 @@ type Validator interface {
 
 ## Execution Order
 
+Mutating hooks run **before** validation so hooks can populate default values, compute derived fields, or normalize inputs before constraints are checked.
+
 ### Insert
 
 ```
-Validate() -> BeforeInsert() -> BeforeSave() -> [write to DB] -> AfterInsert() -> AfterSave()
+BeforeInsert() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB] -> AfterInsert() -> AfterSave()
 ```
 
 ### Update
 
 ```
-Validate() -> BeforeUpdate() -> BeforeSave() -> [write to DB] -> AfterUpdate() -> AfterSave()
+BeforeUpdate() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB] -> AfterUpdate() -> AfterSave()
 ```
 
 ### Delete
@@ -1677,7 +1679,9 @@ Validate() -> BeforeUpdate() -> BeforeSave() -> [write to DB] -> AfterUpdate() -
 BeforeDelete() -> [delete from DB] -> AfterDelete()
 ```
 
-If any `Before*` hook or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
+If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
+
+This matches ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state.
 
 ## Example: Article with Hooks
 
@@ -2062,12 +2066,19 @@ Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag valida
 
 ## Execution Order
 
-When both mechanisms are enabled, they run in this order during `Insert` and `Update`:
+Both validation mechanisms run **after** any mutating `BeforeInsert` / `BeforeUpdate` / `BeforeSave` hook, so hooks can populate default values, compute derived fields, or normalize inputs before the constraints are checked.
 
-1. Struct tag validation (`validate` tags)
-2. `Validate()` hook (business logic)
+The full order during `Insert` and `Update`:
 
-If tag validation fails, the `Validate()` hook is not called.
+1. `BeforeInsert` / `BeforeUpdate` hook (mutating)
+2. `BeforeSave` hook (mutating, runs on both insert and update)
+3. Struct tag validation (`validate` tags)
+4. `Validate()` hook (custom business logic)
+5. Write to the database
+
+If tag validation fails, the `Validate()` hook is not called. Either step aborts the write and rolls back the transaction.
+
+This matches ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state.
 
 ## Error Handling
 

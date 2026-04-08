@@ -38,6 +38,23 @@ func (d *CustomValidatorDoc) Validate() error {
 	return nil
 }
 
+// DefaultingTagDoc exercises the post-v0.6.0 hook order with tag-based
+// validation: a BeforeInsert hook populates a field that a validate tag
+// marks as required. Before the reorder, tag validation ran before the
+// hook and this would fail.
+type DefaultingTagDoc struct {
+	document.Base
+	Name string `json:"name"`
+	Slug string `json:"slug" validate:"required"`
+}
+
+func (d *DefaultingTagDoc) BeforeInsert(_ context.Context) error {
+	if d.Slug == "" {
+		d.Slug = "auto-" + d.Name
+	}
+	return nil
+}
+
 func mustOpenSQLite(t *testing.T, opts ...den.Option) *den.DB {
 	t.Helper()
 	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
@@ -155,6 +172,21 @@ func TestBothTagAndInterfaceValidation(t *testing.T) {
 	doc = &CustomValidatorDoc{Name: "allowed"}
 	err = den.Insert(ctx, db, doc)
 	require.NoError(t, err)
+}
+
+// TestBeforeInsertPopulatesRequiredTagField regresses the pre-v0.6.0 order
+// bug: tag validation must run AFTER BeforeInsert/BeforeSave hooks so that
+// a hook can populate a default value for a field marked as required.
+func TestBeforeInsertPopulatesRequiredTagField(t *testing.T) {
+	db := mustOpenSQLite(t, validate.WithValidation())
+	ctx := context.Background()
+	require.NoError(t, den.Register(ctx, db, DefaultingTagDoc{}))
+
+	// Slug is required, but the BeforeInsert hook populates it from Name.
+	doc := &DefaultingTagDoc{Name: "Hello"}
+	err := den.Insert(ctx, db, doc)
+	require.NoError(t, err)
+	assert.Equal(t, "auto-Hello", doc.Slug)
 }
 
 func TestInsertManyRollsBackOnValidationError(t *testing.T) {

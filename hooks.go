@@ -43,14 +43,11 @@ type Validator interface {
 	Validate() error
 }
 
-// runInsertHooks runs validation and before-hooks for insert.
-// Returns an error if any hook fails (caller should abort the insert).
+// runBeforeInsertHooks runs the mutating before-hooks for insert in order:
+// BeforeInsert first, then BeforeSave. Validation runs separately via
+// runValidationHooks after these have populated any defaults or computed
+// fields, so the validator sees the final document that will be written.
 func runBeforeInsertHooks(ctx context.Context, doc any) error {
-	if v, ok := doc.(Validator); ok {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
 	if h, ok := doc.(BeforeInserter); ok {
 		if err := h.BeforeInsert(ctx); err != nil {
 			return err
@@ -59,6 +56,20 @@ func runBeforeInsertHooks(ctx context.Context, doc any) error {
 	if h, ok := doc.(BeforeSaver); ok {
 		if err := h.BeforeSave(ctx); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// runValidationHooks runs the custom Validator.Validate() method, if any.
+// This runs after BeforeInsert/BeforeUpdate/BeforeSave hooks so that the
+// validator sees the final, fully-populated document. Tag-based validation
+// (via DB.tagValidator) is invoked separately in the CRUD functions so that
+// both declarative and custom validation see the same post-hook state.
+func runValidationHooks(_ context.Context, doc any) error {
+	if v, ok := doc.(Validator); ok {
+		if err := v.Validate(); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
 		}
 	}
 	return nil
@@ -78,12 +89,10 @@ func runAfterInsertHooks(ctx context.Context, doc any) error {
 	return nil
 }
 
+// runBeforeUpdateHooks runs the mutating before-hooks for update in order:
+// BeforeUpdate first, then BeforeSave. Validation runs separately via
+// runValidationHooks after these have populated any computed fields.
 func runBeforeUpdateHooks(ctx context.Context, doc any) error {
-	if v, ok := doc.(Validator); ok {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
 	if h, ok := doc.(BeforeUpdater); ok {
 		if err := h.BeforeUpdate(ctx); err != nil {
 			return err

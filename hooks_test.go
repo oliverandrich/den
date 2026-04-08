@@ -46,6 +46,29 @@ type BeforeInsertDoc struct {
 	Touched bool   `json:"touched"`
 }
 
+// DefaultingDoc exercises the post-0.6.0 hook order: a BeforeInsert hook
+// populates a field that the custom Validator.Validate() method requires.
+// Before the reorder, validation ran before the hook and this would fail.
+type DefaultingDoc struct {
+	document.Base
+	Title string `json:"title"`
+	Slug  string `json:"slug"`
+}
+
+func (d *DefaultingDoc) BeforeInsert(_ context.Context) error {
+	if d.Slug == "" {
+		d.Slug = "auto-" + d.Title
+	}
+	return nil
+}
+
+func (d *DefaultingDoc) Validate() error {
+	if d.Slug == "" {
+		return errors.New("slug is required")
+	}
+	return nil
+}
+
 func (d *BeforeInsertDoc) BeforeInsert(_ context.Context) error {
 	d.Touched = true
 	return nil
@@ -257,6 +280,42 @@ func TestValidateOnSave_Valid(t *testing.T) {
 
 	v := &Validated{Name: "OK"}
 	require.NoError(t, den.Insert(ctx, db, v))
+}
+
+// TestBeforeInsertPopulatesFieldForValidate regresses the pre-v0.6.0 bug
+// where validation ran before mutating hooks, making it impossible for a
+// BeforeInsert hook to populate a field that the custom Validate() method
+// required. The new order is: BeforeInsert → BeforeSave → Validate.
+func TestBeforeInsertPopulatesFieldForValidate(t *testing.T) {
+	db := dentest.MustOpen(t, &DefaultingDoc{})
+	ctx := context.Background()
+
+	// Title is set, Slug is not. The BeforeInsert hook will populate Slug
+	// from Title. Validate() requires Slug to be non-empty. If the hook
+	// order is correct, the insert succeeds.
+	d := &DefaultingDoc{Title: "Hello"}
+	require.NoError(t, den.Insert(ctx, db, d))
+	assert.Equal(t, "auto-Hello", d.Slug)
+}
+
+// TestUpdateHookOrderRunsBeforeValidate is the update-path analogue:
+// BeforeSave on update recomputes the slug, and Validate() sees the new
+// value.
+func TestUpdateHookOrderRunsBeforeValidate(t *testing.T) {
+	db := dentest.MustOpen(t, &DefaultingDoc{})
+	ctx := context.Background()
+
+	d := &DefaultingDoc{Title: "First"}
+	require.NoError(t, den.Insert(ctx, db, d))
+
+	// Clear the slug; without the hook order fix, Validate would fail.
+	// With the fix, BeforeSave (which DefaultingDoc does not have) would
+	// run first. Since DefaultingDoc only implements BeforeInsert (not
+	// BeforeSave or BeforeUpdate), Update with an empty slug must fail.
+	d.Slug = ""
+	err := den.Update(ctx, db, d)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, den.ErrValidation)
 }
 
 func TestBeforeInsert_Hook(t *testing.T) {

@@ -145,21 +145,63 @@ func (qs QuerySet[T]) Exists() (bool, error) {
 
 // AllWithCount returns matching documents and the total unpaginated count.
 func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
-	unpaginated := qs
-	unpaginated.limitN = 0
-	unpaginated.skipN = 0
-	unpaginated.sortFields = nil
-	unpaginated.afterID = ""
-	unpaginated.beforeID = ""
-
-	total, err := unpaginated.Count()
+	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	results, err := qs.All()
+	// Build both queries upfront
+	countQS := qs
+	countQS.limitN = 0
+	countQS.skipN = 0
+	countQS.sortFields = nil
+	countQS.afterID = ""
+	countQS.beforeID = ""
+	countQ := countQS.buildBackendQuery(col)
+	dataQ := qs.buildBackendQuery(col)
+
+	// Run Count + Query in a single read transaction for consistency
+	tx, err := qs.db.backend.Begin(qs.ctx, false)
+	if err != nil {
+		return nil, 0, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	total, err := tx.Count(qs.ctx, col.meta.Name, countQ)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	iter, err := tx.Query(qs.ctx, col.meta.Name, dataQ)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = iter.Close() }()
+
+	enc := qs.db.getEncoder()
+	var results []*T
+	for iter.Next() {
+		item := new(T)
+		rawBytes := make([]byte, len(iter.Bytes()))
+		copy(rawBytes, iter.Bytes())
+		if err := enc.Decode(rawBytes, item); err != nil {
+			return nil, 0, fmt.Errorf("decode: %w", err)
+		}
+		captureSnapshot(rawBytes, item)
+
+		if qs.fetchLinks {
+			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, item, qs.nestDepth); err != nil {
+				return nil, 0, err
+			}
+		}
+		results = append(results, item)
+	}
+	if err := iter.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, 0, fmt.Errorf("%w: %w", ErrTransactionFailed, err)
 	}
 
 	return results, total, nil

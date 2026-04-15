@@ -177,75 +177,13 @@ func (qs QuerySet[T]) GroupBy(field string) GroupByBuilder[T] {
 }
 
 // Into executes the group-by aggregation and maps results into the target slice.
+// The query is pushed down to the database as a SQL GROUP BY statement.
 func (gb GroupByBuilder[T]) Into(target any) error {
 	col, err := collectionFor[T](gb.qs.db)
 	if err != nil {
 		return err
 	}
 
-	q := gb.qs.buildBackendQuery(col)
-	iter, err := gb.qs.db.backend.Query(gb.qs.ctx, col.meta.Name, q)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = iter.Close() }()
-
-	enc := gb.qs.db.getEncoder()
-	groups := make(map[any]*groupAcc)
-	fieldParts := strings.Split(gb.field, ".")
-
-	for iter.Next() {
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
-		var docMap map[string]any
-		if err := enc.Decode(rawBytes, &docMap); err != nil {
-			return fmt.Errorf("decode for group-by: %w", err)
-		}
-
-		rawGroupVal := resolveMapFieldParts(docMap, fieldParts)
-		// Ensure the group key is hashable (nested objects/arrays are not).
-		groupVal := toHashableKey(rawGroupVal)
-		acc, ok := groups[groupVal]
-		if !ok {
-			acc = &groupAcc{
-				sums:   make(map[string]float64),
-				counts: make(map[string]int64),
-				mins:   make(map[string]float64),
-				maxs:   make(map[string]float64),
-			}
-			groups[groupVal] = acc
-		}
-		acc.total++
-
-		for k, v := range docMap {
-			if f, ok := toFloat(v); ok {
-				acc.sums[k] += f
-				acc.counts[k]++
-				if existing, exists := acc.mins[k]; !exists || f < existing {
-					acc.mins[k] = f
-				}
-				if existing, exists := acc.maxs[k]; !exists || f > existing {
-					acc.maxs[k] = f
-				}
-			}
-		}
-	}
-	if err := iter.Err(); err != nil {
-		return err
-	}
-
-	return mapGroupsToTarget(groups, target)
-}
-
-type groupAcc struct {
-	sums   map[string]float64
-	counts map[string]int64
-	mins   map[string]float64
-	maxs   map[string]float64
-	total  int64
-}
-
-func mapGroupsToTarget(groups map[any]*groupAcc, target any) error {
 	rv := reflect.ValueOf(target)
 	if rv.Kind() != reflect.Pointer || rv.Elem().Kind() != reflect.Slice {
 		return fmt.Errorf("den: GroupBy.Into target must be a pointer to a slice")
@@ -255,34 +193,33 @@ func mapGroupsToTarget(groups map[any]*groupAcc, target any) error {
 	elemType := sliceVal.Type().Elem()
 	mappings := getGroupMappings(elemType)
 
-	for key, acc := range groups {
+	// Build the list of aggregate expressions from the target struct's den tags.
+	aggs, aggIndices := buildAggsFromMappings(mappings)
+
+	q := gb.qs.buildBackendQuery(col)
+	rows, err := gb.qs.db.backend.GroupBy(gb.qs.ctx, col.meta.Name, gb.field, aggs, q)
+	if err != nil {
+		return err
+	}
+
+	for _, row := range rows {
 		elem := reflect.New(elemType).Elem()
 
 		for _, m := range mappings {
 			fv := elem.Field(m.index)
 
-			switch {
-			case m.tag == "group_key":
-				if key != nil {
-					rv := reflect.ValueOf(key)
-					targetType := elemType.Field(m.index).Type
-					if rv.Type().ConvertibleTo(targetType) {
-						fv.Set(rv.Convert(targetType))
-					}
+			if m.tag == "group_key" {
+				targetType := elemType.Field(m.index).Type
+				kv := reflect.ValueOf(row.Key)
+				if kv.Type().ConvertibleTo(targetType) {
+					fv.Set(kv.Convert(targetType))
 				}
-			case m.tag == "count":
-				fv.SetInt(acc.total)
-			case strings.HasPrefix(m.tag, "avg:"):
-				fieldName := strings.TrimPrefix(m.tag, "avg:")
-				if acc.counts[fieldName] > 0 {
-					fv.SetFloat(acc.sums[fieldName] / float64(acc.counts[fieldName]))
+			} else if idx, ok := aggIndices[m.tag]; ok {
+				if m.tag == "count" {
+					fv.SetInt(int64(row.Values[idx]))
+				} else {
+					fv.SetFloat(row.Values[idx])
 				}
-			case strings.HasPrefix(m.tag, "sum:"):
-				fv.SetFloat(acc.sums[strings.TrimPrefix(m.tag, "sum:")])
-			case strings.HasPrefix(m.tag, "min:"):
-				fv.SetFloat(acc.mins[strings.TrimPrefix(m.tag, "min:")])
-			case strings.HasPrefix(m.tag, "max:"):
-				fv.SetFloat(acc.maxs[strings.TrimPrefix(m.tag, "max:")])
 			}
 		}
 
@@ -293,17 +230,35 @@ func mapGroupsToTarget(groups map[any]*groupAcc, target any) error {
 	return nil
 }
 
-// toHashableKey converts a value to a type safe for use as a map key.
-// JSON-decoded maps and slices are not comparable; we stringify them.
-func toHashableKey(v any) any {
-	if v == nil {
-		return nil
+// buildAggsFromMappings converts den struct tags into GroupByAgg descriptors.
+// Returns the aggs and a map from tag → index in the Values slice.
+func buildAggsFromMappings(mappings []groupField) ([]GroupByAgg, map[string]int) {
+	var aggs []GroupByAgg
+	indices := make(map[string]int)
+
+	for _, m := range mappings {
+		switch {
+		case m.tag == "group_key":
+			continue
+		case m.tag == "count":
+			indices[m.tag] = len(aggs)
+			aggs = append(aggs, GroupByAgg{Op: OpCount})
+		case strings.HasPrefix(m.tag, "avg:"):
+			indices[m.tag] = len(aggs)
+			aggs = append(aggs, GroupByAgg{Op: OpAvg, Field: strings.TrimPrefix(m.tag, "avg:")})
+		case strings.HasPrefix(m.tag, "sum:"):
+			indices[m.tag] = len(aggs)
+			aggs = append(aggs, GroupByAgg{Op: OpSum, Field: strings.TrimPrefix(m.tag, "sum:")})
+		case strings.HasPrefix(m.tag, "min:"):
+			indices[m.tag] = len(aggs)
+			aggs = append(aggs, GroupByAgg{Op: OpMin, Field: strings.TrimPrefix(m.tag, "min:")})
+		case strings.HasPrefix(m.tag, "max:"):
+			indices[m.tag] = len(aggs)
+			aggs = append(aggs, GroupByAgg{Op: OpMax, Field: strings.TrimPrefix(m.tag, "max:")})
+		}
 	}
-	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice {
-		return fmt.Sprintf("%v", v)
-	}
-	return v
+
+	return aggs, indices
 }
 
 func resolveMapFieldParts(doc map[string]any, parts []string) any {
@@ -316,25 +271,4 @@ func resolveMapFieldParts(doc map[string]any, parts []string) any {
 		current = m[part]
 	}
 	return current
-}
-
-func toFloat(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case float32:
-		return float64(n), true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	default:
-		return 0, false
-	}
 }

@@ -105,6 +105,37 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 	return sb.String(), args
 }
 
+func buildGroupBySQL(collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) (string, []any, error) {
+	groupExpr := jsonbPathText(groupField)
+
+	// Build SELECT: group key + aggregate expressions
+	selectParts := []string{groupExpr}
+	for _, agg := range aggs {
+		switch agg.Op {
+		case den.OpCount:
+			selectParts = append(selectParts, "COUNT(*)")
+		case den.OpSum, den.OpAvg, den.OpMin, den.OpMax:
+			expr := fmt.Sprintf("(%s)::float", jsonbPathText(agg.Field))
+			selectParts = append(selectParts, fmt.Sprintf("%s(%s)", string(agg.Op), expr))
+		default:
+			return "", nil, fmt.Errorf("den: unsupported aggregate op in group-by: %s", agg.Op)
+		}
+	}
+
+	clauses, args, _ := buildWhereClauses(q.Conditions)
+	clauses, args = appendCursorClauses(clauses, args, 1, q)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "SELECT %s FROM %s", strings.Join(selectParts, ", "), quoteIdent(collection))
+	if len(clauses) > 0 {
+		sb.WriteString(" WHERE ")
+		sb.WriteString(strings.Join(clauses, " AND "))
+	}
+	fmt.Fprintf(&sb, " GROUP BY %s", groupExpr)
+
+	return sb.String(), args, nil
+}
+
 func buildWhereClauses(conditions []where.Condition) ([]string, []any, int) {
 	var clauses []string
 	var args []any
@@ -155,7 +186,7 @@ func buildExistsSQL(collection string, q *den.Query) (string, []any) {
 }
 
 func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *den.Query) (string, []any, error) {
-	switch op {
+	switch op { //nolint:exhaustive // OpCount is only valid in GroupBy, not scalar Aggregate
 	case den.OpSum, den.OpAvg, den.OpMin, den.OpMax:
 	default:
 		return "", nil, fmt.Errorf("den: unsupported aggregate op: %s", op)

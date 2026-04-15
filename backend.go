@@ -16,6 +16,7 @@ type Backend interface {
 	Count(ctx context.Context, collection string, q *Query) (int64, error)
 	Exists(ctx context.Context, collection string, q *Query) (bool, error)
 	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
+	GroupBy(ctx context.Context, collection string, groupField string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
 
 	EnsureIndex(ctx context.Context, collection string, idx IndexDefinition) error
 	DropIndex(ctx context.Context, collection string, name string) error
@@ -35,11 +36,24 @@ type Backend interface {
 type AggregateOp string
 
 const (
-	OpSum AggregateOp = "SUM"
-	OpAvg AggregateOp = "AVG"
-	OpMin AggregateOp = "MIN"
-	OpMax AggregateOp = "MAX"
+	OpSum   AggregateOp = "SUM"
+	OpAvg   AggregateOp = "AVG"
+	OpMin   AggregateOp = "MIN"
+	OpMax   AggregateOp = "MAX"
+	OpCount AggregateOp = "COUNT"
 )
+
+// GroupByAgg describes a single aggregate expression in a GROUP BY query.
+type GroupByAgg struct {
+	Op    AggregateOp
+	Field string // source field (ignored for OpCount)
+}
+
+// GroupByRow holds one result row from a GROUP BY query.
+type GroupByRow struct {
+	Key    string    // group key value (text representation)
+	Values []float64 // aggregate values, matching GroupByAgg order
+}
 
 // ReadWriter is the common interface for both Backend and Transaction,
 // providing the core CRUD operations that all write paths need.
@@ -51,6 +65,7 @@ type ReadWriter interface {
 	Count(ctx context.Context, collection string, q *Query) (int64, error)
 	Exists(ctx context.Context, collection string, q *Query) (bool, error)
 	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
+	GroupBy(ctx context.Context, collection string, groupField string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
 }
 
 // Transaction provides CRUD operations within a transaction boundary.

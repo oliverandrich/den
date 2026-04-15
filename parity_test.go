@@ -257,6 +257,59 @@ func TestParity_NestedFieldQuery(t *testing.T) {
 	}
 }
 
+func TestParity_GroupBySQL(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "A", Price: 10, Category: "X"},
+				{Name: "B", Price: 20, Category: "X"},
+				{Name: "C", Price: 30, Category: "Y"},
+				{Name: "D", Price: 40, Category: "Y"},
+				{Name: "E", Price: 50, Category: "Y"},
+			}))
+
+			type CatStats struct {
+				Category string  `den:"group_key"`
+				Count    int64   `den:"count"`
+				AvgPrice float64 `den:"avg:price"`
+				Total    float64 `den:"sum:price"`
+				MinPrice float64 `den:"min:price"`
+				MaxPrice float64 `den:"max:price"`
+			}
+
+			var stats []CatStats
+			err := den.NewQuery[ParityProduct](ctx, db).GroupBy("category").Into(&stats)
+			require.NoError(t, err)
+			require.Len(t, stats, 2)
+
+			var x, y *CatStats
+			for i := range stats {
+				switch stats[i].Category {
+				case "X":
+					x = &stats[i]
+				case "Y":
+					y = &stats[i]
+				}
+			}
+
+			require.NotNil(t, x)
+			assert.Equal(t, int64(2), x.Count)
+			assert.InDelta(t, 15.0, x.AvgPrice, 0.001)
+			assert.InDelta(t, 30.0, x.Total, 0.001)
+			assert.InDelta(t, 10.0, x.MinPrice, 0.001)
+			assert.InDelta(t, 20.0, x.MaxPrice, 0.001)
+
+			require.NotNil(t, y)
+			assert.Equal(t, int64(3), y.Count)
+			assert.InDelta(t, 40.0, y.AvgPrice, 0.001)
+			assert.InDelta(t, 120.0, y.Total, 0.001)
+			assert.InDelta(t, 30.0, y.MinPrice, 0.001)
+			assert.InDelta(t, 50.0, y.MaxPrice, 0.001)
+		})
+	}
+}
+
 func TestParity_NumericEqConsistency(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

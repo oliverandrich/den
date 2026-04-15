@@ -127,6 +127,14 @@ func (b *backend) Aggregate(ctx context.Context, collection string, op den.Aggre
 	return result, err
 }
 
+func (b *backend) GroupBy(ctx context.Context, collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
+	sqlStr, args, err := buildGroupBySQL(collection, groupField, aggs, q)
+	if err != nil {
+		return nil, err
+	}
+	return scanGroupByRowsPG(ctx, b.pool, sqlStr, args, len(aggs))
+}
+
 func (b *backend) EnsureIndex(ctx context.Context, collection string, idx den.IndexDefinition) error {
 	return createExpressionIndex(ctx, b.pool, collection, idx)
 }
@@ -160,6 +168,44 @@ func (b *backend) Ping(ctx context.Context) error {
 func (b *backend) Close() error {
 	b.pool.Close()
 	return nil
+}
+
+// pgQuerier abstracts pgxpool.Pool and pgx.Tx for GROUP BY scanning.
+type pgQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func scanGroupByRowsPG(ctx context.Context, db pgQuerier, sqlStr string, args []any, numAggs int) ([]den.GroupByRow, error) {
+	rows, err := db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []den.GroupByRow
+	for rows.Next() {
+		var key *string
+		vals := make([]*float64, numAggs)
+		scanDest := make([]any, 1+numAggs)
+		scanDest[0] = &key
+		for i := range numAggs {
+			scanDest[i+1] = &vals[i]
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, err
+		}
+		row := den.GroupByRow{Values: make([]float64, numAggs)}
+		if key != nil {
+			row.Key = *key
+		}
+		for i, v := range vals {
+			if v != nil {
+				row.Values[i] = *v
+			}
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 func mapPGError(err error) error {

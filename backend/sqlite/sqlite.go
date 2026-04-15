@@ -249,6 +249,14 @@ func (b *backend) Aggregate(ctx context.Context, collection string, op den.Aggre
 	return result, err
 }
 
+func (b *backend) GroupBy(ctx context.Context, collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
+	sqlStr, args, err := buildGroupBySQL(collection, groupField, aggs, q)
+	if err != nil {
+		return nil, err
+	}
+	return scanGroupByRows(ctx, b.db, sqlStr, args, len(aggs))
+}
+
 func (b *backend) EnsureIndex(ctx context.Context, collection string, idx den.IndexDefinition) error {
 	return createExpressionIndex(ctx, b.db, collection, idx)
 }
@@ -288,6 +296,43 @@ func (b *backend) Close() error {
 		return true
 	})
 	return b.db.Close()
+}
+
+// scanGroupByRows executes a GROUP BY query and scans the results.
+// The first column is the group key (text), followed by numAggs float columns.
+func scanGroupByRows(ctx context.Context, db interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}, sqlStr string, args []any, numAggs int) ([]den.GroupByRow, error) {
+	rows, err := db.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []den.GroupByRow
+	for rows.Next() {
+		var key *string
+		vals := make([]*float64, numAggs)
+		scanDest := make([]any, 1+numAggs)
+		scanDest[0] = &key
+		for i := range numAggs {
+			scanDest[i+1] = &vals[i]
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, err
+		}
+		row := den.GroupByRow{Values: make([]float64, numAggs)}
+		if key != nil {
+			row.Key = *key
+		}
+		for i, v := range vals {
+			if v != nil {
+				row.Values[i] = *v
+			}
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 func mapSQLiteError(err error) error {

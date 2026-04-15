@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/where"
@@ -275,7 +276,8 @@ func TestBuildExistsSQL(t *testing.T) {
 
 func TestBuildAggregateSQL_Sum(t *testing.T) {
 	q := &den.Query{Collection: "products"}
-	sql, args := buildAggregateSQL("products", den.OpSum, "price", q)
+	sql, args, err := buildAggregateSQL("products", den.OpSum, "price", q)
+	require.NoError(t, err)
 	assert.Contains(t, sql, `SUM(CAST(json_extract(data, '$.price') AS REAL))`)
 	assert.Contains(t, sql, `FROM "products"`)
 	assert.Empty(t, args)
@@ -294,8 +296,16 @@ func TestBuildAggregateSQL_AvgWithFilter(t *testing.T) {
 		Collection: "products",
 		Conditions: []where.Condition{where.Field("category").Eq("X")},
 	}
-	sql, args := buildAggregateSQL("products", den.OpAvg, "price", q)
+	sql, args, err := buildAggregateSQL("products", den.OpAvg, "price", q)
+	require.NoError(t, err)
 	assert.Contains(t, sql, `AVG(CAST(json_extract(data, '$.price') AS REAL))`)
 	assert.Contains(t, sql, "WHERE")
 	assert.Equal(t, []any{"X"}, args)
+}
+
+func TestBuildAggregateSQL_UnsupportedOp(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	_, _, err := buildAggregateSQL("products", den.AggregateOp("INVALID"), "price", q)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op")
 }

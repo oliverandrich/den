@@ -240,9 +240,12 @@ func (b *backend) Exists(ctx context.Context, collection string, q *den.Query) (
 }
 
 func (b *backend) Aggregate(ctx context.Context, collection string, op den.AggregateOp, field string, q *den.Query) (*float64, error) {
-	sqlStr, args := buildAggregateSQL(collection, op, field, q)
+	sqlStr, args, err := buildAggregateSQL(collection, op, field, q)
+	if err != nil {
+		return nil, err
+	}
 	var result *float64
-	err := b.db.QueryRowContext(ctx, sqlStr, args...).Scan(&result)
+	err = b.db.QueryRowContext(ctx, sqlStr, args...).Scan(&result)
 	return result, err
 }
 

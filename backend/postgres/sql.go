@@ -154,11 +154,11 @@ func buildExistsSQL(collection string, q *den.Query) (string, []any) {
 	return fmt.Sprintf("SELECT EXISTS(%s)", inner), args
 }
 
-func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *den.Query) (string, []any) {
+func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *den.Query) (string, []any, error) {
 	switch op {
 	case den.OpSum, den.OpAvg, den.OpMin, den.OpMax:
 	default:
-		panic(fmt.Sprintf("den: unsupported aggregate op: %s", op))
+		return "", nil, fmt.Errorf("den: unsupported aggregate op: %s", op)
 	}
 	clauses, args, _ := buildWhereClauses(q.Conditions)
 	expr := fmt.Sprintf("(%s)::float", jsonbPathText(field))
@@ -166,7 +166,7 @@ func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *d
 	if len(clauses) > 0 {
 		sql += " WHERE " + strings.Join(clauses, " AND ")
 	}
-	return sql, args
+	return sql, args, nil
 }
 
 func conditionToSQL(cond where.Condition, paramN int) (string, []any, int) {

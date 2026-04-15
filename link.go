@@ -301,6 +301,16 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 		}
 	}
 
+	if db.tagValidator != nil {
+		if err := db.tagValidator(target); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+	}
+
+	if err := runValidationHooks(ctx, target); err != nil {
+		return err
+	}
+
 	now := time.Now()
 	setBaseFields(tv, col.structInfo, now, isInsert)
 

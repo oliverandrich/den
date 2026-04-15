@@ -497,3 +497,48 @@ func TestWithLinkRule_DeleteIgnore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 200, foundDoor.Height)
 }
+
+// ValidatedPart is a linked document with a custom Validate() method.
+type ValidatedPart struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (p *ValidatedPart) Validate() error {
+	if p.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
+}
+
+type Machine struct {
+	document.Base
+	Label string                    `json:"label"`
+	Part  den.Link[ValidatedPart]   `json:"part"`
+	Parts []den.Link[ValidatedPart] `json:"parts"`
+}
+
+func TestWithLinkRule_Write_RunsValidation(t *testing.T) {
+	db := dentest.MustOpen(t, &ValidatedPart{}, &Machine{})
+	ctx := context.Background()
+
+	// Part with empty name should fail validation during cascade write
+	invalidPart := &ValidatedPart{Name: ""}
+	machine := &Machine{
+		Label: "Drill",
+		Part:  den.NewLink(invalidPart),
+	}
+
+	err := den.Insert(ctx, db, machine, den.WithLinkRule(den.LinkWrite))
+	require.ErrorIs(t, err, den.ErrValidation)
+
+	// Part with valid name should succeed
+	validPart := &ValidatedPart{Name: "Motor"}
+	machine2 := &Machine{
+		Label: "Saw",
+		Part:  den.NewLink(validPart),
+	}
+
+	require.NoError(t, den.Insert(ctx, db, machine2, den.WithLinkRule(den.LinkWrite)))
+	assert.NotEmpty(t, validPart.ID)
+}

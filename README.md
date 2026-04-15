@@ -189,7 +189,7 @@ Den supports automatic struct tag validation via [`go-playground/validator`](htt
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.Open(sqlite.Open("./data.db"), validate.WithValidation())
+db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
 ```
 
 Then add `validate` tags to your document structs:

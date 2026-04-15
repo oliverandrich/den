@@ -44,7 +44,7 @@ Den is part of the **Burrow** ecosystem. Its name follows the gopher/burrow meta
 ├──────────────────────────────────────────────────────────────┤
 │  Layer 5: Registration & Init                                 │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │  den.Open() / den.Register() / den.WithSQLite() / ...   │ │
+│  │  den.OpenURL() / den.Register() / den.WithSQLite() / ...   │ │
 │  │  Auto-index creation, schema validation                  │ │
 │  └──────────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────┤
@@ -911,15 +911,15 @@ func (a *Article) Validate() error {
 
 **Execution order for `den.Insert()`:**
 
-1. `ValidateOnSave.Validate()` (if implemented)
-2. `BeforeInsert.BeforeInsert(ctx)` (if implemented)
-3. `BeforeSave.BeforeSave(ctx)` (if implemented)
-4. Encode and write document + indexes via the backend
-5. Commit backend transaction
+1. `BeforeInsert.BeforeInsert(ctx)` (if implemented — mutating hook)
+2. `BeforeSave.BeforeSave(ctx)` (if implemented — mutating hook)
+3. Struct tag validation (`go-playground/validator`, if enabled)
+4. `Validator.Validate()` (if implemented — runs on final post-hook state)
+5. Encode and write document + indexes via the backend
 6. `AfterInsert.AfterInsert(ctx)` (if implemented)
 7. `AfterSave.AfterSave(ctx)` (if implemented)
 
-If any `Before*` hook returns an error, the operation is aborted and the transaction is rolled back.
+Mutating hooks run before validation so they can populate defaults, compute derived fields, and normalize values before constraints are checked. If any hook or validation step returns an error, the operation is aborted.
 
 ### Revision Control (Optimistic Concurrency)
 

@@ -19,7 +19,7 @@ err := den.Insert(ctx, db, p)
 // p.CreatedAt and p.UpdatedAt are set automatically
 ```
 
-Insert triggers the full lifecycle hook chain: `Validate` -> `BeforeInsert` -> `BeforeSave` -> write -> `AfterInsert` -> `AfterSave`. If any `Before*` hook returns an error, the insert is aborted.
+Insert triggers the full lifecycle hook chain: `BeforeInsert` -> `BeforeSave` -> tag validation -> `Validate` -> write -> `AfterInsert` -> `AfterSave`. Mutating hooks run before validation so they can populate defaults. If any hook or validation step returns an error, the insert is aborted.
 
 ### InsertMany
 

@@ -4,11 +4,23 @@ import (
 	"fmt"
 	"strings"
 
+	json "github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/where"
 )
+
+// toJSONBParam serializes a Go value to its JSON representation for use as a
+// $N::jsonb parameter. This preserves type information: strings become JSON
+// strings, numbers become JSON numbers, etc.
+func toJSONBParam(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
+}
 
 func sanitizeFieldName(field string) string {
 	var b strings.Builder
@@ -19,6 +31,31 @@ func sanitizeFieldName(field string) string {
 		}
 	}
 	return b.String()
+}
+
+// jsonbPath returns a typed JSONB extraction expression that preserves the
+// original JSON type (number, string, boolean). Supports nested fields via
+// dot notation: "address.city" → jsonb_extract_path(data, 'address', 'city').
+func jsonbPath(rawField string) string {
+	field := sanitizeFieldName(rawField)
+	parts := strings.Split(field, ".")
+	quoted := make([]string, len(parts))
+	for i, p := range parts {
+		quoted[i] = "'" + p + "'"
+	}
+	return "jsonb_extract_path(data, " + strings.Join(quoted, ", ") + ")"
+}
+
+// jsonbPathText returns a text extraction expression. Used for text operations
+// (LIKE, REGEXP) and IS NULL checks where SQL NULL semantics are needed.
+func jsonbPathText(rawField string) string {
+	field := sanitizeFieldName(rawField)
+	parts := strings.Split(field, ".")
+	quoted := make([]string, len(parts))
+	for i, p := range parts {
+		quoted[i] = "'" + p + "'"
+	}
+	return "jsonb_extract_path_text(data, " + strings.Join(quoted, ", ") + ")"
 }
 
 // buildSelectSQL translates a den.Query into a PostgreSQL SELECT statement.
@@ -54,7 +91,7 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 			if s.Dir == den.Desc {
 				dir = "DESC"
 			}
-			fmt.Fprintf(&sb, "data->>'%s' %s", sanitizeFieldName(s.Field), dir)
+			fmt.Fprintf(&sb, "%s %s", jsonbPath(s.Field), dir)
 		}
 	}
 
@@ -124,7 +161,7 @@ func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *d
 		panic(fmt.Sprintf("den: unsupported aggregate op: %s", op))
 	}
 	clauses, args, _ := buildWhereClauses(q.Conditions)
-	expr := fmt.Sprintf("(data->>'%s')::float", sanitizeFieldName(field))
+	expr := fmt.Sprintf("(%s)::float", jsonbPathText(field))
 	sql := fmt.Sprintf("SELECT %s(%s) FROM %s", string(op), expr, quoteIdent(collection))
 	if len(clauses) > 0 {
 		sql += " WHERE " + strings.Join(clauses, " AND ")
@@ -160,55 +197,55 @@ func conditionToSQL(cond where.Condition, paramN int) (string, []any, int) {
 }
 
 func fieldConditionToSQL(rawField string, op where.Operator, value any, values []any, paramN int) (string, []any, int) {
-	field := sanitizeFieldName(rawField)
-	jsonPath := fmt.Sprintf("data->>'%s'", field)
+	typed := jsonbPath(rawField)
+	text := jsonbPathText(rawField)
 
 	// FieldRef: compare against another document field
 	if ref, isRef := value.(where.FieldRef); isRef {
-		refPath := fmt.Sprintf("data->>'%s'", sanitizeFieldName(string(ref)))
-		return fieldRefToSQL(jsonPath, refPath, op), nil, paramN
+		refPath := jsonbPath(string(ref))
+		return fieldRefToSQL(typed, refPath, op), nil, paramN
 	}
 
 	switch op {
 	case where.OpEq:
-		return fmt.Sprintf("%s = $%d", jsonPath, paramN), []any{toText(value)}, paramN + 1
+		return fmt.Sprintf("%s = $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpNe:
-		return fmt.Sprintf("%s != $%d", jsonPath, paramN), []any{toText(value)}, paramN + 1
+		return fmt.Sprintf("%s != $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpGt:
-		return fmt.Sprintf("(%s)::float > $%d", jsonPath, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("%s > $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpGte:
-		return fmt.Sprintf("(%s)::float >= $%d", jsonPath, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("%s >= $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpLt:
-		return fmt.Sprintf("(%s)::float < $%d", jsonPath, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("%s < $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpLte:
-		return fmt.Sprintf("(%s)::float <= $%d", jsonPath, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("%s <= $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpIsNil:
-		return fmt.Sprintf("%s IS NULL", jsonPath), nil, paramN
+		return fmt.Sprintf("%s IS NULL", text), nil, paramN
 	case where.OpIsNotNil:
-		return fmt.Sprintf("%s IS NOT NULL", jsonPath), nil, paramN
+		return fmt.Sprintf("%s IS NOT NULL", text), nil, paramN
 	case where.OpIn:
 		placeholders := make([]string, len(values))
-		textValues := make([]any, len(values))
+		jsonbValues := make([]any, len(values))
 		for i := range values {
-			placeholders[i] = fmt.Sprintf("$%d", paramN+i)
-			textValues[i] = toText(values[i])
+			placeholders[i] = fmt.Sprintf("$%d::jsonb", paramN+i)
+			jsonbValues[i] = toJSONBParam(values[i])
 		}
-		return fmt.Sprintf("%s IN (%s)", jsonPath, strings.Join(placeholders, ", ")), textValues, paramN + len(values)
+		return fmt.Sprintf("%s IN (%s)", typed, strings.Join(placeholders, ", ")), jsonbValues, paramN + len(values)
 	case where.OpNotIn:
 		placeholders := make([]string, len(values))
-		textValues := make([]any, len(values))
+		jsonbValues := make([]any, len(values))
 		for i := range values {
-			placeholders[i] = fmt.Sprintf("$%d", paramN+i)
-			textValues[i] = toText(values[i])
+			placeholders[i] = fmt.Sprintf("$%d::jsonb", paramN+i)
+			jsonbValues[i] = toJSONBParam(values[i])
 		}
-		return fmt.Sprintf("%s NOT IN (%s)", jsonPath, strings.Join(placeholders, ", ")), textValues, paramN + len(values)
+		return fmt.Sprintf("%s NOT IN (%s)", typed, strings.Join(placeholders, ", ")), jsonbValues, paramN + len(values)
 	case where.OpContains:
-		return fmt.Sprintf("data->'%s' @> to_jsonb($%d::text)", field, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("%s @> to_jsonb($%d::text)", typed, paramN), []any{value}, paramN + 1
 	case where.OpContainsAny:
 		clauses := make([]string, len(values))
 		var args []any
 		for i, v := range values {
-			clauses[i] = fmt.Sprintf("data->'%s' @> to_jsonb($%d::text)", field, paramN+i)
+			clauses[i] = fmt.Sprintf("%s @> to_jsonb($%d::text)", typed, paramN+i)
 			args = append(args, v)
 		}
 		return "(" + strings.Join(clauses, " OR ") + ")", args, paramN + len(values)
@@ -216,20 +253,20 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 		clauses := make([]string, len(values))
 		var args []any
 		for i, v := range values {
-			clauses[i] = fmt.Sprintf("data->'%s' @> to_jsonb($%d::text)", field, paramN+i)
+			clauses[i] = fmt.Sprintf("%s @> to_jsonb($%d::text)", typed, paramN+i)
 			args = append(args, v)
 		}
 		return strings.Join(clauses, " AND "), args, paramN + len(values)
 	case where.OpHasKey:
-		return fmt.Sprintf("jsonb_exists(data->'%s', $%d)", field, paramN), []any{value}, paramN + 1
+		return fmt.Sprintf("jsonb_exists(%s, $%d)", typed, paramN), []any{value}, paramN + 1
 	case where.OpRegExp:
-		return fmt.Sprintf("%s ~ $%d", jsonPath, paramN), []any{fmt.Sprintf("%v", value)}, paramN + 1
+		return fmt.Sprintf("%s ~ $%d", text, paramN), []any{fmt.Sprintf("%v", value)}, paramN + 1
 	case where.OpStartsWith:
-		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", text, paramN), []any{escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
 	case where.OpEndsWith:
-		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value))}, paramN + 1
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", text, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value))}, paramN + 1
 	case where.OpStringContains:
-		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", jsonPath, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
+		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", text, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
 	default:
 		return "", nil, paramN
 	}
@@ -277,15 +314,6 @@ func logicalToSQL(logic where.LogicType, conditions []where.Condition, paramN in
 		sep = " OR "
 	}
 	return strings.Join(clauses, sep), args, paramN
-}
-
-// toText converts a value to string for comparison with data->>'field'
-// which always returns text in PostgreSQL.
-func toText(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
 }
 
 // rowsIterator implements den.Iterator over pgx.Rows.

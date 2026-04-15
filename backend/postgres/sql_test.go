@@ -22,14 +22,14 @@ func TestBuildSelectSQL_Eq(t *testing.T) {
 		Conditions: []where.Condition{where.Field("name").Eq("Widget")},
 	}
 	sql, args := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "data->>'name' = $1")
-	assert.Equal(t, []any{"Widget"}, args)
+	assert.Contains(t, sql, "jsonb_extract_path(data, 'name') = $1::jsonb")
+	assert.Equal(t, []any{`"Widget"`}, args)
 }
 
 func TestBuildSelectSQL_Sort(t *testing.T) {
 	q := &den.Query{Collection: "products", SortFields: []den.SortEntry{{Field: "price", Dir: den.Asc}}}
 	sql, _ := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "ORDER BY data->>'price' ASC")
+	assert.Contains(t, sql, "ORDER BY jsonb_extract_path(data, 'price') ASC")
 }
 
 func TestBuildSelectSQL_SortDesc(t *testing.T) {
@@ -61,21 +61,24 @@ func TestBuildSelectSQL_BeforeCursor(t *testing.T) {
 
 func TestBuildSelectSQL_Comparison(t *testing.T) {
 	tests := []struct {
+		name string
 		cond where.Condition
 		want string
 	}{
-		{where.Field("x").Ne(1), "!="},
-		{where.Field("x").Gt(1), "::float >"},
-		{where.Field("x").Gte(1), "::float >="},
-		{where.Field("x").Lt(1), "::float <"},
-		{where.Field("x").Lte(1), "::float <="},
-		{where.Field("x").IsNil(), "IS NULL"},
-		{where.Field("x").IsNotNil(), "IS NOT NULL"},
+		{"Ne", where.Field("x").Ne(1), "jsonb_extract_path(data, 'x') != $1::jsonb"},
+		{"Gt", where.Field("x").Gt(1), "jsonb_extract_path(data, 'x') > $1::jsonb"},
+		{"Gte", where.Field("x").Gte(1), "jsonb_extract_path(data, 'x') >= $1::jsonb"},
+		{"Lt", where.Field("x").Lt(1), "jsonb_extract_path(data, 'x') < $1::jsonb"},
+		{"Lte", where.Field("x").Lte(1), "jsonb_extract_path(data, 'x') <= $1::jsonb"},
+		{"IsNil", where.Field("x").IsNil(), "IS NULL"},
+		{"IsNotNil", where.Field("x").IsNotNil(), "IS NOT NULL"},
 	}
 	for _, tt := range tests {
-		q := &den.Query{Collection: "t", Conditions: []where.Condition{tt.cond}}
-		sql, _ := buildSelectSQL("t", q)
-		assert.Contains(t, sql, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			q := &den.Query{Collection: "t", Conditions: []where.Condition{tt.cond}}
+			sql, _ := buildSelectSQL("t", q)
+			assert.Contains(t, sql, tt.want)
+		})
 	}
 }
 
@@ -85,8 +88,8 @@ func TestBuildSelectSQL_In(t *testing.T) {
 		Conditions: []where.Condition{where.Field("status").In("a", "b")},
 	}
 	sql, args := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "IN ($1, $2)")
-	assert.Equal(t, []any{"a", "b"}, args)
+	assert.Contains(t, sql, "IN ($1::jsonb, $2::jsonb)")
+	assert.Equal(t, []any{`"a"`, `"b"`}, args)
 }
 
 func TestBuildSelectSQL_NotIn(t *testing.T) {
@@ -104,7 +107,7 @@ func TestBuildSelectSQL_Contains(t *testing.T) {
 		Conditions: []where.Condition{where.Field("tags").Contains("go")},
 	}
 	sql, args := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "@>")
+	assert.Contains(t, sql, "jsonb_extract_path(data, 'tags') @>")
 	assert.Equal(t, []any{"go"}, args)
 }
 
@@ -133,7 +136,7 @@ func TestBuildSelectSQL_FieldRef(t *testing.T) {
 		Conditions: []where.Condition{where.Field("end").Gt(where.FieldRef("start"))},
 	}
 	sql, args := buildSelectSQL("events", q)
-	assert.Contains(t, sql, "data->>'end' > data->>'start'")
+	assert.Contains(t, sql, "jsonb_extract_path(data, 'end') > jsonb_extract_path(data, 'start')")
 	assert.Empty(t, args)
 }
 
@@ -143,8 +146,38 @@ func TestBuildSelectSQL_HasKey(t *testing.T) {
 		Conditions: []where.Condition{where.Field("metadata").HasKey("color")},
 	}
 	sql, args := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "jsonb_exists")
+	assert.Contains(t, sql, "jsonb_exists(jsonb_extract_path(data, 'metadata')")
 	assert.Contains(t, args, "color")
+}
+
+func TestBuildSelectSQL_NestedField(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("address.city").Eq("Berlin")},
+	}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "jsonb_extract_path(data, 'address', 'city') = $1::jsonb")
+	assert.Equal(t, []any{`"Berlin"`}, args)
+}
+
+func TestBuildSelectSQL_NestedFieldSort(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		SortFields: []den.SortEntry{{Field: "category.name", Dir: den.Asc}},
+	}
+	sql, _ := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "ORDER BY jsonb_extract_path(data, 'category', 'name') ASC")
+}
+
+func TestBuildSelectSQL_StringGt(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("name").Gt("A")},
+	}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, "jsonb_extract_path(data, 'name') > $1::jsonb")
+	assert.NotContains(t, sql, "::float")
+	assert.Equal(t, []any{`"A"`}, args)
 }
 
 func TestBuildSelectSQL_ContainsAll(t *testing.T) {
@@ -198,12 +231,12 @@ func TestBuildSelectSQL_FieldRefComparisons(t *testing.T) {
 		cond where.Condition
 		want string
 	}{
-		{"Eq", where.Field("a").Eq(where.FieldRef("b")), "data->>'a' = data->>'b'"},
-		{"Ne", where.Field("a").Ne(where.FieldRef("b")), "data->>'a' != data->>'b'"},
-		{"Gt", where.Field("a").Gt(where.FieldRef("b")), "data->>'a' > data->>'b'"},
-		{"Gte", where.Field("a").Gte(where.FieldRef("b")), "data->>'a' >= data->>'b'"},
-		{"Lt", where.Field("a").Lt(where.FieldRef("b")), "data->>'a' < data->>'b'"},
-		{"Lte", where.Field("a").Lte(where.FieldRef("b")), "data->>'a' <= data->>'b'"},
+		{"Eq", where.Field("a").Eq(where.FieldRef("b")), "jsonb_extract_path(data, 'a') = jsonb_extract_path(data, 'b')"},
+		{"Ne", where.Field("a").Ne(where.FieldRef("b")), "jsonb_extract_path(data, 'a') != jsonb_extract_path(data, 'b')"},
+		{"Gt", where.Field("a").Gt(where.FieldRef("b")), "jsonb_extract_path(data, 'a') > jsonb_extract_path(data, 'b')"},
+		{"Gte", where.Field("a").Gte(where.FieldRef("b")), "jsonb_extract_path(data, 'a') >= jsonb_extract_path(data, 'b')"},
+		{"Lt", where.Field("a").Lt(where.FieldRef("b")), "jsonb_extract_path(data, 'a') < jsonb_extract_path(data, 'b')"},
+		{"Lte", where.Field("a").Lte(where.FieldRef("b")), "jsonb_extract_path(data, 'a') <= jsonb_extract_path(data, 'b')"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -222,7 +255,7 @@ func TestBuildCountSQL(t *testing.T) {
 	}
 	sql, args := buildCountSQL("products", q)
 	assert.Contains(t, sql, `SELECT COUNT(*) FROM "products" WHERE`)
-	assert.Equal(t, []any{10}, args)
+	assert.Equal(t, []any{"10"}, args)
 }
 
 func TestBuildCountSQL_NoConditions(t *testing.T) {
@@ -240,13 +273,13 @@ func TestBuildExistsSQL(t *testing.T) {
 	sql, args := buildExistsSQL("products", q)
 	assert.Contains(t, sql, "SELECT EXISTS(")
 	assert.Contains(t, sql, "LIMIT 1")
-	assert.Equal(t, []any{"Alpha"}, args)
+	assert.Equal(t, []any{`"Alpha"`}, args)
 }
 
 func TestBuildAggregateSQL_Sum(t *testing.T) {
 	q := &den.Query{Collection: "products"}
 	sql, args := buildAggregateSQL("products", den.OpSum, "price", q)
-	assert.Contains(t, sql, `SUM((data->>'price')::float)`)
+	assert.Contains(t, sql, `SUM((jsonb_extract_path_text(data, 'price'))::float)`)
 	assert.Contains(t, sql, `FROM "products"`)
 	assert.Empty(t, args)
 }
@@ -257,9 +290,9 @@ func TestBuildAggregateSQL_AvgWithFilter(t *testing.T) {
 		Conditions: []where.Condition{where.Field("category").Eq("X")},
 	}
 	sql, args := buildAggregateSQL("products", den.OpAvg, "price", q)
-	assert.Contains(t, sql, `AVG((data->>'price')::float)`)
+	assert.Contains(t, sql, `AVG((jsonb_extract_path_text(data, 'price'))::float)`)
 	assert.Contains(t, sql, "WHERE")
-	assert.Equal(t, []any{"X"}, args)
+	assert.Equal(t, []any{`"X"`}, args)
 }
 
 func TestMapPGError_Nil(t *testing.T) {

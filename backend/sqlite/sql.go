@@ -6,21 +6,11 @@ import (
 	"strings"
 
 	"github.com/oliverandrich/den"
+	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/where"
 )
 
-// sanitizeFieldName strips characters that are not safe for JSON path interpolation.
-// Allows letters, digits, underscores, and dots (for nested paths).
-func sanitizeFieldName(field string) string {
-	var b strings.Builder
-	for _, r := range field {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '.' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+var sanitizeFieldName = internal.SanitizeFieldName
 
 // buildSelectSQL translates a den.Query into a SQLite SELECT statement.
 func buildSelectSQL(collection string, q *den.Query) (string, []any) {
@@ -341,13 +331,7 @@ func (it *rowsIterator) Next() bool {
 	return true
 }
 
-// escapeLike escapes LIKE special characters (%, _, \) in a value.
-func escapeLike(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-	return s
-}
+var escapeLike = internal.EscapeLike
 
 func (it *rowsIterator) Bytes() []byte { return it.data }
 func (it *rowsIterator) ID() string    { return it.id }

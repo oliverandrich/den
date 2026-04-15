@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oliverandrich/den"
+	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -22,16 +23,7 @@ func toJSONBParam(v any) string {
 	return string(b)
 }
 
-func sanitizeFieldName(field string) string {
-	var b strings.Builder
-	for _, r := range field {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '.' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+var sanitizeFieldName = internal.SanitizeFieldName
 
 // jsonbPath returns a typed JSONB extraction expression that preserves the
 // original JSON type (number, string, boolean). Supports nested fields via
@@ -355,13 +347,7 @@ type rowsIterator struct {
 	err  error
 }
 
-// escapeLike escapes LIKE special characters (%, _, \) in a value.
-func escapeLike(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-	return s
-}
+var escapeLike = internal.EscapeLike
 
 func (it *rowsIterator) Next() bool {
 	if !it.rows.Next() {

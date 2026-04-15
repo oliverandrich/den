@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 
 	"github.com/oliverandrich/den/internal"
@@ -111,7 +112,7 @@ func Meta[T any](db *DB) (CollectionMeta, error) {
 	return col.meta, nil
 }
 
-// Collections returns the names of all registered collections.
+// Collections returns the names of all registered collections in sorted order.
 func Collections(db *DB) []string {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -120,6 +121,7 @@ func Collections(db *DB) []string {
 	for name := range db.collections {
 		names = append(names, name)
 	}
+	slices.Sort(names)
 	return names
 }
 

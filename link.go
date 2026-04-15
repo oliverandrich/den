@@ -10,6 +10,8 @@ import (
 	"time"
 
 	json "github.com/goccy/go-json"
+
+	"github.com/oliverandrich/den/internal"
 )
 
 // Link represents a reference to a document in another collection.
@@ -395,14 +397,5 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 	return runAfterDeleteHooks(ctx, doc)
 }
 
-func parseJSONTagName(tag string) string {
-	if tag == "" || tag == "-" {
-		return ""
-	}
-	for i, c := range tag {
-		if c == ',' {
-			return tag[:i]
-		}
-	}
-	return tag
-}
+// parseJSONTagName delegates to internal.ParseJSONTagName.
+var parseJSONTagName = internal.ParseJSONTagName

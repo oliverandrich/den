@@ -10,8 +10,6 @@ import (
 	"time"
 
 	json "github.com/goccy/go-json"
-
-	"github.com/oliverandrich/den/internal"
 )
 
 // Link represents a reference to a document in another collection.
@@ -155,14 +153,12 @@ func resolveSingleLink(ctx context.Context, db *DB, linkVal reflect.Value) error
 	// Determine the target type (the T in Link[T])
 	targetType := valueField.Type().Elem() // *T → T
 
-	// Look up the collection for this type
-	colName := internal.CollectionName(targetType.Name())
-	db.mu.RLock()
-	_, ok := db.collections[colName]
-	db.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrNotRegistered, colName)
+	// Look up the collection for this type (respects custom CollectionName)
+	col, err := collectionForType(db, targetType)
+	if err != nil {
+		return err
 	}
+	colName := col.meta.Name
 
 	// Fetch the document
 	data, err := db.backend.Get(ctx, colName, id)
@@ -277,13 +273,10 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 
 	target := valueField.Interface()
 	targetType := valueField.Type().Elem()
-	colName := internal.CollectionName(targetType.Name())
 
-	db.mu.RLock()
-	col, ok := db.collections[colName]
-	db.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrNotRegistered, colName)
+	col, err := collectionForType(db, targetType)
+	if err != nil {
+		return err
 	}
 
 	tv := reflect.ValueOf(target).Elem()
@@ -326,13 +319,13 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 
 	data, err := db.encode(target)
 	if err != nil {
-		return fmt.Errorf("encode linked %s: %w", colName, err)
+		return fmt.Errorf("encode linked %s: %w", col.meta.Name, err)
 	}
 
 	id = getID(tv, col.structInfo)
 	linkVal.FieldByName("ID").SetString(id)
 
-	if err := b.Put(ctx, colName, id, data); err != nil {
+	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
 		return err
 	}
 	captureSnapshot(data, target)
@@ -356,14 +349,12 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 
 	id := idField.String()
 	targetType := valueField.Type().Elem()
-	colName := internal.CollectionName(targetType.Name())
 
-	db.mu.RLock()
-	col, ok := db.collections[colName]
-	db.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrNotRegistered, colName)
+	col, err := collectionForType(db, targetType)
+	if err != nil {
+		return err
 	}
+	colName := col.meta.Name
 
 	// Load the linked document to run hooks and handle soft-delete
 	data, err := b.Get(ctx, colName, id)

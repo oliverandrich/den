@@ -71,7 +71,12 @@ func collectionFor[T any](db *DB) (*collectionInfo, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
+	return collectionForType(db, t)
+}
 
+// collectionForType is the non-generic implementation used by both
+// collectionFor[T] and link resolution (which only has a reflect.Type).
+func collectionForType(db *DB, t reflect.Type) (*collectionInfo, error) {
 	// Fast path: lock-free cache lookup
 	if cached, ok := db.typeCache.Load(t); ok {
 		v, _ := cached.(*collectionInfo)

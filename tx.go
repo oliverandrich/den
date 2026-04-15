@@ -43,6 +43,34 @@ func RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error 
 	return nil
 }
 
+// runInWriteTx is an internal helper that executes fn in a write transaction.
+// Used by updateCore to wrap revision-checking updates atomically.
+func runInWriteTx(ctx context.Context, b Backend, fn func(tx Transaction) error) error {
+	tx, err := b.Begin(ctx, true)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+			panic(r)
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("rollback failed after %w: %w", err, rbErr)
+		}
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%w: %w", ErrTransactionFailed, err)
+	}
+	return nil
+}
+
 // TxFindByID retrieves a document by ID within a transaction.
 func TxFindByID[T any](tx *Tx, id string) (*T, error) {
 	col, err := collectionFor[T](tx.db)

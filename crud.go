@@ -123,6 +123,18 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		return err
 	}
 
+	// When revision checking is active and we're not already in a
+	// transaction, auto-wrap in a transaction so the revision check (Get)
+	// and write (Put) are atomic — preventing TOCTOU races on PostgreSQL
+	// where concurrent pool connections can interleave.
+	if col.settings.UseRevision && !o.ignoreRevision {
+		if backend, ok := b.(Backend); ok {
+			return runInWriteTx(ctx, backend, func(tx Transaction) error {
+				return updateCore(ctx, db, tx, document, opts...)
+			})
+		}
+	}
+
 	if o.linkRule == LinkWrite {
 		if err := cascadeWriteLinks(ctx, db, b, document); err != nil {
 			return err

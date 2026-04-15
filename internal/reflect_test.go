@@ -58,26 +58,45 @@ func TestParseDenTag(t *testing.T) {
 		name     string
 		tag      string
 		wantOpts TagOptions
+		wantErr  bool
 	}{
-		{"empty", "", TagOptions{}},
-		{"index", "index", TagOptions{Index: true}},
-		{"unique", "unique", TagOptions{Unique: true}},
-		{"fts", "fts", TagOptions{FTS: true}},
-		{"multiple", "index,fts", TagOptions{Index: true, FTS: true}},
-		{"all", "index,unique,fts", TagOptions{Index: true, Unique: true, FTS: true}},
-		{"unique_together", "unique_together:feed_guid", TagOptions{UniqueTogether: "feed_guid"}},
-		{"index_together", "index_together:user_feed", TagOptions{IndexTogether: "user_feed"}},
-		{"unique_together with index", "index,unique_together:composite", TagOptions{Index: true, UniqueTogether: "composite"}},
-		{"index_together with fts", "fts,index_together:group1", TagOptions{FTS: true, IndexTogether: "group1"}},
-		{"unknown tag ignored", "nonsense", TagOptions{}},
+		{"empty", "", TagOptions{}, false},
+		{"index", "index", TagOptions{Index: true}, false},
+		{"unique", "unique", TagOptions{Unique: true}, false},
+		{"fts", "fts", TagOptions{FTS: true}, false},
+		{"multiple", "index,fts", TagOptions{Index: true, FTS: true}, false},
+		{"all", "index,unique,fts", TagOptions{Index: true, Unique: true, FTS: true}, false},
+		{"unique_together", "unique_together:feed_guid", TagOptions{UniqueTogether: "feed_guid"}, false},
+		{"index_together", "index_together:user_feed", TagOptions{IndexTogether: "user_feed"}, false},
+		{"unique_together with index", "index,unique_together:composite", TagOptions{Index: true, UniqueTogether: "composite"}, false},
+		{"index_together with fts", "fts,index_together:group1", TagOptions{FTS: true, IndexTogether: "group1"}, false},
+		{"omitempty", "omitempty", TagOptions{OmitEmpty: true}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := ParseDenTag(tt.tag)
-			assert.Equal(t, tt.wantOpts, opts)
+			opts, err := ParseDenTag(tt.tag)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantOpts, opts)
+			}
 		})
 	}
+}
+
+func TestParseDenTag_UnknownOption(t *testing.T) {
+	_, err := ParseDenTag("nonsense")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown den tag option")
+	assert.Contains(t, err.Error(), "nonsense")
+}
+
+func TestParseDenTag_UnknownMixed(t *testing.T) {
+	_, err := ParseDenTag("index,typo")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "typo")
 }
 
 func TestParseJSONTagName(t *testing.T) {

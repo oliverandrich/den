@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ type TagOptions struct {
 	Index          bool
 	Unique         bool
 	FTS            bool
+	OmitEmpty      bool
 	UniqueTogether string // group name for composite unique index
 	IndexTogether  string // group name for composite non-unique index
 }
@@ -66,13 +68,17 @@ func (s *StructInfo) UniqueFields() []FieldInfo {
 
 // ParseDenTag parses a den struct tag for metadata options only.
 // Format: "option1,option2,..." (no field name — that comes from json tag).
-func ParseDenTag(tag string) TagOptions {
+// Returns an error for unknown tag options to catch typos like "indx".
+func ParseDenTag(tag string) (TagOptions, error) {
 	opts := TagOptions{}
 	if tag == "" {
-		return opts
+		return opts, nil
 	}
 	for part := range strings.SplitSeq(tag, ",") {
 		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
 		switch {
 		case trimmed == "index":
 			opts.Index = true
@@ -80,13 +86,17 @@ func ParseDenTag(tag string) TagOptions {
 			opts.Unique = true
 		case trimmed == "fts":
 			opts.FTS = true
+		case trimmed == "omitempty":
+			opts.OmitEmpty = true
 		case strings.HasPrefix(trimmed, "unique_together:"):
 			opts.UniqueTogether = strings.TrimPrefix(trimmed, "unique_together:")
 		case strings.HasPrefix(trimmed, "index_together:"):
 			opts.IndexTogether = strings.TrimPrefix(trimmed, "index_together:")
+		default:
+			return opts, fmt.Errorf("unknown den tag option %q", trimmed)
 		}
 	}
-	return opts
+	return opts, nil
 }
 
 // ParseJSONTagName extracts the field name from a json struct tag.
@@ -118,7 +128,9 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 		fieldIndex:     make(map[string]int),
 	}
 
-	collectFields(t, nil, info)
+	if err := collectFields(t, nil, info); err != nil {
+		return nil, err
+	}
 
 	// Build index for O(1) FieldByName lookups
 	for i, f := range info.Fields {
@@ -130,13 +142,15 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 
 var timePtrType = reflect.TypeFor[*time.Time]()
 
-func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) {
+func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
 	for i := range t.NumField() {
 		field := t.Field(i)
 		index := append(append([]int(nil), indexPrefix...), i)
 
 		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			collectFields(field.Type, index, info)
+			if err := collectFields(field.Type, index, info); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -148,7 +162,10 @@ func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) {
 		}
 
 		denTag := field.Tag.Get("den")
-		opts := ParseDenTag(denTag)
+		opts, err := ParseDenTag(denTag)
+		if err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
+		}
 
 		isPointer := field.Type.Kind() == reflect.Pointer
 
@@ -167,4 +184,5 @@ func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) {
 			info.HasDeletedAt = true
 		}
 	}
+	return nil
 }

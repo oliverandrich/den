@@ -45,7 +45,7 @@ func OpenURL(dsn string, opts ...Option) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return open(backend, opts...)
+	return Open(backend, opts...)
 }
 
 // parseScheme extracts the scheme from a DSN string.

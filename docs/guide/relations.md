@@ -213,34 +213,6 @@ When documents link to documents that themselves contain links, eager fetching c
 
 The default maximum nesting depth is **3 levels**.
 
-### Global Override via DenSettings
-
-Set a collection-wide limit:
-
-```go
-func (h House) DenSettings() den.Settings {
-    return den.Settings{
-        MaxNestingDepth: 2, // fetch at most 2 levels deep
-    }
-}
-```
-
-### Per-Field Override
-
-Different link fields can have different depth limits:
-
-```go
-func (h House) DenSettings() den.Settings {
-    return den.Settings{
-        MaxNestingDepth: 3,
-        NestingDepthPerField: map[string]int{
-            "door":    1, // door links are shallow
-            "windows": 2, // windows can go 2 levels deep
-        },
-    }
-}
-```
-
 ### Per-Query Override
 
 Override the depth for a specific query:

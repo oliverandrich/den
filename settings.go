@@ -1,17 +1,10 @@
 package den
 
-import "time"
-
 // Settings configures per-collection behavior.
 type Settings struct {
-	CollectionName       string
-	OmitEmpty            bool
-	UseRevision          bool
-	UseCache             bool
-	CacheCapacity        int
-	CacheExpiration      time.Duration
-	NestingDepthPerField map[string]int
-	Indexes              []IndexDefinition
+	CollectionName string
+	UseRevision    bool
+	Indexes        []IndexDefinition
 }
 
 // DenSettable is implemented by document types that provide custom settings.

@@ -82,9 +82,9 @@ if errors.Is(err, den.ErrValidation) {
 For field-level details from tag validation, use `errors.As`:
 
 ```go
-var validationErr *validate.ValidationError
+var validationErr *validate.Errors
 if errors.As(err, &validationErr) {
-    for _, fe := range validationErr.FieldErrors {
+    for _, fe := range validationErr.Fields {
         fmt.Printf("Field %s failed on %s\n", fe.Field, fe.Tag)
     }
 }

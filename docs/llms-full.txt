@@ -421,11 +421,9 @@ type DenSettable interface {
 }
 
 type Settings struct {
-    CollectionName       string            // override auto-derived name
-    OmitEmpty            bool              // omit zero-value fields by default
-    UseRevision          bool              // enable optimistic concurrency control
-    NestingDepthPerField map[string]int    // per-field nesting depth overrides
-    Indexes              []IndexDefinition // compound indexes
+    CollectionName string            // override auto-derived name
+    UseRevision    bool              // enable optimistic concurrency control
+    Indexes        []IndexDefinition // compound indexes
 }
 ```
 
@@ -1207,30 +1205,6 @@ This is useful for answering "who links to this document?" without maintaining a
 When documents link to documents that themselves contain links, eager fetching can cause deep recursion or infinite loops with circular references. Den limits the maximum nesting depth.
 
 The default maximum nesting depth is **3 levels**.
-
-### Global Override via DenSettings
-
-```go
-func (h House) DenSettings() den.Settings {
-    return den.Settings{
-        MaxNestingDepth: 2, // fetch at most 2 levels deep
-    }
-}
-```
-
-### Per-Field Override
-
-```go
-func (h House) DenSettings() den.Settings {
-    return den.Settings{
-        MaxNestingDepth: 3,
-        NestingDepthPerField: map[string]int{
-            "door":    1, // door links are shallow
-            "windows": 2, // windows can go 2 levels deep
-        },
-    }
-}
-```
 
 ### Per-Query Override
 
@@ -2094,9 +2068,9 @@ if errors.Is(err, den.ErrValidation) {
 For field-level details from tag validation, use `errors.As`:
 
 ```go
-var validationErr *validate.ValidationError
+var validationErr *validate.Errors
 if errors.As(err, &validationErr) {
-    for _, fe := range validationErr.FieldErrors {
+    for _, fe := range validationErr.Fields {
         fmt.Printf("Field %s failed on %s\n", fe.Field, fe.Tag)
     }
 }
@@ -2851,9 +2825,7 @@ type DenSettable interface {
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `CollectionName` | `string` | lowercase struct name | Override the auto-derived collection name |
-| `OmitEmpty` | `bool` | `false` | When true, zero-value fields are omitted from storage by default |
 | `UseRevision` | `bool` | `false` | Enable optimistic concurrency control via `_rev` field |
-| `NestingDepthPerField` | `map[string]int` | `nil` | Per-field override for link nesting depth |
 | `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes) |
 
 ## Collection Naming

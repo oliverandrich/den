@@ -63,6 +63,32 @@ func TestRevision_Conflict(t *testing.T) {
 	require.ErrorIs(t, err, den.ErrRevisionConflict)
 }
 
+// TestRevision_BlindUpdateConflict reproduces den-b0mq: a caller constructs
+// a fresh doc with only the ID (no _rev) and calls Update. Without the fix,
+// the revision check is silently skipped (empty currentRev short-circuits the
+// guard) and the write clobbers the stored document. Expected behavior: the
+// empty in-memory rev must not match the populated DB rev → ErrRevisionConflict.
+func TestRevision_BlindUpdateConflict(t *testing.T) {
+	db := dentest.MustOpen(t, &RevProduct{})
+	ctx := context.Background()
+
+	original := &RevProduct{Name: "v1", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, original))
+
+	blind := &RevProduct{Name: "blind overwrite", Price: 999.0}
+	blind.ID = original.ID
+	// blind.Rev is the zero value — intentionally not set
+
+	err := den.Update(ctx, db, blind)
+	require.ErrorIs(t, err, den.ErrRevisionConflict,
+		"update of a revisioned doc with an empty _rev must conflict, not silently overwrite")
+
+	// Confirm the write did not go through.
+	found, err := den.FindByID[RevProduct](ctx, db, original.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "v1", found.Name, "original document must be untouched")
+}
+
 func TestRevision_IgnoreRevision(t *testing.T) {
 	db := dentest.MustOpen(t, &RevProduct{})
 	ctx := context.Background()

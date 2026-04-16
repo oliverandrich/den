@@ -49,7 +49,11 @@ func checkAndUpdateRevision(ctx context.Context, db *DB, b ReadWriter, col *coll
 	id := getID(rv, col.structInfo)
 	currentRev := getRevision(rv, col.structInfo)
 
-	if !ignoreRevision && currentRev != "" {
+	// Key the check off document existence (id), not on the in-memory rev.
+	// An empty currentRev against a stored doc with a populated _rev is a
+	// conflict — typically a caller constructed a doc without first loading
+	// it, or read it via a path that did not populate _rev.
+	if !ignoreRevision && id != "" {
 		data, err := b.Get(ctx, col.meta.Name, id)
 		if err != nil {
 			return err

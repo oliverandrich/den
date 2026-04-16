@@ -229,36 +229,40 @@ func (qs QuerySet[T]) Update(fields SetFields) (int64, error) {
 
 	var count int64
 	txErr := RunInTransaction(qs.ctx, qs.db, func(tx *Tx) error {
+		// Drain the iterator to completion before issuing any writes. pgx's
+		// cursor pins the transaction's connection, so running TxUpdate while
+		// the cursor is still open would hit "conn busy" on PostgreSQL.
 		iter, err := tx.tx.Query(tx.ctx, col.meta.Name, q)
 		if err != nil {
 			return err
 		}
-
+		var docs []*T
 		for iter.Next() {
 			doc := new(T)
 			if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {
 				_ = iter.Close()
 				return fmt.Errorf("decode: %w", err)
 			}
-
-			rv := reflect.ValueOf(doc).Elem()
-			for fieldName, newVal := range fields {
-				fv := rv.FieldByIndex(fieldInfos[fieldName].Index)
-				if err := setFieldValue(fv, newVal, fieldName); err != nil {
-					_ = iter.Close()
-					return err
-				}
-			}
-			if err := TxUpdate(tx, doc); err != nil {
-				_ = iter.Close()
-				return err
-			}
-			count++
+			docs = append(docs, doc)
 		}
 		iterErr := iter.Err()
 		_ = iter.Close()
 		if iterErr != nil {
 			return iterErr
+		}
+
+		for _, doc := range docs {
+			rv := reflect.ValueOf(doc).Elem()
+			for fieldName, newVal := range fields {
+				fv := rv.FieldByIndex(fieldInfos[fieldName].Index)
+				if err := setFieldValue(fv, newVal, fieldName); err != nil {
+					return err
+				}
+			}
+			if err := TxUpdate(tx, doc); err != nil {
+				return err
+			}
+			count++
 		}
 		return nil
 	})

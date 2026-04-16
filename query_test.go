@@ -2,8 +2,10 @@ package den_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -466,6 +468,39 @@ func TestQuerySet_Update_TypeMismatch(t *testing.T) {
 		Update(den.SetFields{"price": "not-a-float"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot assign")
+}
+
+// TestQuerySet_Update_Postgres_NoDeadlock reproduces den-chpf: on PostgreSQL,
+// pgx.Rows pins the transaction's connection until Close. The previous
+// QuerySet.Update implementation called TxUpdate inside the iteration loop,
+// on the same tx → the Exec waits for the connection → the cursor waits for
+// Close. Result: deadlock. With a sufficiently large result set this manifests
+// reliably. A short context deadline makes the failure mode visible.
+func TestQuerySet_Update_Postgres_NoDeadlock(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &QueryProduct{})
+
+	parent, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Seed a result set big enough that the iterator streams.
+	for i := range 25 {
+		p := &QueryProduct{Name: fmt.Sprintf("bulk-%02d", i), Price: float64(i), Category: "bulk"}
+		require.NoError(t, den.Insert(parent, db, p))
+	}
+
+	count, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("bulk")).
+		Update(den.SetFields{"category": "done"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(25), count)
+
+	// Confirm the writes landed.
+	remaining, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("bulk")).Count()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), remaining)
+
+	done, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("done")).Count()
+	require.NoError(t, err)
+	assert.Equal(t, int64(25), done)
 }
 
 func TestQuerySet_Update_NilValue(t *testing.T) {

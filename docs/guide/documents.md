@@ -238,6 +238,18 @@ func (p Product) DenSettings() den.Settings {
 !!! tip
     Prefer `unique_together`/`index_together` struct tags for most cases -- they're declarative and co-located with the fields. Use `DenSettings().Indexes` when you need full control over index names or when the index definition doesn't map cleanly to struct fields.
 
+### Index Creation Behavior
+
+=== "SQLite"
+
+    Indexes are created with `CREATE INDEX IF NOT EXISTS` as part of `Register()`. SQLite is fast enough in-process that blocking is rarely a concern.
+
+=== "PostgreSQL"
+
+    Indexes are created with `CREATE INDEX CONCURRENTLY IF NOT EXISTS`. Concurrent writes on the collection are not blocked during index creation, which matters on large tables.
+
+    If a previous `CONCURRENTLY` run was interrupted (process killed, query cancelled), PostgreSQL may leave behind an invalid index. Den detects invalid indexes via `pg_index.indisvalid` on the next `Register()` call, drops them, and recreates them cleanly — no manual intervention required.
+
 ## Nullable Unique Constraints
 
 When a pointer field is tagged with `den:"unique"`, Den creates a partial unique index. Uniqueness is only enforced for non-nil values -- multiple documents can have `nil` for that field.

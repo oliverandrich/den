@@ -277,6 +277,45 @@ func TestEnsureIndex(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEnsureIndex_RecoversInvalid(t *testing.T) {
+	b := openTestDB(t)
+	pg, ok := b.(*backend)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	collection := "test_idx_recover"
+	indexName := "idx_test_recover_field"
+
+	require.NoError(t, b.EnsureCollection(ctx, collection, den.CollectionMeta{}))
+	t.Cleanup(func() { b.DropCollection(ctx, collection) })
+
+	require.NoError(t, b.EnsureIndex(ctx, collection, den.IndexDefinition{
+		Name: indexName, Fields: []string{"field"},
+	}))
+
+	_, err := pg.pool.Exec(ctx,
+		`UPDATE pg_index SET indisvalid = false WHERE indexrelid = $1::regclass`,
+		indexName)
+	if err != nil {
+		t.Skipf("cannot mark index invalid (requires superuser): %v", err)
+	}
+
+	var valid bool
+	require.NoError(t, pg.pool.QueryRow(ctx,
+		`SELECT indisvalid FROM pg_index WHERE indexrelid = $1::regclass`,
+		indexName).Scan(&valid))
+	require.False(t, valid, "precondition: index should be invalid")
+
+	require.NoError(t, b.EnsureIndex(ctx, collection, den.IndexDefinition{
+		Name: indexName, Fields: []string{"field"},
+	}))
+
+	require.NoError(t, pg.pool.QueryRow(ctx,
+		`SELECT indisvalid FROM pg_index WHERE indexrelid = $1::regclass`,
+		indexName).Scan(&valid))
+	assert.True(t, valid, "index should be valid after EnsureIndex recovers it")
+}
+
 func TestQuery_BothCursors(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

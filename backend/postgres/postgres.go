@@ -224,8 +224,13 @@ func mapPGError(err error) error {
 		return nil
 	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
-		return fmt.Errorf("%w: %w", den.ErrDuplicate, err)
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505": // unique_violation
+			return fmt.Errorf("%w: %w", den.ErrDuplicate, err)
+		case "55P03": // lock_not_available
+			return den.ErrLocked
+		}
 	}
 	return err
 }

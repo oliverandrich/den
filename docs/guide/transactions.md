@@ -106,6 +106,32 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 !!! warning "SKIP LOCKED returns `ErrNotFound`"
     PostgreSQL returns zero rows for both "locked by another tx" and "row does not exist" when `SKIP LOCKED` is active — these cases are indistinguishable through the error alone. If you need to tell them apart, do a separate non-locking read first.
 
+### Multi-row Locking
+
+`den.NewTxQuery[T](tx)` provides a chainable query builder bound to the current transaction. Its `ForUpdate(opts ...LockOption)` method locks every matching row in a single statement — avoids the N+1 round-trips you would get from looping over `TxLockByID`.
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    orders, err := den.NewTxQuery[Order](tx).
+        Where(where.Field("customer").Eq(custID)).
+        Where(where.Field("status").Eq("pending")).
+        ForUpdate(den.SkipLocked()).
+        All()
+    if err != nil {
+        return err
+    }
+    for _, o := range orders {
+        o.Status = "processing"
+        if err := den.TxUpdate(tx, o); err != nil {
+            return err
+        }
+    }
+    return nil
+})
+```
+
+The `SkipLocked()` and `NoWait()` options work identically to `TxLockByID`. `NewTxQuery` is a minimal builder — `Where`, `Sort`, `Limit`, `Skip` on the chain side, `All` and `First` as terminals. Use `NewQuery` (non-transaction) for other reads or aggregations; locking only makes sense inside a transaction.
+
 ## Commit and Rollback
 
 The commit/rollback behavior is controlled entirely by the return value of the closure:

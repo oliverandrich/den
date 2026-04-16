@@ -165,4 +165,6 @@ type Query struct {
 	SkipN      int // 0 = no skip
 	AfterID    string
 	BeforeID   string
+	ForUpdate  bool     // if true, append a row-level lock clause (PostgreSQL only)
+	LockMode   LockMode // only consulted when ForUpdate is true
 }

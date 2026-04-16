@@ -169,8 +169,9 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
 | `TxFindByID[T]` | `TxFindByID[T](tx *Tx, id string) (*T, error)` | Find a document by ID within a transaction |
 | `TxLockByID[T]` | `TxLockByID[T](tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (`SELECT ... FOR UPDATE` on PostgreSQL; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
-| `SkipLocked` | `SkipLocked() LockOption` | `TxLockByID` modifier: return `ErrNotFound` if another transaction holds the row instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
-| `NoWait` | `NoWait() LockOption` | `TxLockByID` modifier: return `ErrLocked` immediately if another transaction holds the row. PostgreSQL `FOR UPDATE NOWAIT` |
+| `SkipLocked` | `SkipLocked() LockOption` | `TxLockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `TxLockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
+| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First` |
 | `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
 | `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
 | `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |

@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oliverandrich/den"
 )
@@ -47,11 +46,7 @@ func (t *transaction) GetForUpdate(ctx context.Context, collection, id string, m
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, den.ErrNotFound
 		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
-			return nil, den.ErrLocked
-		}
-		return nil, err
+		return nil, mapPGError(err)
 	}
 	return data, nil
 }
@@ -70,7 +65,7 @@ func (t *transaction) Query(ctx context.Context, collection string, q *den.Query
 	sqlStr, args := buildSelectSQL(collection, q)
 	rows, err := t.tx.Query(ctx, sqlStr, args...)
 	if err != nil {
-		return nil, err
+		return nil, mapPGError(err)
 	}
 	return &rowsIterator{rows: rows}, nil
 }

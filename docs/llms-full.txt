@@ -1590,6 +1590,19 @@ if errors.Is(err, den.ErrNotFound) {
 
 Caveat: with `SkipLocked()`, zero rows is returned for both "locked" and "not exists". The error cannot distinguish them.
 
+### Multi-row Locking
+
+`den.NewTxQuery[T](tx)` returns a minimal chainable query builder bound to a transaction. Its `ForUpdate(opts ...LockOption)` method locks every matching row in one statement.
+
+```go
+orders, err := den.NewTxQuery[Order](tx).
+    Where(where.Field("status").Eq("pending")).
+    ForUpdate(den.SkipLocked()).
+    All()
+```
+
+Supported chain methods: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First`. Options are the same as `TxLockByID` (`SkipLocked`, `NoWait`). On SQLite `ForUpdate` is a no-op. Use the non-transaction `NewQuery` for reads and aggregations outside the lock use case.
+
 ## Commit and Rollback
 
 The commit/rollback behavior is controlled entirely by the return value of the closure:

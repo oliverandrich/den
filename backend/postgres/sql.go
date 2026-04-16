@@ -94,6 +94,18 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 		fmt.Fprintf(&sb, " OFFSET %d", q.SkipN)
 	}
 
+	if q.ForUpdate {
+		sb.WriteString(" FOR UPDATE")
+		switch q.LockMode {
+		case den.LockDefault:
+			// no modifier
+		case den.LockSkipLocked:
+			sb.WriteString(" SKIP LOCKED")
+		case den.LockNoWait:
+			sb.WriteString(" NOWAIT")
+		}
+	}
+
 	return sb.String(), args
 }
 
@@ -351,11 +363,11 @@ var escapeLike = internal.EscapeLike
 
 func (it *rowsIterator) Next() bool {
 	if !it.rows.Next() {
-		it.err = it.rows.Err()
+		it.err = mapPGError(it.rows.Err())
 		return false
 	}
 	if err := it.rows.Scan(&it.id, &it.data); err != nil {
-		it.err = err
+		it.err = mapPGError(err)
 		return false
 	}
 	return true

@@ -28,6 +28,13 @@ func (t *transaction) Get(ctx context.Context, collection, id string) ([]byte, e
 	return data, nil
 }
 
+// GetForUpdate is a no-op lock on SQLite: IMMEDIATE transactions already
+// acquire a RESERVED lock on the whole database at BEGIN time, which serializes
+// all writers. Delegates to Get.
+func (t *transaction) GetForUpdate(ctx context.Context, collection, id string) ([]byte, error) {
+	return t.Get(ctx, collection, id)
+}
+
 func (t *transaction) Put(ctx context.Context, collection, id string, data []byte) error {
 	_, err := t.tx.ExecContext(ctx,
 		fmt.Sprintf("INSERT INTO %q (id, data) VALUES (?, jsonb(?)) ON CONFLICT(id) DO UPDATE SET data = jsonb(?)", collection),

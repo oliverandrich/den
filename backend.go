@@ -74,6 +74,12 @@ type Transaction interface {
 	ReadWriter
 	Commit() error
 	Rollback() error
+
+	// GetForUpdate reads a document and acquires a row-level lock that
+	// persists until the transaction commits or rolls back. On PostgreSQL
+	// this maps to SELECT ... FOR UPDATE; on SQLite it is a no-op because
+	// IMMEDIATE transactions already serialize writers.
+	GetForUpdate(ctx context.Context, collection, id string) ([]byte, error)
 }
 
 // Iterator provides sequential access to query results.

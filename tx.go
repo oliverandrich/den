@@ -92,6 +92,35 @@ func TxFindByID[T any](tx *Tx, id string) (*T, error) {
 	return result, nil
 }
 
+// TxLockByID retrieves a document by ID and acquires a row-level lock that
+// persists for the lifetime of the transaction. Other transactions that try
+// to lock the same row will block until this transaction commits or rolls
+// back. On PostgreSQL this maps to SELECT ... FOR UPDATE; on SQLite it is a
+// no-op because IMMEDIATE transactions already serialize writers.
+//
+// Only callable inside RunInTransaction — a lock outside a transaction
+// releases immediately and would be meaningless. Returns ErrNotFound if the
+// document does not exist.
+func TxLockByID[T any](tx *Tx, id string) (*T, error) {
+	col, err := collectionFor[T](tx.db)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id)
+	if err != nil {
+		return nil, err
+	}
+
+	result := new(T)
+	if err := tx.db.decode(data, result); err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	captureSnapshot(data, result)
+
+	return result, nil
+}
+
 // TxInsert inserts a document within a transaction.
 func TxInsert[T any](tx *Tx, document *T, opts ...CRUDOption) error {
 	return insertCore(tx.ctx, tx.db, tx.tx, document, opts...)

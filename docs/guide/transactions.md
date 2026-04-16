@@ -45,8 +45,40 @@ Inside a transaction closure, use the `Tx`-prefixed variants of Den's CRUD funct
 | `den.Insert(ctx, db, &doc)` | `den.TxInsert(tx, &doc)` |
 | `den.Update(ctx, db, &doc)` | `den.TxUpdate(tx, &doc)` |
 | `den.Delete(ctx, db, &doc)` | `den.TxDelete(tx, &doc)` |
+| — (transaction-only) | `den.TxLockByID[T](tx, id)` |
 
 These functions operate on the `*den.Tx` instead of the `*den.DB`, ensuring all reads and writes go through the same underlying database transaction.
+
+## Row-Level Locking
+
+`den.TxLockByID[T](tx, id)` reads a document and acquires a row-level lock that persists for the lifetime of the transaction. Other transactions that try to lock the same row block until this transaction commits or rolls back.
+
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    item, err := den.TxLockByID[Inventory](tx, itemID)
+    if err != nil {
+        return err
+    }
+    if item.Stock < qty {
+        return ErrOutOfStock
+    }
+    item.Stock -= qty
+    return den.TxUpdate(tx, item)
+})
+```
+
+There is deliberately no non-transaction variant: a lock outside a transaction releases immediately and would be meaningless. The `*den.Tx` parameter enforces correct usage at compile time.
+
+=== "PostgreSQL"
+
+    Emits `SELECT ... FOR UPDATE`. The lock is held until the enclosing transaction commits or rolls back. Concurrent transactions attempting to lock the same row block until the holder releases.
+
+=== "SQLite"
+
+    No-op. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing. `TxLockByID` behaves identically to `TxFindByID` on SQLite.
+
+!!! tip
+    For most read-modify-write scenarios, **revision control** (`den.Settings{UseRevision: true}`) is the better choice — it works identically across both backends and does not hold database locks. Reach for `TxLockByID` when contention is high enough that retry storms are a concern, when the business logic between read and write is too expensive to repeat on conflict, or when you need a queue-consumer pattern.
 
 ## Commit and Rollback
 

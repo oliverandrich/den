@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
@@ -18,6 +19,19 @@ type transaction struct {
 func (t *transaction) Get(ctx context.Context, collection, id string) ([]byte, error) {
 	var data []byte
 	err := t.tx.QueryRow(ctx, t.parent.getSQLs(collection).get, id).Scan(&data)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, den.ErrNotFound
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+func (t *transaction) GetForUpdate(ctx context.Context, collection, id string) ([]byte, error) {
+	var data []byte
+	query := fmt.Sprintf("SELECT data::text FROM %s WHERE id = $1 FOR UPDATE", quoteIdent(collection))
+	err := t.tx.QueryRow(ctx, query, id).Scan(&data)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, den.ErrNotFound

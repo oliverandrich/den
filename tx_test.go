@@ -3,7 +3,10 @@ package den_test
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -288,4 +291,93 @@ func TestInsertMany_Rollback(t *testing.T) {
 	all, err := den.NewQuery[FailBeforeDoc](ctx, db).All()
 	require.NoError(t, err)
 	assert.Empty(t, all, "no documents should persist after transaction rollback")
+}
+
+func TestTxLockByID(t *testing.T) {
+	dbs := map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &Product{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{}),
+	}
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			p := &Product{Name: "Widget", Price: 10.0}
+			require.NoError(t, den.Insert(ctx, db, p))
+
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				locked, err := den.TxLockByID[Product](tx, p.ID)
+				if err != nil {
+					return err
+				}
+				assert.Equal(t, p.ID, locked.ID)
+				assert.Equal(t, "Widget", locked.Name)
+				return nil
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTxLockByID_NotFound(t *testing.T) {
+	dbs := map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &Product{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{}),
+	}
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				_, err := den.TxLockByID[Product](tx, "missing-id")
+				return err
+			})
+			assert.ErrorIs(t, err, den.ErrNotFound)
+		})
+	}
+}
+
+func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Contended", Price: 1.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	var tx1Committed atomic.Bool
+	var tx2LockedBefore atomic.Bool
+	tx1Released := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		// Wait for tx1 to definitely hold the lock before attempting tx2.
+		<-tx1Released
+		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			_, err := den.TxLockByID[Product](tx, p.ID)
+			if err != nil {
+				return err
+			}
+			// tx1 must have committed before tx2's lock succeeds.
+			if !tx1Committed.Load() {
+				tx2LockedBefore.Store(true)
+			}
+			return nil
+		})
+		assert.NoError(t, err)
+	})
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxLockByID[Product](tx, p.ID)
+		if err != nil {
+			return err
+		}
+		// Signal tx2 to start trying; give it time to block on the lock.
+		close(tx1Released)
+		time.Sleep(150 * time.Millisecond)
+		tx1Committed.Store(true)
+		return nil
+	})
+	require.NoError(t, err)
+
+	wg.Wait()
+	assert.False(t, tx2LockedBefore.Load(),
+		"tx2 must not acquire the lock before tx1 commits")
 }

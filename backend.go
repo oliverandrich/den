@@ -20,6 +20,7 @@ type Backend interface {
 
 	EnsureIndex(ctx context.Context, collection string, idx IndexDefinition) error
 	DropIndex(ctx context.Context, collection string, name string) error
+	ListRecordedIndexes(ctx context.Context, collection string) ([]RecordedIndex, error)
 
 	EnsureCollection(ctx context.Context, name string, meta CollectionMeta) error
 	DropCollection(ctx context.Context, name string) error
@@ -86,6 +87,15 @@ type Iterator interface {
 
 // IndexDefinition describes a secondary index on a collection.
 type IndexDefinition struct {
+	Name   string
+	Fields []string
+	Unique bool
+}
+
+// RecordedIndex describes a secondary index that was previously created by
+// Den and is tracked in the backend's metadata table. Managed indexes (such
+// as the PostgreSQL GIN index or FTS auxiliary objects) are not recorded.
+type RecordedIndex struct {
 	Name   string
 	Fields []string
 	Unique bool

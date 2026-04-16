@@ -187,6 +187,22 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 
 ---
 
+## Index Lifecycle
+
+| Function | Signature | Description |
+|---|---|---|
+| `DropStaleIndexes` | `DropStaleIndexes(ctx, db *DB, opts ...DropStaleOption) (DropStaleResult, error)` | Drop indexes previously created by `Register()` that no longer correspond to any `IndexDefinition`. Managed indexes (GIN, FTS) are never touched |
+| `DryRun` | `DryRun() DropStaleOption` | Option for `DropStaleIndexes`; reports the plan without mutating the database |
+
+`DropStaleResult` contains two slices:
+
+- `Dropped []StaleIndex` — indexes that were (or would be, under DryRun) removed
+- `Kept []StaleIndex` — recorded indexes that are still referenced by a current `IndexDefinition`
+
+`StaleIndex` has fields `Collection`, `Name`, `Fields []string`, `Unique bool`.
+
+---
+
 ## Migrations
 
 Located in the `migrate` sub-package (`github.com/oliverandrich/den/migrate`).

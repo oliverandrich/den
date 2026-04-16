@@ -250,6 +250,34 @@ func (p Product) DenSettings() den.Settings {
 
     If a previous `CONCURRENTLY` run was interrupted (process killed, query cancelled), PostgreSQL may leave behind an invalid index. Den detects invalid indexes via `pg_index.indisvalid` on the next `Register()` call, drops them, and recreates them cleanly — no manual intervention required.
 
+### Dropping Stale Indexes
+
+`Register()` is additive: it creates new indexes but never removes obsolete ones. When you remove a `den:"index"` or `den:"unique"` tag, or rename a field, the old index stays in the database.
+
+To clean up, call `den.DropStaleIndexes()`:
+
+```go
+result, err := den.DropStaleIndexes(ctx, db)
+if err != nil {
+    return err
+}
+log.Printf("dropped %d stale indexes, kept %d", len(result.Dropped), len(result.Kept))
+```
+
+To preview what would be dropped without actually dropping anything, pass `den.DryRun()`:
+
+```go
+result, _ := den.DropStaleIndexes(ctx, db, den.DryRun())
+for _, idx := range result.Dropped {
+    log.Printf("would drop: %s.%s (fields=%v)", idx.Collection, idx.Name, idx.Fields)
+}
+```
+
+Den tracks indexes it created in a private `_den_indexes` metadata table, so this operation only considers indexes Den knows about. Managed indexes (the PostgreSQL GIN index, FTS triggers and auxiliary tables, application-created indexes that Den did not create) are never touched.
+
+!!! tip
+    Typical usage is from a migration or deployment script, not on every startup. Running `DropStaleIndexes` unconditionally on every process start is safe but unnecessary — it only does work when the struct has actually changed.
+
 ## Nullable Unique Constraints
 
 When a pointer field is tagged with `den:"unique"`, Den creates a partial unique index. Uniqueness is only enforced for non-nil values -- multiple documents can have `nil` for that field.

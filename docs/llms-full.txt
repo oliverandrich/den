@@ -494,6 +494,16 @@ Prefer `unique_together`/`index_together` struct tags for most cases. Use `DenSe
 
 **PostgreSQL**: Indexes are created with `CREATE INDEX CONCURRENTLY IF NOT EXISTS` so concurrent writes are not blocked during index creation on large tables. If a previous concurrent run was interrupted, PostgreSQL leaves behind an invalid index; Den detects this via `pg_index.indisvalid` on the next `Register()` and recreates the index automatically.
 
+### Dropping Stale Indexes
+
+`Register()` is additive — it creates indexes but never removes obsolete ones. When a `den:"index"` or `den:"unique"` tag is removed or a field is renamed, the old index remains in the database.
+
+Call `den.DropStaleIndexes(ctx, db)` to remove indexes that Den previously created but are no longer part of any registered struct. Pass `den.DryRun()` to preview without mutating the database. The function returns a `DropStaleResult` with `Dropped` and `Kept` slices of `StaleIndex` entries.
+
+Den tracks indexes it created in a private `_den_indexes` metadata table (created automatically on `Open()`). Managed indexes (PostgreSQL GIN, FTS triggers/tables, and anything not created through `Register()`) are never touched.
+
+Typical usage is from a migration or deployment script, not every startup — the operation is a no-op when the struct has not changed.
+
 ## Nullable Unique Constraints
 
 When a pointer field is tagged with `den:"unique"`, Den creates a partial unique index. Uniqueness is only enforced for non-nil values -- multiple documents can have `nil` for that field.

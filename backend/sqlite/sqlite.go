@@ -93,6 +93,10 @@ func Open(path string) (den.Backend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
 	}
+	if err := ensureMetadataTable(context.Background(), db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
+	}
 	return &backend{db: db}, nil
 }
 
@@ -262,8 +266,14 @@ func (b *backend) EnsureIndex(ctx context.Context, collection string, idx den.In
 }
 
 func (b *backend) DropIndex(ctx context.Context, _ string, name string) error {
-	_, err := b.db.ExecContext(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %q", name))
-	return err
+	if _, err := b.db.ExecContext(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %q", name)); err != nil {
+		return err
+	}
+	return forgetIndex(ctx, b.db, name)
+}
+
+func (b *backend) ListRecordedIndexes(ctx context.Context, collection string) ([]den.RecordedIndex, error) {
+	return listRecordedIndexes(ctx, b.db, collection)
 }
 
 func (b *backend) EnsureCollection(ctx context.Context, name string, _ den.CollectionMeta) error {

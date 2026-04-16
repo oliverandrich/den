@@ -49,6 +49,11 @@ func Open(connString string) (den.Backend, error) {
 		return nil, fmt.Errorf("postgres open: %w", err)
 	}
 
+	if err := ensureMetadataTable(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres open: %w", err)
+	}
+
 	return &backend{pool: pool}, nil
 }
 
@@ -140,8 +145,14 @@ func (b *backend) EnsureIndex(ctx context.Context, collection string, idx den.In
 }
 
 func (b *backend) DropIndex(ctx context.Context, _ string, name string) error {
-	_, err := b.pool.Exec(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %s", quoteIdent(name)))
-	return err
+	if _, err := b.pool.Exec(ctx, fmt.Sprintf("DROP INDEX IF EXISTS %s", quoteIdent(name))); err != nil {
+		return err
+	}
+	return forgetIndex(ctx, b.pool, name)
+}
+
+func (b *backend) ListRecordedIndexes(ctx context.Context, collection string) ([]den.RecordedIndex, error) {
+	return listRecordedIndexes(ctx, b.pool, collection)
 }
 
 func (b *backend) EnsureCollection(ctx context.Context, name string, _ den.CollectionMeta) error {

@@ -5,12 +5,78 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oliverandrich/den"
 )
+
+const metadataTableName = "_den_indexes"
+
+func ensureMetadataTable(ctx context.Context, pool *pgxpool.Pool) error {
+	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+		collection TEXT NOT NULL,
+		name TEXT NOT NULL,
+		fields JSONB NOT NULL,
+		is_unique BOOLEAN NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (collection, name)
+	)`, quoteIdent(metadataTableName))
+	_, err := pool.Exec(ctx, query)
+	return err
+}
+
+func recordIndex(ctx context.Context, pool *pgxpool.Pool, collection string, idx den.IndexDefinition) error {
+	fieldsJSON, err := json.Marshal(idx.Fields)
+	if err != nil {
+		return err
+	}
+	query := fmt.Sprintf(`INSERT INTO %s (collection, name, fields, is_unique, created_at)
+		VALUES ($1, $2, $3::jsonb, $4, $5)
+		ON CONFLICT (collection, name) DO UPDATE SET
+			fields = EXCLUDED.fields,
+			is_unique = EXCLUDED.is_unique`, quoteIdent(metadataTableName))
+	_, err = pool.Exec(ctx, query, collection, idx.Name, string(fieldsJSON), idx.Unique, time.Now().UTC())
+	return err
+}
+
+func forgetIndex(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	query := fmt.Sprintf(`DELETE FROM %s WHERE name = $1`, quoteIdent(metadataTableName))
+	_, err := pool.Exec(ctx, query, name)
+	return err
+}
+
+func listRecordedIndexes(ctx context.Context, pool *pgxpool.Pool, collection string) ([]den.RecordedIndex, error) {
+	query := fmt.Sprintf(`SELECT name, fields, is_unique FROM %s WHERE collection = $1 ORDER BY name`, quoteIdent(metadataTableName))
+	rows, err := pool.Query(ctx, query, collection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []den.RecordedIndex
+	for rows.Next() {
+		var name string
+		var fieldsJSON []byte
+		var unique bool
+		if err := rows.Scan(&name, &fieldsJSON, &unique); err != nil {
+			return nil, err
+		}
+		var fields []string
+		if err := json.Unmarshal(fieldsJSON, &fields); err != nil {
+			return nil, err
+		}
+		result = append(result, den.RecordedIndex{
+			Name:   name,
+			Fields: fields,
+			Unique: unique,
+		})
+	}
+	return result, rows.Err()
+}
 
 func createTable(ctx context.Context, pool *pgxpool.Pool, name string) error {
 	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -51,7 +117,10 @@ func createExpressionIndex(ctx context.Context, pool *pgxpool.Pool, collection s
 
 	query := fmt.Sprintf("CREATE %sINDEX CONCURRENTLY IF NOT EXISTS %s ON %s(%s)%s",
 		uniqueStr, quoteIdent(idx.Name), quoteIdent(collection), exprList, whereClause)
-	return ensureConcurrentIndex(ctx, pool, idx.Name, query)
+	if err := ensureConcurrentIndex(ctx, pool, idx.Name, query); err != nil {
+		return err
+	}
+	return recordIndex(ctx, pool, collection, idx)
 }
 
 // ensureConcurrentIndex drops any existing invalid index with the same name

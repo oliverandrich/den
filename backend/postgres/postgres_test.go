@@ -277,6 +277,61 @@ func TestEnsureIndex(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEnsureIndex_RecordsMetadata(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "test_idx_meta", den.CollectionMeta{}))
+	t.Cleanup(func() { b.DropCollection(ctx, "test_idx_meta") })
+
+	require.NoError(t, b.EnsureIndex(ctx, "test_idx_meta", den.IndexDefinition{
+		Name: "idx_test_meta_name", Fields: []string{"name"},
+	}))
+	require.NoError(t, b.EnsureIndex(ctx, "test_idx_meta", den.IndexDefinition{
+		Name: "idx_test_meta_sku", Fields: []string{"sku"}, Unique: true,
+	}))
+
+	recorded, err := b.ListRecordedIndexes(ctx, "test_idx_meta")
+	require.NoError(t, err)
+	require.Len(t, recorded, 2)
+	assert.Equal(t, "idx_test_meta_name", recorded[0].Name)
+	assert.Equal(t, []string{"name"}, recorded[0].Fields)
+	assert.False(t, recorded[0].Unique)
+	assert.Equal(t, "idx_test_meta_sku", recorded[1].Name)
+	assert.True(t, recorded[1].Unique)
+}
+
+func TestDropIndex_ForgetsMetadata(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "test_idx_forget", den.CollectionMeta{}))
+	t.Cleanup(func() { b.DropCollection(ctx, "test_idx_forget") })
+
+	require.NoError(t, b.EnsureIndex(ctx, "test_idx_forget", den.IndexDefinition{
+		Name: "idx_test_forget_name", Fields: []string{"name"},
+	}))
+	require.NoError(t, b.DropIndex(ctx, "test_idx_forget", "idx_test_forget_name"))
+
+	recorded, err := b.ListRecordedIndexes(ctx, "test_idx_forget")
+	require.NoError(t, err)
+	assert.Empty(t, recorded)
+}
+
+func TestListRecordedIndexes_ExcludesGIN(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	// EnsureCollection creates the GIN index automatically — it must not be
+	// tracked in the metadata table (otherwise DropStaleIndexes could drop it).
+	require.NoError(t, b.EnsureCollection(ctx, "test_idx_gin", den.CollectionMeta{}))
+	t.Cleanup(func() { b.DropCollection(ctx, "test_idx_gin") })
+
+	recorded, err := b.ListRecordedIndexes(ctx, "test_idx_gin")
+	require.NoError(t, err)
+	assert.Empty(t, recorded)
+}
+
 func TestEnsureIndex_RecoversInvalid(t *testing.T) {
 	b := openTestDB(t)
 	pg, ok := b.(*backend)

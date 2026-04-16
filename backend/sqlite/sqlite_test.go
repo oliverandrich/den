@@ -207,6 +207,68 @@ func TestEnsureIndex(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestEnsureIndex_RecordsMetadata(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
+	require.NoError(t, b.EnsureIndex(ctx, "products", den.IndexDefinition{
+		Name: "idx_products_name", Fields: []string{"name"},
+	}))
+	require.NoError(t, b.EnsureIndex(ctx, "products", den.IndexDefinition{
+		Name: "idx_products_sku", Fields: []string{"sku"}, Unique: true,
+	}))
+
+	recorded, err := b.ListRecordedIndexes(ctx, "products")
+	require.NoError(t, err)
+	require.Len(t, recorded, 2)
+	assert.Equal(t, "idx_products_name", recorded[0].Name)
+	assert.Equal(t, []string{"name"}, recorded[0].Fields)
+	assert.False(t, recorded[0].Unique)
+	assert.Equal(t, "idx_products_sku", recorded[1].Name)
+	assert.Equal(t, []string{"sku"}, recorded[1].Fields)
+	assert.True(t, recorded[1].Unique)
+}
+
+func TestDropIndex_ForgetsMetadata(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
+	require.NoError(t, b.EnsureIndex(ctx, "products", den.IndexDefinition{
+		Name: "idx_products_name", Fields: []string{"name"},
+	}))
+	require.NoError(t, b.DropIndex(ctx, "products", "idx_products_name"))
+
+	recorded, err := b.ListRecordedIndexes(ctx, "products")
+	require.NoError(t, err)
+	assert.Empty(t, recorded)
+}
+
+func TestListRecordedIndexes_IsolatedByCollection(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
+	require.NoError(t, b.EnsureCollection(ctx, "orders", den.CollectionMeta{}))
+	require.NoError(t, b.EnsureIndex(ctx, "products", den.IndexDefinition{
+		Name: "idx_products_sku", Fields: []string{"sku"},
+	}))
+	require.NoError(t, b.EnsureIndex(ctx, "orders", den.IndexDefinition{
+		Name: "idx_orders_customer", Fields: []string{"customer"},
+	}))
+
+	products, err := b.ListRecordedIndexes(ctx, "products")
+	require.NoError(t, err)
+	require.Len(t, products, 1)
+	assert.Equal(t, "idx_products_sku", products[0].Name)
+
+	orders, err := b.ListRecordedIndexes(ctx, "orders")
+	require.NoError(t, err)
+	require.Len(t, orders, 1)
+	assert.Equal(t, "idx_orders_customer", orders[0].Name)
+}
+
 func TestEnsureIndex_Unique(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

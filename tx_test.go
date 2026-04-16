@@ -381,3 +381,132 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 	assert.False(t, tx2LockedBefore.Load(),
 		"tx2 must not acquire the lock before tx1 commits")
 }
+
+// runContendedTx spawns a goroutine that holds a row lock until release is
+// signaled. The returned release function must be called (deferred) to let the
+// first transaction commit. locked is closed once tx1 has acquired the lock.
+func runContendedTx(t *testing.T, db *den.DB, id string) (locked <-chan struct{}, release func()) {
+	t.Helper()
+	lockedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		err := den.RunInTransaction(context.Background(), db, func(tx *den.Tx) error {
+			if _, err := den.TxLockByID[Product](tx, id); err != nil {
+				return err
+			}
+			close(lockedCh)
+			<-releaseCh
+			return nil
+		})
+		assert.NoError(t, err)
+	}()
+
+	t.Cleanup(func() {
+		select {
+		case <-releaseCh:
+		default:
+			close(releaseCh)
+		}
+		<-done
+	})
+
+	return lockedCh, func() { close(releaseCh) }
+}
+
+func TestTxLockByID_SkipLocked_ReturnsNotFoundOnContention(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "SkipLocked"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	locked, release := runContendedTx(t, db, p.ID)
+	<-locked
+
+	start := time.Now()
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxLockByID[Product](tx, p.ID, den.SkipLocked())
+		return err
+	})
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, den.ErrNotFound,
+		"SkipLocked on a contended row should return ErrNotFound immediately")
+	assert.Less(t, elapsed, 500*time.Millisecond,
+		"SkipLocked must not block; returned after %v", elapsed)
+
+	release()
+}
+
+func TestTxLockByID_NoWait_ReturnsErrLockedOnContention(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "NoWait"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	locked, release := runContendedTx(t, db, p.ID)
+	<-locked
+
+	start := time.Now()
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxLockByID[Product](tx, p.ID, den.NoWait())
+		return err
+	})
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, den.ErrLocked,
+		"NoWait on a contended row should return ErrLocked immediately")
+	assert.Less(t, elapsed, 500*time.Millisecond,
+		"NoWait must not block; returned after %v", elapsed)
+
+	release()
+}
+
+func TestTxLockByID_Options_SQLiteNoop(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Widget", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	for name, opt := range map[string]den.LockOption{
+		"SkipLocked": den.SkipLocked(),
+		"NoWait":     den.NoWait(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				locked, err := den.TxLockByID[Product](tx, p.ID, opt)
+				if err != nil {
+					return err
+				}
+				assert.Equal(t, "Widget", locked.Name)
+				return nil
+			})
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestTxLockByID_ConflictingOptions_LastWins(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "LastWins"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	locked, release := runContendedTx(t, db, p.ID)
+	<-locked
+
+	// SkipLocked first, then NoWait — NoWait must win → ErrLocked, not ErrNotFound.
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxLockByID[Product](tx, p.ID, den.SkipLocked(), den.NoWait())
+		return err
+	})
+	require.ErrorIs(t, err, den.ErrLocked)
+
+	release()
+}

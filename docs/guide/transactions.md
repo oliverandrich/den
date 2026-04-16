@@ -80,6 +80,32 @@ There is deliberately no non-transaction variant: a lock outside a transaction r
 !!! tip
     For most read-modify-write scenarios, **revision control** (`den.Settings{UseRevision: true}`) is the better choice — it works identically across both backends and does not hold database locks. Reach for `TxLockByID` when contention is high enough that retry storms are a concern, when the business logic between read and write is too expensive to repeat on conflict, or when you need a queue-consumer pattern.
 
+### Lock Modifiers
+
+Two options change how `TxLockByID` reacts to contention on PostgreSQL:
+
+- `den.SkipLocked()` — if another transaction holds the row, the query returns no rows. Mapped to `FOR UPDATE SKIP LOCKED`. The canonical queue-consumer primitive: N workers can each pop a different row without blocking each other.
+- `den.NoWait()` — if another transaction holds the row, fail immediately with `den.ErrLocked`. Mapped to `FOR UPDATE NOWAIT`. Use when the caller should choose between retry, abort, or an alternative path rather than wait.
+
+On SQLite both options are no-ops (writers are serialized at the database level).
+
+```go
+// Queue worker pattern: pop next unlocked job
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    job, err := den.TxLockByID[Job](tx, candidateID, den.SkipLocked())
+    if errors.Is(err, den.ErrNotFound) {
+        return nil // another worker owns it (or it really does not exist)
+    }
+    if err != nil {
+        return err
+    }
+    return processJob(tx, job)
+})
+```
+
+!!! warning "SKIP LOCKED returns `ErrNotFound`"
+    PostgreSQL returns zero rows for both "locked by another tx" and "row does not exist" when `SKIP LOCKED` is active — these cases are indistinguishable through the error alone. If you need to tell them apart, do a separate non-locking read first.
+
 ## Commit and Rollback
 
 The commit/rollback behavior is controlled entirely by the return value of the closure:

@@ -92,22 +92,58 @@ func TxFindByID[T any](tx *Tx, id string) (*T, error) {
 	return result, nil
 }
 
+// LockOption configures TxLockByID.
+type LockOption func(*lockConfig)
+
+type lockConfig struct {
+	mode LockMode
+}
+
+// SkipLocked makes TxLockByID return ErrNotFound immediately if another
+// transaction already holds the row lock, instead of blocking. Maps to
+// PostgreSQL's FOR UPDATE SKIP LOCKED. Useful for queue-consumer patterns
+// where each worker should claim a different row without contending.
+// On SQLite this option is a no-op.
+//
+// Because PostgreSQL returns zero rows for both "locked by another tx" and
+// "row does not exist", the caller cannot distinguish these cases via the
+// error alone.
+func SkipLocked() LockOption {
+	return func(c *lockConfig) { c.mode = LockSkipLocked }
+}
+
+// NoWait makes TxLockByID return ErrLocked immediately if another transaction
+// already holds the row lock, instead of blocking. Maps to PostgreSQL's
+// FOR UPDATE NOWAIT. Useful when the caller wants to decide between retry,
+// abort, or an alternative code path. On SQLite this option is a no-op.
+func NoWait() LockOption {
+	return func(c *lockConfig) { c.mode = LockNoWait }
+}
+
 // TxLockByID retrieves a document by ID and acquires a row-level lock that
-// persists for the lifetime of the transaction. Other transactions that try
-// to lock the same row will block until this transaction commits or rolls
-// back. On PostgreSQL this maps to SELECT ... FOR UPDATE; on SQLite it is a
-// no-op because IMMEDIATE transactions already serialize writers.
+// persists for the lifetime of the transaction. Without options, concurrent
+// transactions attempting to lock the same row block until this transaction
+// commits or rolls back. Pass SkipLocked or NoWait to change that behavior.
+//
+// On PostgreSQL this maps to SELECT ... FOR UPDATE; on SQLite it is a no-op
+// because IMMEDIATE transactions already serialize writers.
 //
 // Only callable inside RunInTransaction — a lock outside a transaction
 // releases immediately and would be meaningless. Returns ErrNotFound if the
-// document does not exist.
-func TxLockByID[T any](tx *Tx, id string) (*T, error) {
+// document does not exist. Returns ErrLocked when NoWait is set and the row
+// is held by another transaction.
+func TxLockByID[T any](tx *Tx, id string, opts ...LockOption) (*T, error) {
 	col, err := collectionFor[T](tx.db)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id)
+	cfg := lockConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id, cfg.mode)
 	if err != nil {
 		return nil, err
 	}

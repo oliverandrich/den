@@ -30,8 +30,8 @@ func (t *transaction) Get(ctx context.Context, collection, id string) ([]byte, e
 
 // GetForUpdate is a no-op lock on SQLite: IMMEDIATE transactions already
 // acquire a RESERVED lock on the whole database at BEGIN time, which serializes
-// all writers. Delegates to Get.
-func (t *transaction) GetForUpdate(ctx context.Context, collection, id string) ([]byte, error) {
+// all writers. Delegates to Get and ignores the mode parameter.
+func (t *transaction) GetForUpdate(ctx context.Context, collection, id string, _ den.LockMode) ([]byte, error) {
 	return t.Get(ctx, collection, id)
 }
 

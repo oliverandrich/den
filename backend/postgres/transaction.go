@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oliverandrich/den"
 )
@@ -28,13 +29,27 @@ func (t *transaction) Get(ctx context.Context, collection, id string) ([]byte, e
 	return data, nil
 }
 
-func (t *transaction) GetForUpdate(ctx context.Context, collection, id string) ([]byte, error) {
+func (t *transaction) GetForUpdate(ctx context.Context, collection, id string, mode den.LockMode) ([]byte, error) {
+	suffix := ""
+	switch mode {
+	case den.LockDefault:
+		// no modifier
+	case den.LockSkipLocked:
+		suffix = " SKIP LOCKED"
+	case den.LockNoWait:
+		suffix = " NOWAIT"
+	}
+	query := fmt.Sprintf("SELECT data::text FROM %s WHERE id = $1 FOR UPDATE%s", quoteIdent(collection), suffix)
+
 	var data []byte
-	query := fmt.Sprintf("SELECT data::text FROM %s WHERE id = $1 FOR UPDATE", quoteIdent(collection))
 	err := t.tx.QueryRow(ctx, query, id).Scan(&data)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, den.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+			return nil, den.ErrLocked
 		}
 		return nil, err
 	}

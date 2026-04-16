@@ -1574,6 +1574,22 @@ There is no non-transaction variant — a lock outside a transaction releases im
 
 Prefer revision control (`den.Settings{UseRevision: true}`) for most read-modify-write scenarios — it works identically across backends and does not hold database locks. Reach for `TxLockByID` only when retry storms are a concern, or when the work between read and write is too expensive to repeat on conflict.
 
+### Lock Modifiers
+
+Pass one of the following `LockOption` values to `TxLockByID` to change how contention is handled on PostgreSQL (no-op on SQLite):
+
+- `den.SkipLocked()` — if another transaction holds the row, return `ErrNotFound`. Maps to `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive.
+- `den.NoWait()` — if another transaction holds the row, return `ErrLocked` immediately. Maps to `FOR UPDATE NOWAIT`.
+
+```go
+job, err := den.TxLockByID[Job](tx, candidateID, den.SkipLocked())
+if errors.Is(err, den.ErrNotFound) {
+    return nil // another worker owns it, or the row does not exist
+}
+```
+
+Caveat: with `SkipLocked()`, zero rows is returned for both "locked" and "not exists". The error cannot distinguish them.
+
 ## Commit and Rollback
 
 The commit/rollback behavior is controlled entirely by the return value of the closure:

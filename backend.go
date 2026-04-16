@@ -77,10 +77,25 @@ type Transaction interface {
 
 	// GetForUpdate reads a document and acquires a row-level lock that
 	// persists until the transaction commits or rolls back. On PostgreSQL
-	// this maps to SELECT ... FOR UPDATE; on SQLite it is a no-op because
-	// IMMEDIATE transactions already serialize writers.
-	GetForUpdate(ctx context.Context, collection, id string) ([]byte, error)
+	// this maps to SELECT ... FOR UPDATE, optionally with SKIP LOCKED or
+	// NOWAIT. On SQLite it is a no-op because IMMEDIATE transactions
+	// already serialize writers; the mode parameter is ignored.
+	GetForUpdate(ctx context.Context, collection, id string, mode LockMode) ([]byte, error)
 }
+
+// LockMode selects the row-locking behavior used by GetForUpdate.
+type LockMode int
+
+const (
+	// LockDefault acquires the lock and blocks if another transaction holds it.
+	LockDefault LockMode = iota
+	// LockSkipLocked returns no row (ErrNotFound) if another transaction
+	// already holds the lock. Mapped to FOR UPDATE SKIP LOCKED on PostgreSQL.
+	LockSkipLocked
+	// LockNoWait returns ErrLocked immediately if another transaction
+	// already holds the lock. Mapped to FOR UPDATE NOWAIT on PostgreSQL.
+	LockNoWait
+)
 
 // Iterator provides sequential access to query results.
 type Iterator interface {

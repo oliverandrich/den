@@ -11,4 +11,5 @@ var (
 	ErrTransactionFailed = errors.New("den: transaction failed")
 	ErrNoSnapshot        = errors.New("den: no snapshot — document was never loaded from database")
 	ErrMigrationFailed   = errors.New("den: migration failed")
+	ErrLocked            = errors.New("den: row is locked by another transaction")
 )

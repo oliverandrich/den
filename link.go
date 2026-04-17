@@ -85,15 +85,20 @@ func WithLinkRule(rule LinkRule) CRUDOption {
 
 // FetchLink resolves a single named link field on a document.
 func FetchLink[T any](ctx context.Context, db *DB, doc *T, fieldName string) error {
-	return fetchLinkByName(ctx, db, doc, fieldName, 1)
+	return fetchLinkByName(ctx, db, db.backend, doc, fieldName, 1)
 }
 
 // FetchAllLinks resolves all link fields on a document.
 func FetchAllLinks[T any](ctx context.Context, db *DB, doc *T) error {
-	return fetchAllLinksOnDoc(ctx, db, doc, 1)
+	return fetchAllLinksOnDoc(ctx, db, db.backend, doc, 1)
 }
 
-func fetchLinkByName(ctx context.Context, db *DB, doc any, fieldName string, depth int) error {
+// fetchLinkByName resolves one named link field. The rw parameter carries
+// the ReadWriter that should service the actual Get for the linked document:
+// pass a Transaction from inside an open iterator so the read reuses the
+// same connection (avoids pool exhaustion) and, on stricter isolation
+// levels, the same snapshot. Fall back to db.backend when no tx is open.
+func fetchLinkByName(ctx context.Context, db *DB, rw ReadWriter, doc any, fieldName string, depth int) error {
 	if depth <= 0 {
 		return nil
 	}
@@ -114,28 +119,28 @@ func fetchLinkByName(ctx context.Context, db *DB, doc any, fieldName string, dep
 		fv := v.Field(lf.index)
 		if lf.slice {
 			for j := range fv.Len() {
-				if err := resolveSingleLink(ctx, db, fv.Index(j)); err != nil {
+				if err := resolveSingleLink(ctx, db, rw, fv.Index(j)); err != nil {
 					return err
 				}
 			}
 			return nil
 		}
-		return resolveSingleLink(ctx, db, fv)
+		return resolveSingleLink(ctx, db, rw, fv)
 	}
 	return fmt.Errorf("den: link field %q not found", fieldName)
 }
 
-func fetchAllLinksOnDoc(ctx context.Context, db *DB, doc any, depth int) error {
+func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, depth int) error {
 	if depth <= 0 {
 		return nil
 	}
 
 	return forEachLinkField(doc, func(elem reflect.Value) error {
-		return resolveSingleLink(ctx, db, elem)
+		return resolveSingleLink(ctx, db, rw, elem)
 	})
 }
 
-func resolveSingleLink(ctx context.Context, db *DB, linkVal reflect.Value) error {
+func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal reflect.Value) error {
 	idField := linkVal.FieldByName("ID")
 	if !idField.IsValid() || idField.String() == "" {
 		return nil
@@ -162,8 +167,10 @@ func resolveSingleLink(ctx context.Context, db *DB, linkVal reflect.Value) error
 	}
 	colName := col.meta.Name
 
-	// Fetch the document
-	data, err := db.backend.Get(ctx, colName, id)
+	// Fetch the document via the caller-supplied ReadWriter so that,
+	// when called from inside an iterator's TX, the read reuses the same
+	// connection instead of grabbing a second one from the pool.
+	data, err := rw.Get(ctx, colName, id)
 	if err != nil {
 		return err
 	}

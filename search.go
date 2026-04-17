@@ -43,7 +43,7 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 		}
 
 		if qs.fetchLinks {
-			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, doc, qs.nestDepth); err != nil {
+			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, qs.db.backend, doc, qs.nestDepth); err != nil {
 				return nil, fmt.Errorf("fetch links: %w", err)
 			}
 		}

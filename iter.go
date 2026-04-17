@@ -40,7 +40,7 @@ func (qs QuerySet[T]) Iter() iter.Seq2[*T, error] {
 			}
 
 			if qs.fetchLinks {
-				if err := fetchAllLinksOnDoc(qs.ctx, qs.db, doc, qs.nestDepth); err != nil {
+				if err := fetchAllLinksOnDoc(qs.ctx, qs.db, qs.db.backend, doc, qs.nestDepth); err != nil {
 					if !yield(nil, fmt.Errorf("fetch links: %w", err)) {
 						return
 					}

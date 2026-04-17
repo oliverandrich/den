@@ -2,6 +2,7 @@ package den
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -21,6 +22,9 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 
 		info, err := internal.AnalyzeStruct(t)
 		if err != nil {
+			if errors.Is(err, internal.ErrInvalidFieldName) {
+				return fmt.Errorf("%w: analyze %s: %w", ErrValidation, t.Name(), err)
+			}
 			return fmt.Errorf("analyze %s: %w", t.Name(), err)
 		}
 

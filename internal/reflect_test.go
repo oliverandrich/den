@@ -99,6 +99,58 @@ func TestParseDenTag_UnknownMixed(t *testing.T) {
 	assert.Contains(t, err.Error(), "typo")
 }
 
+// The following types carry intentionally malformed json tags so we can
+// verify AnalyzeStruct rejects them. staticcheck (SA5008) flags the tags
+// as invalid JSON field names — that is exactly what we're testing.
+//
+//nolint:staticcheck
+func TestAnalyzeStruct_RejectsInvalidJSONName(t *testing.T) {
+	type badSemicolon struct {
+		testBase
+		X string `json:"name';DROP TABLE foo;--"`
+	}
+	type badQuote struct {
+		testBase
+		X string `json:"a'b"`
+	}
+	type badDoubleQuote struct {
+		testBase
+		X string `json:"a\"b"`
+	}
+	type badDot struct {
+		testBase
+		X string `json:"a.b"`
+	}
+	type badSpace struct {
+		testBase
+		X string `json:"a b"`
+	}
+
+	tests := []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{"semicolon injection", reflect.TypeFor[badSemicolon]()},
+		{"single quote", reflect.TypeFor[badQuote]()},
+		{"double quote", reflect.TypeFor[badDoubleQuote]()},
+		{"dot", reflect.TypeFor[badDot]()},
+		{"space", reflect.TypeFor[badSpace]()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := AnalyzeStruct(tt.typ)
+			require.ErrorIs(t, err, ErrInvalidFieldName)
+			assert.Contains(t, err.Error(), "field X", "error should name the Go field")
+		})
+	}
+}
+
+func TestAnalyzeStruct_NoJSONTagFallsBackToLowercase(t *testing.T) {
+	_, err := AnalyzeStruct(reflect.TypeFor[noTagDoc]())
+	require.NoError(t, err, "empty json tag should fall back to strings.ToLower(fieldname), which is always valid")
+}
+
 func TestParseJSONTagName(t *testing.T) {
 	tests := []struct {
 		tag  string

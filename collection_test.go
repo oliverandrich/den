@@ -86,6 +86,67 @@ func (d CustomNameDoc) DenSettings() den.Settings {
 	return den.Settings{CollectionName: "custom_docs"}
 }
 
+// DocWithSQLInjectionTag carries an intentionally malicious json tag so we
+// can verify Register rejects it at registration time before the name ever
+// reaches SQL construction. staticcheck (SA5008) flags the tag as invalid —
+// that is exactly what we're testing.
+//
+//nolint:staticcheck
+type DocWithSQLInjectionTag struct {
+	document.Base
+	X string `json:"name';DROP TABLE foo;--"`
+}
+
+//nolint:staticcheck
+type DocWithSingleQuoteTag struct {
+	document.Base
+	X string `json:"a'b"`
+}
+
+//nolint:staticcheck
+type DocWithDoubleQuoteTag struct {
+	document.Base
+	X string `json:"a\"b"`
+}
+
+func TestRegister_RejectsInjectionInFieldName_SQLite(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  any
+	}{
+		{"semicolon injection", &DocWithSQLInjectionTag{}},
+		{"single quote", &DocWithSingleQuoteTag{}},
+		{"double quote", &DocWithDoubleQuoteTag{}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			db := dentest.MustOpen(t) // no types, so Register can fail
+			err := den.Register(context.Background(), db, tt.doc)
+			require.ErrorIs(t, err, den.ErrValidation,
+				"Register must reject malicious field names with ErrValidation")
+		})
+	}
+}
+
+func TestRegister_RejectsInjectionInFieldName_Postgres(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  any
+	}{
+		{"semicolon injection", &DocWithSQLInjectionTag{}},
+		{"single quote", &DocWithSingleQuoteTag{}},
+		{"double quote", &DocWithDoubleQuoteTag{}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			db := dentest.MustOpenPostgres(t, dentest.PostgresURL())
+			err := den.Register(context.Background(), db, tt.doc)
+			require.ErrorIs(t, err, den.ErrValidation,
+				"Register must reject malicious field names with ErrValidation")
+		})
+	}
+}
+
 func TestRegister_CustomCollectionName(t *testing.T) {
 	db := dentest.MustOpen(t, &CustomNameDoc{})
 	ctx := context.Background()

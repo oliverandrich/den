@@ -160,6 +160,9 @@ func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
 		if name == "" {
 			name = strings.ToLower(field.Name)
 		}
+		if err := ValidateFieldName(name); err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
+		}
 
 		denTag := field.Tag.Get("den")
 		opts, err := ParseDenTag(denTag)

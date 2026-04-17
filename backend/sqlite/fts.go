@@ -11,7 +11,16 @@ import (
 // EnsureFTS creates an FTS5 virtual table and sync triggers for the collection.
 func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []string) error {
 	ftsTable := collection + "_fts"
-	fieldList := strings.Join(fields, ", ")
+
+	// Defense in depth: sanitize every field name before it lands in the bare
+	// FTS column list. Registration-time validation should already have rejected
+	// anything unsafe, but sanitize again here so no raw %s of a field name
+	// survives SQL construction.
+	sanitized := make([]string, len(fields))
+	for i, f := range fields {
+		sanitized[i] = sanitizeFieldName(f)
+	}
+	fieldList := strings.Join(sanitized, ", ")
 
 	// Create FTS5 virtual table
 	createFTS := fmt.Sprintf(

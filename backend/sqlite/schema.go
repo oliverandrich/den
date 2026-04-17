@@ -43,7 +43,7 @@ func createExpressionIndex(ctx context.Context, db *sql.DB, collection string, i
 
 	exprs := make([]string, len(idx.Fields))
 	for i, f := range idx.Fields {
-		exprs[i] = fmt.Sprintf("json_extract(data, '$.%s')", f)
+		exprs[i] = fmt.Sprintf("json_extract(data, '$.%s')", sanitizeFieldName(f))
 	}
 	exprList := strings.Join(exprs, ", ")
 
@@ -57,7 +57,7 @@ func createExpressionIndex(ctx context.Context, db *sql.DB, collection string, i
 	if idx.Unique {
 		parts := make([]string, len(idx.Fields))
 		for i, f := range idx.Fields {
-			parts[i] = fmt.Sprintf("json_extract(data, '$.%s') IS NOT NULL", f)
+			parts[i] = fmt.Sprintf("json_extract(data, '$.%s') IS NOT NULL", sanitizeFieldName(f))
 		}
 		whereClause = " WHERE " + strings.Join(parts, " AND ")
 	}

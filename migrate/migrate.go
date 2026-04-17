@@ -48,16 +48,13 @@ func (r *Registry) Register(version string, m Migration) {
 }
 
 // Up runs all pending forward migrations, each in its own transaction.
+// Concurrent starters serialize on an advisory lock; every registered
+// migration runs exactly once across processes.
 func (r *Registry) Up(ctx context.Context, db *den.DB) error {
-	applied, err := loadApplied(ctx, db)
-	if err != nil {
+	if err := ensureMigrationTable(ctx, db); err != nil {
 		return err
 	}
-
 	for _, m := range r.migrations {
-		if slices.Contains(applied, m.version) {
-			continue
-		}
 		if err := runForward(ctx, db, m); err != nil {
 			return err
 		}
@@ -66,7 +63,12 @@ func (r *Registry) Up(ctx context.Context, db *den.DB) error {
 }
 
 // UpOne runs the next pending forward migration in a transaction.
+// Loads the current applied set to find the first pending version; the
+// actual "apply exactly once" guarantee comes from the lock in runForward.
 func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
+	if err := ensureMigrationTable(ctx, db); err != nil {
+		return err
+	}
 	applied, err := loadApplied(ctx, db)
 	if err != nil {
 		return err
@@ -128,12 +130,41 @@ func (r *Registry) Down(ctx context.Context, db *den.DB) error {
 	return nil
 }
 
+// migrationLockKey is the advisory-lock key used to serialize concurrent
+// migration runners. The value is arbitrary and only needs to be stable so
+// two starters contend on the same key; "den.migrate" CRC32 keeps it
+// distinct from any other advisory lock a user might use in their own code.
+const migrationLockKey int64 = 0x44656e4d4947524e // "DenMIGRN"
+
 func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
 	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		// Serialize concurrent starters: on PG this is pg_advisory_xact_lock,
+		// on SQLite a no-op (IMMEDIATE tx already serializes writers).
+		if err := den.TxAdvisoryLock(tx, migrationLockKey); err != nil {
+			return err
+		}
+
+		// Re-read the applied set inside the tx+lock so we see writes
+		// committed by any other starter that went first.
+		entries, err := loadEntriesFromTx(tx)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.Version == m.version {
+				return nil // another starter got here first
+			}
+		}
+
 		if err := m.migration.Forward(ctx, tx); err != nil {
 			return fmt.Errorf("%w: %s: %w", den.ErrMigrationFailed, m.version, err)
 		}
-		return markApplied(ctx, tx, m.version)
+
+		entries = append(entries, migrationEntry{
+			Version:   m.version,
+			AppliedAt: time.Now(),
+		})
+		return saveEntriesToTx(tx, entries)
 	})
 }
 
@@ -189,23 +220,6 @@ func loadApplied(ctx context.Context, db *den.DB) ([]string, error) {
 		versions[i] = e.Version
 	}
 	return versions, nil
-}
-
-// markApplied and unmarkApplied work on the transaction backend
-// so they are atomic with the migration itself.
-
-func markApplied(_ context.Context, tx *den.Tx, version string) error {
-	entries, err := loadEntriesFromTx(tx)
-	if err != nil {
-		return err
-	}
-
-	entries = append(entries, migrationEntry{
-		Version:   version,
-		AppliedAt: time.Now(),
-	})
-
-	return saveEntriesToTx(tx, entries)
 }
 
 func unmarkApplied(_ context.Context, tx *den.Tx, version string) error {

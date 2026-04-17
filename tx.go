@@ -181,3 +181,11 @@ func TxGet(tx *Tx, collection, id string) ([]byte, error) {
 func TxPut(tx *Tx, collection, id string, data []byte) error {
 	return tx.tx.Put(tx.ctx, collection, id, data)
 }
+
+// TxAdvisoryLock acquires an application-defined lock on key that persists
+// until the transaction commits or rolls back. Concurrent transactions
+// attempting to lock the same key block until the holder ends. See the
+// Transaction interface for backend-specific behavior.
+func TxAdvisoryLock(tx *Tx, key int64) error {
+	return tx.tx.AdvisoryLock(tx.ctx, key)
+}

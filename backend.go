@@ -81,6 +81,18 @@ type Transaction interface {
 	// NOWAIT. On SQLite it is a no-op because IMMEDIATE transactions
 	// already serialize writers; the mode parameter is ignored.
 	GetForUpdate(ctx context.Context, collection, id string, mode LockMode) ([]byte, error)
+
+	// AdvisoryLock acquires an application-defined lock identified by key
+	// that persists until the transaction commits or rolls back. Concurrent
+	// transactions attempting to acquire the same key block until the holder
+	// ends. Unlike GetForUpdate this does not require a row to exist, so it
+	// is suitable for bootstrap paths like coordinating concurrent migration
+	// starters before any state row has been written.
+	//
+	// On PostgreSQL this maps to pg_advisory_xact_lock. On SQLite it is a
+	// no-op because IMMEDIATE transactions already serialize writers on the
+	// whole database.
+	AdvisoryLock(ctx context.Context, key int64) error
 }
 
 // LockMode selects the row-locking behavior used by GetForUpdate.

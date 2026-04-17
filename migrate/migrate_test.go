@@ -2,6 +2,8 @@ package migrate
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -222,6 +224,68 @@ func TestDown_NoBackwardFunction(t *testing.T) {
 	err := r.Down(ctx, db)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no backward function")
+}
+
+// concurrentUpTest runs N goroutines calling Up concurrently against the
+// same DB. Each migration's Forward must be called exactly once even under
+// contention — two concurrent starters must not both run the same version.
+func concurrentUpTest(t *testing.T, db *den.DB) {
+	t.Helper()
+
+	const goroutines = 8
+	const migrations = 3
+
+	// counters[i] is bumped inside migration i's Forward; after the test
+	// each must be exactly 1.
+	var counters [migrations]atomic.Int32
+
+	r := NewRegistry()
+	for i := range migrations {
+		idx := i
+		r.Register(versionName(idx), Migration{
+			Forward: func(_ context.Context, _ *den.Tx) error {
+				counters[idx].Add(1)
+				return nil
+			},
+		})
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	for g := range goroutines {
+		wg.Add(1)
+		go func(gi int) {
+			defer wg.Done()
+			errs[gi] = r.Up(context.Background(), db)
+		}(g)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoErrorf(t, err, "goroutine %d", i)
+	}
+	for i := range counters {
+		assert.Equalf(t, int32(1), counters[i].Load(),
+			"migration %d must run exactly once across %d concurrent starters", i, goroutines)
+	}
+}
+
+func versionName(i int) string {
+	return []string{"001_a", "002_b", "003_c"}[i]
+}
+
+func TestUp_ConcurrentStarters_SQLite(t *testing.T) {
+	db := dentest.MustOpen(t)
+	concurrentUpTest(t, db)
+}
+
+func TestUp_ConcurrentStarters_Postgres(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL())
+	// dentest's PG cleanup only drops registered collections; _den_migrations
+	// is unregistered, so entries from prior test runs stick. Reset here so
+	// each run starts from an empty applied set.
+	require.NoError(t, db.Backend().DropCollection(context.Background(), "_den_migrations"))
+	concurrentUpTest(t, db)
 }
 
 func TestDown_BackwardError(t *testing.T) {

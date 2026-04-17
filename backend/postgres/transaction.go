@@ -28,6 +28,11 @@ func (t *transaction) Get(ctx context.Context, collection, id string) ([]byte, e
 	return data, nil
 }
 
+func (t *transaction) AdvisoryLock(ctx context.Context, key int64) error {
+	_, err := t.tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", key)
+	return mapPGError(err)
+}
+
 func (t *transaction) GetForUpdate(ctx context.Context, collection, id string, mode den.LockMode) ([]byte, error) {
 	suffix := ""
 	switch mode {

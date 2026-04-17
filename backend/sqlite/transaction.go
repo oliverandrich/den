@@ -35,6 +35,12 @@ func (t *transaction) GetForUpdate(ctx context.Context, collection, id string, _
 	return t.Get(ctx, collection, id)
 }
 
+// AdvisoryLock is a no-op on SQLite: IMMEDIATE transactions already serialize
+// all writers on the whole database, so a key-based lock would be redundant.
+func (t *transaction) AdvisoryLock(_ context.Context, _ int64) error {
+	return nil
+}
+
 func (t *transaction) Put(ctx context.Context, collection, id string, data []byte) error {
 	_, err := t.tx.ExecContext(ctx,
 		fmt.Sprintf("INSERT INTO %q (id, data) VALUES (?, jsonb(?)) ON CONFLICT(id) DO UPDATE SET data = jsonb(?)", collection),

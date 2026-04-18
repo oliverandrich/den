@@ -94,7 +94,7 @@ houses[0].Door.IsLoaded() // false
 
 ### Eager (WithFetchLinks)
 
-Resolve all links during the query. Additional lookups happen within the same transaction for read consistency:
+Resolve all links during the query:
 
 ```go
 houses, err := den.NewQuery[House](db,
@@ -106,13 +106,17 @@ houses[0].Door.IsLoaded() // true
 houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 ```
 
+`.All(ctx)` drains the result first, then runs **one batched `WHERE _id IN (…)` query per target type per nesting level**. IDs are deduplicated, so a hot target referenced by many parents is fetched once and the decoded pointer is shared across all matching slots — `houses[0].Door.Value == houses[1].Door.Value` when they point at the same ID. `AllWithCount` and `Search` use the same batched path.
+
+`.Iter(ctx).WithFetchLinks()` resolves per row instead, because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract. Use `.Iter` when the result set is too large to materialize; otherwise prefer `.All` so you get the batched resolver.
+
 === "SQLite"
 
-    Each link resolution is a direct in-process lookup -- no network overhead.
+    Each link resolution is a direct in-process lookup -- no network overhead. Batching still cuts allocations and decode work.
 
 === "PostgreSQL"
 
-    Link fetches are batched into a single query where possible, minimizing round trips.
+    Each batch collapses N per-row `SELECT` round-trips into one `WHERE _id IN (…)`. On a 20-parent fixture with one shared link, this takes `WithFetchLinks` from ~1.6 ms down to ~630 µs.
 
 ### On-Demand (FetchLink / FetchAllLinks)
 
@@ -219,11 +223,13 @@ Override the depth for a specific query:
 
 ```go
 houses, err := den.NewQuery[House](db).
-    WithFetchLinks().WithNestingDepth(1).All(ctx)
+    WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
 
-!!! note
-    When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved -- they contain the ID but `Value` is `nil` and `IsLoaded()` returns `false`. This prevents infinite loops and bounds resource consumption.
+With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query per target type for `Mid`, then one query per target type for `Leaf` on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
+
+!!! warning "Recursion requires `.All` (or `.AllWithCount` / `.Search`)"
+    Nested resolution only descends in the batched paths. Streaming `.Iter(ctx)` resolves the direct level of every yielded document but does not recurse into loaded targets — it would otherwise have to buffer results to run a coherent batch.
 
 ## Complete Example
 

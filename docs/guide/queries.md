@@ -232,14 +232,18 @@ houses, err := den.NewQuery[House](db).WithFetchLinks().All(ctx)
 // houses[0].Windows[0].Value != nil
 ```
 
+`.All(ctx)` runs one batched `WHERE _id IN (…)` per target type per nesting level and deduplicates ids across parents — shared targets are fetched once and the pointer is shared. `.Iter(ctx)` keeps its per-row resolver to preserve streaming. See the [Relations guide](relations.md#eager-withfetchlinks) for the full behavior.
+
 ### WithNestingDepth
 
 Control how deep link resolution recurses (default: 3):
 
 ```go
 houses, err := den.NewQuery[House](db).
-    WithFetchLinks().WithNestingDepth(1).All(ctx)
+    WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
+
+Recursion runs on `.All` / `.AllWithCount` / `.Search`; streaming `.Iter` only resolves the direct level.
 
 ### IncludeDeleted
 

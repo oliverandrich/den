@@ -21,35 +21,37 @@ Module: `github.com/oliverandrich/den`
 
 ## CRUD
 
+Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interface satisfied by both `*DB` (operating outside a transaction) and `*Tx` (operating inside `RunInTransaction`). Pass whichever you have.
+
 ### Insert
 
 | Function | Signature | Description |
 |---|---|---|
-| `Insert[T]` | `Insert[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, db *DB, docs []*T) error` | Insert multiple documents in a single batch |
+| `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
+| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction |
 
 ### Read
 
 | Function | Signature | Description |
 |---|---|---|
-| `FindByID[T]` | `FindByID[T](ctx context.Context, db *DB, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
-| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, db *DB, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
+| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
+| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
 
 ### Update
 
 | Function | Signature | Description |
 |---|---|---|
-| `Update[T]` | `Update[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
-| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, db *DB, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
-| `Refresh[T]` | `Refresh[T](ctx context.Context, db *DB, doc *T) error` | Re-read the document from storage, replacing all field values |
+| `Update[T]` | `Update[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
+| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
+| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T) error` | Re-read the document from storage, replacing all field values |
 
 ### Delete
 
 | Function | Signature | Description |
 |---|---|---|
-| `Delete[T]` | `Delete[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
-| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
-| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete`/`TxDelete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, db, doc, den.HardDelete())` |
+| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
+| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
+| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
 
 ---
 
@@ -139,9 +141,9 @@ err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 | Function | Signature | Description |
 |---|---|---|
 | `NewLink[T]` | `NewLink[T any](doc *T) Link[T]` | Create a Link from an existing document, extracting its ID |
-| `FetchLink[T]` | `FetchLink[T](ctx context.Context, db *DB, doc *T, field string) error` | Fetch and resolve a single link field on a document |
-| `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, db *DB, doc *T) error` | Fetch and resolve all link fields on a document |
-| `BackLinks[T]` | `BackLinks[T](ctx context.Context, db *DB, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
+| `FetchLink[T]` | `FetchLink[T](ctx context.Context, s Scope, doc *T, field string) error` | Fetch and resolve a single link field on a document |
+| `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, s Scope, doc *T) error` | Fetch and resolve all link fields on a document |
+| `BackLinks[T]` | `BackLinks[T](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
 | `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
 
 ### Link Rules
@@ -168,21 +170,20 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 
 ## Transactions
 
+`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Insert`/`Update`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
+
 | Function | Signature | Description |
 |---|---|---|
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
-| `TxFindByID[T]` | `TxFindByID[T](tx *Tx, id string) (*T, error)` | Find a document by ID within a transaction |
-| `TxLockByID[T]` | `TxLockByID[T](tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (`SELECT ... FOR UPDATE` on PostgreSQL; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
-| `SkipLocked` | `SkipLocked() LockOption` | `TxLockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
-| `NoWait` | `NoWait() LockOption` | `TxLockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
-| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First` |
-| `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
-| `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
-| `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |
-| `TxRawGet` | `TxRawGet(tx *Tx, collection string, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction. Intended for infrastructure code (for example, a migration log) writing its own bookkeeping collection; prefer `TxFindByID` for normal reads |
-| `TxRawPut` | `TxRawPut(tx *Tx, collection string, id string, data []byte) error` | Write raw bytes into a transaction under the given collection and ID, bypassing encoding and registry checks. Same audience as `TxRawGet` |
+| `LockByID[T]` | `LockByID[T](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (`SELECT ... FOR UPDATE` on PostgreSQL; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
+| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `LockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
+| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All(ctx)`, `First(ctx)` |
+| `RawGet` | `RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction. Intended for infrastructure code (for example, a migration log) writing its own bookkeeping collection; prefer `FindByID` for normal reads |
+| `RawPut` | `RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error` | Write raw bytes into a transaction under the given collection and ID, bypassing encoding and registry checks. Same audience as `RawGet` |
+| `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
 
-> **Note:** All standard CRUD operations have `Tx` variants for use inside transactions.
+> **Note:** Standard CRUD operations (`Insert`, `Update`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
 
 ---
 
@@ -241,8 +242,9 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 
 | Type | Description |
 |---|---|
-| `DB` | Database handle; holds the backend and collection registry |
-| `Tx` | Transaction handle; wraps a backend transaction |
+| `DB` | Database handle; holds the backend and collection registry. Satisfies `Scope` |
+| `Tx` | Transaction handle; wraps a backend transaction. Satisfies `Scope` |
+| `Scope` | Sealed interface satisfied by `*DB` and `*Tx`. Parameter type for all CRUD entry points so the same function works inside and outside a transaction |
 | `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
 | `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate` and bulk `Update` |
 | `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |

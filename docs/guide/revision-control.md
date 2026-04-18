@@ -73,7 +73,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     // Read the document within the transaction.
     // SQLite: the IMMEDIATE transaction already holds an exclusive write lock.
     // PostgreSQL: the transaction provides a consistent snapshot.
-    p, err := den.TxFindByID[Product](tx, id)
+    p, err := den.FindByID[Product](ctx, tx, id)
     if err != nil {
         return err
     }
@@ -82,7 +82,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
     // The revision check ensures no one modified the document
     // between our read and this write.
-    return den.TxUpdate(tx, p)
+    return den.Update(ctx, tx, p)
 })
 ```
 
@@ -91,12 +91,12 @@ If the revision check fails, the transaction rolls back and you can retry:
 ```go
 for range 3 {
     err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-        p, err := den.TxFindByID[Product](tx, id)
+        p, err := den.FindByID[Product](ctx, tx, id)
         if err != nil {
             return err
         }
         p.Price = 29.99
-        return den.TxUpdate(tx, p)
+        return den.Update(ctx, tx, p)
     })
     if !errors.Is(err, den.ErrRevisionConflict) {
         break

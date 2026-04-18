@@ -113,3 +113,8 @@ func (db *DB) Backend() Backend {
 func (db *DB) Ping(ctx context.Context) error {
 	return db.backend.Ping(ctx)
 }
+
+// readWriter / db together satisfy the sealed Scope interface. They are
+// intentionally unexported so only *DB and *Tx can implement Scope.
+func (db *DB) readWriter() ReadWriter { return db.backend }
+func (db *DB) db() *DB                { return db }

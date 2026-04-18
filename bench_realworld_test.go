@@ -401,12 +401,12 @@ func runRWTransaction(b *testing.B, db *den.DB) {
 	i := 0
 	for b.Loop() {
 		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			doc, err := den.TxFindByID[BenchArticle](tx, ids[i%len(ids)])
+			doc, err := den.FindByID[BenchArticle](ctx, tx, ids[i%len(ids)])
 			if err != nil {
 				return err
 			}
 			doc.Stock++
-			return den.TxUpdate(tx, doc)
+			return den.Update(ctx, tx, doc)
 		})
 		if err != nil {
 			b.Fatal(err)

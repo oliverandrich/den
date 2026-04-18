@@ -366,7 +366,7 @@ func TestWithLinkRule_Write_TransactionRollback(t *testing.T) {
 
 	// Insert with cascade inside a transaction that rolls back
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.TxInsert(tx, house, den.WithLinkRule(den.LinkWrite)); err != nil {
+		if err := den.Insert(ctx, tx, house, den.WithLinkRule(den.LinkWrite)); err != nil {
 			return err
 		}
 		return errors.New("force rollback")

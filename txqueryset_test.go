@@ -30,7 +30,7 @@ func TestNewTxQuery_All(t *testing.T) {
 				items, err := den.NewTxQuery[Product](tx).
 					Where(where.Field("price").Gte(2.0)).
 					Sort("price", den.Asc).
-					All()
+					All(ctx)
 				if err != nil {
 					return err
 				}
@@ -50,7 +50,7 @@ func TestNewTxQuery_First(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Only"}))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.NewTxQuery[Product](tx).First()
+		found, err := den.NewTxQuery[Product](tx).First(ctx)
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func TestNewTxQuery_First_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewTxQuery[Product](tx).First()
+		_, err := den.NewTxQuery[Product](tx).First(ctx)
 		return err
 	})
 	require.ErrorIs(t, err, den.ErrNotFound)
@@ -88,7 +88,7 @@ func TestNewTxQuery_ForUpdate_SkipLocked(t *testing.T) {
 		items, err := den.NewTxQuery[Product](tx).
 			Sort("name", den.Asc).
 			ForUpdate(den.SkipLocked()).
-			All()
+			All(ctx)
 		if err != nil {
 			return err
 		}
@@ -119,7 +119,7 @@ func TestNewTxQuery_ForUpdate_NoWait(t *testing.T) {
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		_, err := den.NewTxQuery[Product](tx).
 			ForUpdate(den.NoWait()).
-			All()
+			All(ctx)
 		return err
 	})
 	elapsed := time.Since(start)
@@ -140,7 +140,7 @@ func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		_, err := den.NewTxQuery[Product](tx).
 			ForUpdate(den.SkipLocked(), den.NoWait()).
-			All()
+			All(ctx)
 		return err
 	})
 	require.Error(t, err)
@@ -149,7 +149,7 @@ func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		_, err := den.NewTxQuery[Product](tx).
 			ForUpdate(den.NoWait(), den.SkipLocked()).
-			First()
+			First(ctx)
 		return err
 	})
 	require.Error(t, err)
@@ -194,7 +194,7 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 			_, err := den.NewTxQuery[Product](tx).
 				Where(where.Field("price").Lte(15.0)).
 				ForUpdate().
-				All()
+				All(ctx)
 			// Small hold to guarantee both TXs overlap in the lock window.
 			time.Sleep(100 * time.Millisecond)
 			return err
@@ -207,7 +207,7 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 			_, err := den.NewTxQuery[Product](tx).
 				Where(where.Field("price").Gte(5.0)).
 				ForUpdate().
-				All()
+				All(ctx)
 			time.Sleep(100 * time.Millisecond)
 			return err
 		})
@@ -235,7 +235,7 @@ func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		items, err := den.NewTxQuery[Product](tx).
 			ForUpdate(den.SkipLocked()).
-			All()
+			All(ctx)
 		if err != nil {
 			return err
 		}

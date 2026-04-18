@@ -11,12 +11,12 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     // All operations here share the same database transaction.
     // Reads see a consistent snapshot.
 
-    sender, err := den.TxFindByID[Account](tx, senderID)
+    sender, err := den.FindByID[Account](ctx, tx, senderID)
     if err != nil {
         return err // rolls back
     }
 
-    receiver, err := den.TxFindByID[Account](tx, receiverID)
+    receiver, err := den.FindByID[Account](ctx, tx, receiverID)
     if err != nil {
         return err // rolls back
     }
@@ -24,10 +24,10 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     sender.Balance -= amount
     receiver.Balance += amount
 
-    if err := den.TxUpdate(tx, sender); err != nil {
+    if err := den.Update(ctx, tx, sender); err != nil {
         return err // rolls back
     }
-    if err := den.TxUpdate(tx, receiver); err != nil {
+    if err := den.Update(ctx, tx, receiver); err != nil {
         return err // rolls back
     }
 
@@ -37,25 +37,36 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ## Transaction Functions
 
-Inside a transaction closure, use the `Tx`-prefixed variants of Den's CRUD functions:
+CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Insert(ctx, scope, &doc)` works outside and inside a transaction:
 
-| Standard API | Transaction API |
+```go
+// Outside a transaction
+den.Insert(ctx, db, &product)
+
+// Inside a transaction — same function, same signature
+den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    return den.Insert(ctx, tx, &product)
+})
+```
+
+`Scope` is sealed: only `*DB` and `*Tx` satisfy it. Backend authors do not need to care — they implement `Backend` / `Transaction` as before.
+
+A handful of APIs remain transaction-only because their semantics are tied to transaction lifetime (a lock outside a transaction would release immediately; raw bytes without rollback would leak half-written state). They take `*den.Tx` directly rather than `Scope`:
+
+| API | Why transaction-only |
 |---|---|
-| `den.FindByID[T](ctx, db, id)` | `den.TxFindByID[T](tx, id)` |
-| `den.Insert(ctx, db, &doc)` | `den.TxInsert(tx, &doc)` |
-| `den.Update(ctx, db, &doc)` | `den.TxUpdate(tx, &doc)` |
-| `den.Delete(ctx, db, &doc)` | `den.TxDelete(tx, &doc)` |
-| — (transaction-only) | `den.TxLockByID[T](tx, id)` |
-
-These functions operate on the `*den.Tx` instead of the `*den.DB`, ensuring all reads and writes go through the same underlying database transaction.
+| `den.LockByID[T](ctx, tx, id, opts...)` | Row-level lock released on commit/rollback |
+| `den.RawGet(ctx, tx, coll, id)` / `den.RawPut(ctx, tx, coll, id, data)` | Raw-bytes escape hatch; rollback safety matters |
+| `den.AdvisoryLock(ctx, tx, key)` | Application-level lock released on commit/rollback |
+| `den.NewTxQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking |
 
 ## Row-Level Locking
 
-`den.TxLockByID[T](tx, id)` reads a document and acquires a row-level lock that persists for the lifetime of the transaction. Other transactions that try to lock the same row block until this transaction commits or rolls back.
+`den.LockByID[T](ctx, tx, id)` reads a document and acquires a row-level lock that persists for the lifetime of the transaction. Other transactions that try to lock the same row block until this transaction commits or rolls back.
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    item, err := den.TxLockByID[Inventory](tx, itemID)
+    item, err := den.LockByID[Inventory](ctx, tx, itemID)
     if err != nil {
         return err
     }
@@ -63,7 +74,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         return ErrOutOfStock
     }
     item.Stock -= qty
-    return den.TxUpdate(tx, item)
+    return den.Update(ctx, tx, item)
 })
 ```
 
@@ -75,33 +86,33 @@ There is deliberately no non-transaction variant: a lock outside a transaction r
 
 === "SQLite"
 
-    No-op. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing. `TxLockByID` behaves identically to `TxFindByID` on SQLite.
+    No-op. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing. `LockByID` behaves identically to `FindByID` on SQLite.
 
 !!! tip
-    For most read-modify-write scenarios, **revision control** (`den.Settings{UseRevision: true}`) is the better choice — it works identically across both backends and does not hold database locks. Reach for `TxLockByID` when contention is high enough that retry storms are a concern, when the business logic between read and write is too expensive to repeat on conflict, or when you need a queue-consumer pattern.
+    For most read-modify-write scenarios, **revision control** (`den.Settings{UseRevision: true}`) is the better choice — it works identically across both backends and does not hold database locks. Reach for `LockByID` when contention is high enough that retry storms are a concern, when the business logic between read and write is too expensive to repeat on conflict, or when you need a queue-consumer pattern.
 
 ### Lock Modifiers
 
-Two options change how `TxLockByID` reacts to contention on PostgreSQL:
+Two options change how `LockByID` reacts to contention on PostgreSQL:
 
 - `den.SkipLocked()` — if another transaction holds the row, the query returns no rows. Mapped to `FOR UPDATE SKIP LOCKED`. The canonical queue-consumer primitive: N workers can each pop a different row without blocking each other.
 - `den.NoWait()` — if another transaction holds the row, fail immediately with `den.ErrLocked`. Mapped to `FOR UPDATE NOWAIT`. Use when the caller should choose between retry, abort, or an alternative path rather than wait.
 
-`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `TxLockByID` returns an error; passing both to `TxQuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
+`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `LockByID` returns an error; passing both to `TxQuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
 
 On SQLite both options are no-ops (writers are serialized at the database level).
 
 ```go
 // Queue worker pattern: pop next unlocked job
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    job, err := den.TxLockByID[Job](tx, candidateID, den.SkipLocked())
+    job, err := den.LockByID[Job](ctx, tx, candidateID, den.SkipLocked())
     if errors.Is(err, den.ErrNotFound) {
         return nil // another worker owns it (or it really does not exist)
     }
     if err != nil {
         return err
     }
-    return processJob(tx, job)
+    return processJob(ctx, tx, job)
 })
 ```
 
@@ -110,7 +121,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ### Multi-row Locking
 
-`den.NewTxQuery[T](tx)` provides a chainable query builder bound to the current transaction. Its `ForUpdate(opts ...LockOption)` method locks every matching row in a single statement — avoids the N+1 round-trips you would get from looping over `TxLockByID`.
+`den.NewTxQuery[T](tx)` provides a chainable query builder bound to the current transaction. Its `ForUpdate(opts ...LockOption)` method locks every matching row in a single statement — avoids the N+1 round-trips you would get from looping over `LockByID`.
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
@@ -118,13 +129,13 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         Where(where.Field("customer").Eq(custID)).
         Where(where.Field("status").Eq("pending")).
         ForUpdate(den.SkipLocked()).
-        All()
+        All(ctx)
     if err != nil {
         return err
     }
     for _, o := range orders {
         o.Status = "processing"
-        if err := den.TxUpdate(tx, o); err != nil {
+        if err := den.Update(ctx, tx, o); err != nil {
             return err
         }
     }
@@ -132,7 +143,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 })
 ```
 
-The `SkipLocked()` and `NoWait()` options work identically to `TxLockByID`. `NewTxQuery` is a minimal builder — `Where`, `Sort`, `Limit`, `Skip` on the chain side, `All` and `First` as terminals. Use `NewQuery` (non-transaction) for other reads or aggregations; locking only makes sense inside a transaction.
+The `SkipLocked()` and `NoWait()` options work identically to `LockByID`. `NewTxQuery` is a minimal builder — `Where`, `Sort`, `Limit`, `Skip` on the chain side, `All(ctx)` and `First(ctx)` as terminals. Use `NewQuery` (non-transaction) for other reads or aggregations; locking only makes sense inside a transaction.
 
 !!! tip "Deterministic lock order"
     On PostgreSQL, `ForUpdate().All(ctx)` without an explicit `Sort` emits `ORDER BY id ASC` automatically. The lock-acquisition order follows the SELECT's output order, and two concurrent callers with overlapping result sets would deadlock on PG if each walked rows in a different heap order. The default guarantees every caller locks the same way. Add your own `Sort(...)` call if you want a different order — but then it is your responsibility to keep that order consistent across callers.
@@ -186,7 +197,7 @@ Transactions are useful for atomic claim-and-process patterns:
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    job, err := den.TxFindByID[Job](tx, jobID)
+    job, err := den.FindByID[Job](ctx, tx, jobID)
     if err != nil {
         return err
     }
@@ -198,7 +209,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     job.Status = "running"
     job.StartedAt = time.Now()
 
-    return den.TxUpdate(tx, job)
+    return den.Update(ctx, tx, job)
 })
 ```
 

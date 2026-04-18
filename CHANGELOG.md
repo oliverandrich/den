@@ -6,6 +6,15 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Breaking Changes
 
+- **`Tx*` CRUD functions unified into a sealed `Scope` interface** — `Insert`, `InsertMany`, `Update`, `Delete`, `DeleteMany`, `FindByID`, `FindByIDs`, `FindOneAndUpdate`, `Refresh`, `FetchLink`, `FetchAllLinks`, `BackLinks` now accept a `den.Scope` parameter satisfied by both `*DB` and `*Tx`. The `TxInsert` / `TxUpdate` / `TxDelete` / `TxFindByID` variants are removed. Migration: replace `den.TxInsert(tx, doc)` with `den.Insert(ctx, tx, doc)` — `ctx` is already in scope from the enclosing `RunInTransaction(ctx, db, …)` closure. `Scope` is sealed (unexported methods) so only `*DB` and `*Tx` can satisfy it; backend authors are unaffected. `InsertMany` / `DeleteMany` / `FindOneAndUpdate` keep their auto-tx behavior when the scope is `*DB` and run inline when the scope is `*Tx`.
+- **`Tx` no longer stores `context.Context`.** The previously-implicit `tx.ctx` is gone; every tx-scoped entry point takes `ctx` explicitly, matching the precedent set by `QuerySet.All(ctx)`. Tx-scope-only operations also drop the now-redundant `Tx` prefix — the `*Tx` parameter already enforces the transaction-scope constraint. Migration:
+    - `den.TxLockByID(tx, id, opts…)` → `den.LockByID(ctx, tx, id, opts…)`
+    - `den.TxRawGet(tx, col, id)` → `den.RawGet(ctx, tx, col, id)`
+    - `den.TxRawPut(tx, col, id, data)` → `den.RawPut(ctx, tx, col, id, data)`
+    - `den.TxAdvisoryLock(tx, key)` → `den.AdvisoryLock(ctx, tx, key)`
+    - `TxQuerySet.All()` → `TxQuerySet.All(ctx)`; same for `First`
+- **`NewTxQuery` / `TxQuerySet` unchanged** — they construct a distinct type with `ForUpdate`, so the asymmetry with `NewQuery` is load-bearing. Only `TxQuerySet.All` and `First` changed to take `ctx` explicitly.
+
 - **`Backend` interface extended** — the `Backend` interface gained a `ListRecordedIndexes(ctx, collection) ([]RecordedIndex, error)` method. Custom backend implementations must add this method. It should return the indexes tracked in the backend's private metadata table (managed indexes such as GIN or FTS auxiliary objects must not be tracked and therefore not returned)
 - **`Transaction` interface extended** — the `Transaction` interface gained a `GetForUpdate(ctx, collection, id, mode LockMode) ([]byte, error)` method. Custom transaction implementations must add this method. On PostgreSQL it should emit `SELECT ... FOR UPDATE` (with `SKIP LOCKED` or `NOWAIT` suffix per mode); on serializing-writer backends like SQLite it can delegate to `Get` and ignore the mode
 - **`Transaction` interface extended** — the `Transaction` interface gained an `AdvisoryLock(ctx, key int64) error` method. Custom transaction implementations must add this method. On PostgreSQL it should map to `pg_advisory_xact_lock`; on serializing-writer backends like SQLite it can be a no-op since IMMEDIATE transactions already serialize writers

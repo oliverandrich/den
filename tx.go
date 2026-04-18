@@ -11,21 +11,28 @@ import (
 // a closure to RunInTransaction. Calling transaction-scoped functions on a
 // zero-value Tx panics.
 type Tx struct {
-	db  *DB
-	tx  Transaction
-	ctx context.Context
+	parent *DB
+	tx     Transaction
 }
+
+// readWriter / db together satisfy the sealed Scope interface. Unexported
+// to keep Scope sealed to *DB and *Tx.
+func (t *Tx) readWriter() ReadWriter { return t.tx }
+func (t *Tx) db() *DB                { return t.parent }
 
 // RunInTransaction executes fn within a transaction.
 // If fn returns nil, the transaction is committed.
 // If fn returns an error, the transaction is rolled back.
+//
+// The *Tx passed to fn does not itself carry the context; entry points
+// inside fn take ctx explicitly. Use the ctx closed over from the caller.
 func RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error {
 	btx, err := db.backend.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	tx := &Tx{db: db, tx: btx, ctx: ctx}
+	tx := &Tx{parent: db, tx: btx}
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -75,28 +82,7 @@ func runInWriteTx(ctx context.Context, b Backend, fn func(tx Transaction) error)
 	return nil
 }
 
-// TxFindByID retrieves a document by ID within a transaction.
-func TxFindByID[T any](tx *Tx, id string) (*T, error) {
-	col, err := collectionFor[T](tx.db)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := tx.tx.Get(tx.ctx, col.meta.Name, id)
-	if err != nil {
-		return nil, err
-	}
-
-	result := new(T)
-	if err := tx.db.decode(data, result); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	captureSnapshot(data, result)
-
-	return result, nil
-}
-
-// LockOption configures TxLockByID and TxQuerySet.ForUpdate.
+// LockOption configures LockByID and TxQuerySet.ForUpdate.
 type LockOption func(*lockConfig)
 
 // lockConfig tracks each option independently (rather than collapsing to a
@@ -123,7 +109,7 @@ func (c lockConfig) resolve() (LockMode, error) {
 	}
 }
 
-// SkipLocked makes TxLockByID return ErrNotFound immediately if another
+// SkipLocked makes LockByID return ErrNotFound immediately if another
 // transaction already holds the row lock, instead of blocking. Maps to
 // PostgreSQL's FOR UPDATE SKIP LOCKED. Useful for queue-consumer patterns
 // where each worker should claim a different row without contending.
@@ -139,7 +125,7 @@ func SkipLocked() LockOption {
 	return func(c *lockConfig) { c.skipLocked = true }
 }
 
-// NoWait makes TxLockByID return ErrLocked immediately if another transaction
+// NoWait makes LockByID return ErrLocked immediately if another transaction
 // already holds the row lock, instead of blocking. Maps to PostgreSQL's
 // FOR UPDATE NOWAIT. Useful when the caller wants to decide between retry,
 // abort, or an alternative code path. On SQLite this option is a no-op.
@@ -150,7 +136,7 @@ func NoWait() LockOption {
 	return func(c *lockConfig) { c.noWait = true }
 }
 
-// TxLockByID retrieves a document by ID and acquires a row-level lock that
+// LockByID retrieves a document by ID and acquires a row-level lock that
 // persists for the lifetime of the transaction. Without options, concurrent
 // transactions attempting to lock the same row block until this transaction
 // commits or rolls back. Pass SkipLocked or NoWait to change that behavior.
@@ -158,12 +144,12 @@ func NoWait() LockOption {
 // On PostgreSQL this maps to SELECT ... FOR UPDATE; on SQLite it is a no-op
 // because IMMEDIATE transactions already serialize writers.
 //
-// Only callable inside RunInTransaction — a lock outside a transaction
-// releases immediately and would be meaningless. Returns ErrNotFound if the
-// document does not exist. Returns ErrLocked when NoWait is set and the row
-// is held by another transaction.
-func TxLockByID[T any](tx *Tx, id string, opts ...LockOption) (*T, error) {
-	col, err := collectionFor[T](tx.db)
+// The *Tx parameter enforces transaction scope at compile time — a lock
+// outside a transaction releases immediately and would be meaningless.
+// Returns ErrNotFound if the document does not exist. Returns ErrLocked
+// when NoWait is set and the row is held by another transaction.
+func LockByID[T any](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error) {
+	col, err := collectionFor[T](tx.parent)
 	if err != nil {
 		return nil, err
 	}
@@ -177,13 +163,13 @@ func TxLockByID[T any](tx *Tx, id string, opts ...LockOption) (*T, error) {
 		return nil, err
 	}
 
-	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id, mode)
+	data, err := tx.tx.GetForUpdate(ctx, col.meta.Name, id, mode)
 	if err != nil {
 		return nil, err
 	}
 
 	result := new(T)
-	if err := tx.db.decode(data, result); err != nil {
+	if err := tx.parent.decode(data, result); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 	captureSnapshot(data, result)
@@ -191,41 +177,27 @@ func TxLockByID[T any](tx *Tx, id string, opts ...LockOption) (*T, error) {
 	return result, nil
 }
 
-// TxInsert inserts a document within a transaction.
-func TxInsert[T any](tx *Tx, document *T, opts ...CRUDOption) error {
-	return insertCore(tx.ctx, tx.db, tx.tx, document, opts...)
-}
-
-// TxUpdate updates a document within a transaction.
-func TxUpdate[T any](tx *Tx, document *T, opts ...CRUDOption) error {
-	return updateCore(tx.ctx, tx.db, tx.tx, document, opts...)
-}
-
-// TxDelete deletes a document within a transaction.
-func TxDelete[T any](tx *Tx, document *T, opts ...CRUDOption) error {
-	return deleteCore(tx.ctx, tx.db, tx.tx, document, opts...)
-}
-
-// TxRawGet performs a raw key lookup within the transaction, returning the
+// RawGet performs a raw key lookup within the transaction, returning the
 // stored bytes verbatim without decoding or registry validation. Intended
 // for infrastructure code that stores unregistered bookkeeping collections
-// (for example, the migration log). Prefer TxFindByID for normal reads.
-func TxRawGet(tx *Tx, collection, id string) ([]byte, error) {
-	return tx.tx.Get(tx.ctx, collection, id)
+// (for example, the migration log). Prefer FindByID(ctx, tx, id) for
+// normal reads.
+func RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error) {
+	return tx.tx.Get(ctx, collection, id)
 }
 
-// TxRawPut writes raw bytes into the transaction under the given collection
-// and id, bypassing encoding and registry checks. Same audience as TxRawGet:
+// RawPut writes raw bytes into the transaction under the given collection
+// and id, bypassing encoding and registry checks. Same audience as RawGet:
 // infrastructure code writing its own bookkeeping collections. Prefer
-// TxInsert / TxUpdate for normal writes.
-func TxRawPut(tx *Tx, collection, id string, data []byte) error {
-	return tx.tx.Put(tx.ctx, collection, id, data)
+// Insert / Update for normal writes.
+func RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error {
+	return tx.tx.Put(ctx, collection, id, data)
 }
 
-// TxAdvisoryLock acquires an application-defined lock on key that persists
+// AdvisoryLock acquires an application-defined lock on key that persists
 // until the transaction commits or rolls back. Concurrent transactions
 // attempting to lock the same key block until the holder ends. See the
 // Transaction interface for backend-specific behavior.
-func TxAdvisoryLock(tx *Tx, key int64) error {
-	return tx.tx.AdvisoryLock(tx.ctx, key)
+func AdvisoryLock(ctx context.Context, tx *Tx, key int64) error {
+	return tx.tx.AdvisoryLock(ctx, key)
 }

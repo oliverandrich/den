@@ -84,14 +84,17 @@ func WithLinkRule(rule LinkRule) CRUDOption {
 	}
 }
 
-// FetchLink resolves a single named link field on a document.
-func FetchLink[T any](ctx context.Context, db *DB, doc *T, fieldName string) error {
-	return fetchLinkByName(ctx, db, db.backend, doc, fieldName, 1)
+// FetchLink resolves a single named link field on a document. The scope
+// parameter accepts either a *DB (read from the backend directly) or a *Tx
+// (read from the enclosing transaction).
+func FetchLink[T any](ctx context.Context, s Scope, doc *T, fieldName string) error {
+	return fetchLinkByName(ctx, s.db(), s.readWriter(), doc, fieldName, 1)
 }
 
-// FetchAllLinks resolves all link fields on a document.
-func FetchAllLinks[T any](ctx context.Context, db *DB, doc *T) error {
-	return fetchAllLinksOnDoc(ctx, db, db.backend, doc, 1)
+// FetchAllLinks resolves all link fields on a document. See FetchLink for
+// the scope semantics.
+func FetchAllLinks[T any](ctx context.Context, s Scope, doc *T) error {
+	return fetchAllLinksOnDoc(ctx, s.db(), s.readWriter(), doc, 1)
 }
 
 // fetchLinkByName resolves one named link field. The rw parameter carries

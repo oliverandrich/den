@@ -153,7 +153,7 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 		for pb.Next() {
 			idx := int(counter.Add(1)) % len(ids)
 			_ = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				job, err := den.TxLockByID[BenchJob](tx, ids[idx], den.SkipLocked())
+				job, err := den.LockByID[BenchJob](ctx, tx, ids[idx], den.SkipLocked())
 				if err != nil {
 					if errors.Is(err, den.ErrNotFound) {
 						// Another worker holds it (or it was already processed).
@@ -162,7 +162,7 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 					return err
 				}
 				job.Status = "processed"
-				return den.TxUpdate(tx, job)
+				return den.Update(ctx, tx, job)
 			})
 		}
 	})

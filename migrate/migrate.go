@@ -150,13 +150,13 @@ func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
 	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		// Serialize concurrent starters: on PG this is pg_advisory_xact_lock,
 		// on SQLite a no-op (IMMEDIATE tx already serializes writers).
-		if err := den.TxAdvisoryLock(tx, migrationLockKey); err != nil {
+		if err := den.AdvisoryLock(ctx, tx, migrationLockKey); err != nil {
 			return err
 		}
 
 		// Re-read the applied set inside the tx+lock so we see writes
 		// committed by any other starter that went first.
-		entries, err := loadEntriesFromTx(tx)
+		entries, err := loadEntriesFromTx(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -174,17 +174,17 @@ func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
 			Version:   m.version,
 			AppliedAt: time.Now(),
 		})
-		return saveEntriesToTx(tx, entries)
+		return saveEntriesToTx(ctx, tx, entries)
 	})
 }
 
 func runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error {
 	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.TxAdvisoryLock(tx, migrationLockKey); err != nil {
+		if err := den.AdvisoryLock(ctx, tx, migrationLockKey); err != nil {
 			return err
 		}
 
-		entries, err := loadEntriesFromTx(tx)
+		entries, err := loadEntriesFromTx(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -209,7 +209,7 @@ func runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error 
 				filtered = append(filtered, e)
 			}
 		}
-		return saveEntriesToTx(tx, filtered)
+		return saveEntriesToTx(ctx, tx, filtered)
 	})
 }
 
@@ -264,8 +264,8 @@ func (r *Registry) loadApplied(ctx context.Context, db *den.DB) ([]string, error
 	return versions, nil
 }
 
-func loadEntriesFromTx(tx *den.Tx) ([]migrationEntry, error) {
-	data, err := den.TxRawGet(tx, migrationsCollection, "log")
+func loadEntriesFromTx(ctx context.Context, tx *den.Tx) ([]migrationEntry, error) {
+	data, err := den.RawGet(ctx, tx, migrationsCollection, "log")
 	if err != nil {
 		if errors.Is(err, den.ErrNotFound) {
 			return nil, nil
@@ -280,10 +280,10 @@ func loadEntriesFromTx(tx *den.Tx) ([]migrationEntry, error) {
 	return entries, nil
 }
 
-func saveEntriesToTx(tx *den.Tx, entries []migrationEntry) error {
+func saveEntriesToTx(ctx context.Context, tx *den.Tx, entries []migrationEntry) error {
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return err
 	}
-	return den.TxRawPut(tx, migrationsCollection, "log", data)
+	return den.RawPut(ctx, tx, migrationsCollection, "log", data)
 }

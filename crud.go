@@ -14,8 +14,11 @@ import (
 // Insert adds a new document to the database.
 // If the document's ID is empty, a new ULID is generated.
 // Options: WithLinkRule to cascade writes to linked documents.
-func Insert[T any](ctx context.Context, db *DB, document *T, opts ...CRUDOption) error {
-	return insertCore(ctx, db, db.backend, document, opts...)
+//
+// The scope parameter accepts either a *DB (operating outside a transaction)
+// or a *Tx (operating inside RunInTransaction). See the Scope interface.
+func Insert[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
+	return insertCore(ctx, s.db(), s.readWriter(), document, opts...)
 }
 
 func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
@@ -76,7 +79,7 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 // FindByIDs retrieves multiple documents by their IDs in a single query.
 // Missing IDs are silently skipped. Order is not guaranteed.
-func FindByIDs[T any](ctx context.Context, db *DB, ids []string) ([]*T, error) {
+func FindByIDs[T any](ctx context.Context, s Scope, ids []string) ([]*T, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -86,17 +89,31 @@ func FindByIDs[T any](ctx context.Context, db *DB, ids []string) ([]*T, error) {
 		anyIDs[i] = id
 	}
 
-	return NewQuery[T](db, where.Field("_id").In(anyIDs...)).All(ctx)
-}
-
-// FindByID retrieves a document by its ID.
-func FindByID[T any](ctx context.Context, db *DB, id string) (*T, error) {
+	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := db.backend.Get(ctx, col.meta.Name, id)
+	q := NewQuery[T](db, where.Field("_id").In(anyIDs...)).buildBackendQuery(col)
+	iter, err := s.readWriter().Query(ctx, col.meta.Name, q)
+	if err != nil {
+		return nil, err
+	}
+	results, err := drainIter[T](db, iter, len(ids))
+	_ = iter.Close()
+	return results, err
+}
+
+// FindByID retrieves a document by its ID.
+func FindByID[T any](ctx context.Context, s Scope, id string) (*T, error) {
+	db := s.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := s.readWriter().Get(ctx, col.meta.Name, id)
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +129,8 @@ func FindByID[T any](ctx context.Context, db *DB, id string) (*T, error) {
 
 // Update updates an existing document in the database.
 // Options: WithLinkRule to cascade writes, IgnoreRevision to skip conflict check.
-func Update[T any](ctx context.Context, db *DB, document *T, opts ...CRUDOption) error {
-	return updateCore(ctx, db, db.backend, document, opts...)
+func Update[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
+	return updateCore(ctx, s.db(), s.readWriter(), document, opts...)
 }
 
 func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
@@ -190,8 +207,8 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 // Delete removes a document from the database.
 // Options: WithLinkRule to cascade deletes to linked documents.
-func Delete[T any](ctx context.Context, db *DB, document *T, opts ...CRUDOption) error {
-	return deleteCore(ctx, db, db.backend, document, opts...)
+func Delete[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
+	return deleteCore(ctx, s.db(), s.readWriter(), document, opts...)
 }
 
 func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
@@ -235,7 +252,8 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 // Refresh re-reads a document from the database by its ID,
 // overwriting all fields on the provided struct.
-func Refresh[T any](ctx context.Context, db *DB, document *T) error {
+func Refresh[T any](ctx context.Context, s Scope, document *T) error {
+	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return err
@@ -246,7 +264,7 @@ func Refresh[T any](ctx context.Context, db *DB, document *T) error {
 		return fmt.Errorf("den: cannot refresh document without ID")
 	}
 
-	data, err := db.backend.Get(ctx, col.meta.Name, id)
+	data, err := s.readWriter().Get(ctx, col.meta.Name, id)
 	if err != nil {
 		return err
 	}
@@ -264,7 +282,11 @@ type SetFields map[string]any
 // FindOneAndUpdate atomically finds the first matching document, applies
 // the field updates, and returns the modified document.
 // The find and replace are wrapped in a transaction for atomicity.
-func FindOneAndUpdate[T any](ctx context.Context, db *DB, fields SetFields, conditions ...where.Condition) (*T, error) {
+//
+// When scope is a *DB, a new transaction is opened; when scope is a *Tx,
+// the operation runs inline in the caller's transaction.
+func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions ...where.Condition) (*T, error) {
+	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
@@ -280,51 +302,59 @@ func FindOneAndUpdate[T any](ctx context.Context, db *DB, fields SetFields, cond
 	qs := NewQuery[T](db, conditions...).Limit(1)
 	q := qs.buildBackendQuery(col)
 
-	var result *T
-	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
-
-		iter, err := tx.tx.Query(tx.ctx, col.meta.Name, q)
+	body := func(tx *Tx) (*T, error) {
+		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if !iter.Next() {
 			err := iter.Err()
 			_ = iter.Close()
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return ErrNotFound
+			return nil, ErrNotFound
 		}
 
 		doc := new(T)
 		iterBytes := iter.Bytes()
 		_ = iter.Close()
 		if err := decodeIterRow(db, iterBytes, doc); err != nil {
-			return fmt.Errorf("decode: %w", err)
+			return nil, fmt.Errorf("decode: %w", err)
 		}
 
 		rv := reflect.ValueOf(doc).Elem()
 		for fieldName, newVal := range fields {
 			fi := col.structInfo.FieldByName(fieldName)
 			if fi == nil {
-				return fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
+				return nil, fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
 			}
 			fv := rv.FieldByIndex(fi.Index)
 			if err := setFieldValue(fv, newVal, fieldName); err != nil {
-				return err
+				return nil, err
 			}
 		}
 
-		// Update within the transaction
-		if err := TxUpdate(tx, doc); err != nil {
+		if err := Update(ctx, tx, doc); err != nil {
+			return nil, err
+		}
+		return doc, nil
+	}
+
+	if tx, ok := s.(*Tx); ok {
+		return body(tx)
+	}
+
+	var result *T
+	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
+		doc, err := body(tx)
+		if err != nil {
 			return err
 		}
-
 		result = doc
 		return nil
 	})
-
 	if txErr != nil {
 		return nil, txErr
 	}
@@ -332,24 +362,34 @@ func FindOneAndUpdate[T any](ctx context.Context, db *DB, fields SetFields, cond
 }
 
 // InsertMany inserts multiple documents in a single transaction.
-func InsertMany[T any](ctx context.Context, db *DB, documents []*T) error {
+//
+// When scope is a *DB, a new transaction is opened for the batch; when
+// scope is a *Tx, the inserts run inline in the caller's transaction.
+func InsertMany[T any](ctx context.Context, s Scope, documents []*T) error {
 	if len(documents) == 0 {
 		return nil
 	}
-	return RunInTransaction(ctx, db, func(tx *Tx) error {
+	body := func(tx *Tx) error {
 		for _, doc := range documents {
-			if err := TxInsert(tx, doc); err != nil {
+			if err := Insert(ctx, tx, doc); err != nil {
 				return err
 			}
 		}
 		return nil
-	})
+	}
+	if tx, ok := s.(*Tx); ok {
+		return body(tx)
+	}
+	return RunInTransaction(ctx, s.db(), body)
 }
 
 // DeleteMany deletes all documents matching the given conditions.
 // Returns the number of deleted documents.
-// All deletes run in one transaction.
-func DeleteMany[T any](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error) {
+//
+// When scope is a *DB, all deletes run in one new transaction; when scope
+// is a *Tx, the deletes run inline in the caller's transaction.
+func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error) {
+	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return 0, err
@@ -359,8 +399,8 @@ func DeleteMany[T any](ctx context.Context, db *DB, conditions []where.Condition
 	q := qs.buildBackendQuery(col)
 
 	var count int64
-	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
-		it, err := tx.tx.Query(tx.ctx, col.meta.Name, q)
+	body := func(tx *Tx) error {
+		it, err := tx.tx.Query(ctx, col.meta.Name, q)
 		if err != nil {
 			return err
 		}
@@ -371,13 +411,21 @@ func DeleteMany[T any](ctx context.Context, db *DB, conditions []where.Condition
 			if err := decodeIterRow(db, it.Bytes(), doc); err != nil {
 				return fmt.Errorf("decode: %w", err)
 			}
-			if err := TxDelete(tx, doc, opts...); err != nil {
+			if err := Delete(ctx, tx, doc, opts...); err != nil {
 				return err
 			}
 			count++
 		}
 		return it.Err()
-	})
+	}
+
+	if tx, ok := s.(*Tx); ok {
+		if err := body(tx); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
+	txErr := RunInTransaction(ctx, db, body)
 	if txErr != nil {
 		return 0, txErr
 	}

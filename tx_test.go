@@ -24,12 +24,12 @@ func TestRunInTransaction_Commit(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.TxFindByID[Product](tx, p.ID)
+		found, err := den.FindByID[Product](ctx, tx, p.ID)
 		if err != nil {
 			return err
 		}
 		found.Price = 99.0
-		return den.TxUpdate(tx, found)
+		return den.Update(ctx, tx, found)
 	})
 	require.NoError(t, err)
 
@@ -46,12 +46,12 @@ func TestRunInTransaction_Rollback(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.TxFindByID[Product](tx, p.ID)
+		found, err := den.FindByID[Product](ctx, tx, p.ID)
 		if err != nil {
 			return err
 		}
 		found.Price = 99.0
-		if err := den.TxUpdate(tx, found); err != nil {
+		if err := den.Update(ctx, tx, found); err != nil {
 			return err
 		}
 		return errors.New("abort")
@@ -71,7 +71,7 @@ func TestTxInsert(t *testing.T) {
 	var insertedID string
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		p := &Product{Name: "InTx", Price: 42.0}
-		if err := den.TxInsert(tx, p); err != nil {
+		if err := den.Insert(ctx, tx, p); err != nil {
 			return err
 		}
 		insertedID = p.ID
@@ -92,7 +92,7 @@ func TestTxDelete(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxDelete(tx, p)
+		return den.Delete(ctx, tx, p)
 	})
 	require.NoError(t, err)
 
@@ -108,7 +108,7 @@ func TestTxDelete_SoftDelete(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxDelete(tx, p)
+		return den.Delete(ctx, tx, p)
 	})
 	require.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestTxInsert_AfterHooks(t *testing.T) {
 
 	d := &AfterSaveDoc{Name: "InTx"}
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxInsert(tx, d)
+		return den.Insert(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "called", d.SavedAt)
@@ -147,7 +147,7 @@ func TestTxUpdate_AfterHooks(t *testing.T) {
 
 	d.Name = "Updated"
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxUpdate(tx, d)
+		return den.Update(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.True(t, d.BeforeUpdated)
@@ -162,7 +162,7 @@ func TestTxDelete_AfterHooks(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, d))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxDelete(tx, d)
+		return den.Delete(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.True(t, d.BeforeDeleted)
@@ -175,7 +175,7 @@ func TestTxInsert_Revision(t *testing.T) {
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxInsert(tx, p)
+		return den.Insert(ctx, tx, p)
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, p.Rev, "revision should be set on TxInsert")
@@ -236,7 +236,7 @@ func TestTxRawGet_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		data, err := den.TxRawGet(tx, "product", p.ID)
+		data, err := den.RawGet(ctx, tx, "product", p.ID)
 		if err != nil {
 			return err
 		}
@@ -254,7 +254,7 @@ func TestTxRawPut_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxRawPut(tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
+		return den.RawPut(ctx, tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
 	})
 	require.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestTxFindByID_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxFindByID[Product](tx, "nonexistent")
+		_, err := den.FindByID[Product](ctx, tx, "nonexistent")
 		return err
 	})
 	require.ErrorIs(t, err, den.ErrNotFound)
@@ -305,7 +305,7 @@ func TestTxLockByID(t *testing.T) {
 			require.NoError(t, den.Insert(ctx, db, p))
 
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				locked, err := den.TxLockByID[Product](tx, p.ID)
+				locked, err := den.LockByID[Product](ctx, tx, p.ID)
 				if err != nil {
 					return err
 				}
@@ -327,7 +327,7 @@ func TestTxLockByID_NotFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				_, err := den.TxLockByID[Product](tx, "missing-id")
+				_, err := den.LockByID[Product](ctx, tx, "missing-id")
 				return err
 			})
 			assert.ErrorIs(t, err, den.ErrNotFound)
@@ -351,7 +351,7 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 		// Wait for tx1 to definitely hold the lock before attempting tx2.
 		<-tx1Released
 		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.TxLockByID[Product](tx, p.ID)
+			_, err := den.LockByID[Product](ctx, tx, p.ID)
 			if err != nil {
 				return err
 			}
@@ -365,7 +365,7 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 	})
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxLockByID[Product](tx, p.ID)
+		_, err := den.LockByID[Product](ctx, tx, p.ID)
 		if err != nil {
 			return err
 		}
@@ -393,8 +393,9 @@ func runContendedTx(t *testing.T, db *den.DB, id string) (locked <-chan struct{}
 
 	go func() {
 		defer close(done)
-		err := den.RunInTransaction(context.Background(), db, func(tx *den.Tx) error {
-			if _, err := den.TxLockByID[Product](tx, id); err != nil {
+		ctx := context.Background()
+		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			if _, err := den.LockByID[Product](ctx, tx, id); err != nil {
 				return err
 			}
 			close(lockedCh)
@@ -428,7 +429,7 @@ func TestTxLockByID_SkipLocked_ReturnsNotFoundOnContention(t *testing.T) {
 
 	start := time.Now()
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxLockByID[Product](tx, p.ID, den.SkipLocked())
+		_, err := den.LockByID[Product](ctx, tx, p.ID, den.SkipLocked())
 		return err
 	})
 	elapsed := time.Since(start)
@@ -453,7 +454,7 @@ func TestTxLockByID_NoWait_ReturnsErrLockedOnContention(t *testing.T) {
 
 	start := time.Now()
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxLockByID[Product](tx, p.ID, den.NoWait())
+		_, err := den.LockByID[Product](ctx, tx, p.ID, den.NoWait())
 		return err
 	})
 	elapsed := time.Since(start)
@@ -479,7 +480,7 @@ func TestTxLockByID_Options_SQLiteNoop(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				locked, err := den.TxLockByID[Product](tx, p.ID, opt)
+				locked, err := den.LockByID[Product](ctx, tx, p.ID, opt)
 				if err != nil {
 					return err
 				}
@@ -501,16 +502,62 @@ func TestTxLockByID_ConflictingOptions_Rejected(t *testing.T) {
 	// SkipLocked and NoWait are mutually exclusive in PG; passing both used
 	// to silently let the second win. Now it must return a clear error.
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxLockByID[Product](tx, p.ID, den.SkipLocked(), den.NoWait())
+		_, err := den.LockByID[Product](ctx, tx, p.ID, den.SkipLocked(), den.NoWait())
 		return err
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 	// Order of options must not matter.
 	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.TxLockByID[Product](tx, p.ID, den.NoWait(), den.SkipLocked())
+		_, err := den.LockByID[Product](ctx, tx, p.ID, den.NoWait(), den.SkipLocked())
 		return err
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+// TestScope_CRUDWorksWithBothDBAndTx proves that every unified CRUD entry
+// point behaves identically whether the scope is *DB or *Tx. The same
+// assertions run twice — once against the database directly, once against
+// a transaction — so any future divergence between the two Scope paths
+// would surface here. If this test ever breaks after a refactor, the
+// compile-time interface is not enough to enforce behavior parity.
+func TestScope_CRUDWorksWithBothDBAndTx(t *testing.T) {
+	run := func(t *testing.T, ctx context.Context, s den.Scope) {
+		t.Helper()
+		p := &Product{Name: "Scope", Price: 12.5}
+		require.NoError(t, den.Insert(ctx, s, p))
+		require.NotEmpty(t, p.ID)
+
+		got, err := den.FindByID[Product](ctx, s, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "Scope", got.Name)
+
+		got.Price = 20
+		require.NoError(t, den.Update(ctx, s, got))
+
+		refreshed, err := den.FindByID[Product](ctx, s, p.ID)
+		require.NoError(t, err)
+		assert.InDelta(t, 20.0, refreshed.Price, 0.001)
+
+		require.NoError(t, den.Delete(ctx, s, refreshed))
+		_, err = den.FindByID[Product](ctx, s, p.ID)
+		require.ErrorIs(t, err, den.ErrNotFound)
+	}
+
+	ctx := context.Background()
+
+	t.Run("scope=*DB", func(t *testing.T) {
+		db := dentest.MustOpen(t, &Product{})
+		run(t, ctx, db)
+	})
+
+	t.Run("scope=*Tx", func(t *testing.T) {
+		db := dentest.MustOpen(t, &Product{})
+		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			run(t, ctx, tx)
+			return nil
+		})
+		require.NoError(t, err)
+	})
 }

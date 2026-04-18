@@ -1,6 +1,7 @@
 package den
 
 import (
+	"context"
 	"slices"
 
 	"github.com/oliverandrich/den/where"
@@ -28,8 +29,9 @@ type TxQuerySet[T any] struct {
 }
 
 // NewTxQuery creates a new TxQuerySet bound to the given transaction.
-// Conditions can optionally be passed directly. The query inherits the
-// transaction's context and sees the in-transaction view of the data.
+// Conditions can optionally be passed directly. The query sees the
+// in-transaction view of the data; the context is supplied later by the
+// terminal method (All / First) so one TxQuerySet can be reused.
 func NewTxQuery[T any](tx *Tx, conditions ...where.Condition) TxQuerySet[T] {
 	qs := TxQuerySet[T]{tx: tx}
 	if len(conditions) > 0 {
@@ -89,29 +91,29 @@ func (qs TxQuerySet[T]) ForUpdate(opts ...LockOption) TxQuerySet[T] {
 }
 
 // All executes the query and returns all matching documents.
-func (qs TxQuerySet[T]) All() ([]*T, error) {
+func (qs TxQuerySet[T]) All(ctx context.Context) ([]*T, error) {
 	if qs.err != nil {
 		return nil, qs.err
 	}
-	col, err := collectionFor[T](qs.tx.db)
+	col, err := collectionFor[T](qs.tx.parent)
 	if err != nil {
 		return nil, err
 	}
 
 	q := qs.buildBackendQuery(col)
 
-	it, err := qs.tx.tx.Query(qs.tx.ctx, col.meta.Name, q)
+	it, err := qs.tx.tx.Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = it.Close() }()
 
-	return drainIter[T](qs.tx.db, it, qs.limitN)
+	return drainIter[T](qs.tx.parent, it, qs.limitN)
 }
 
 // First returns the first matching document. Returns ErrNotFound if none match.
-func (qs TxQuerySet[T]) First() (*T, error) {
-	results, err := qs.Limit(1).All()
+func (qs TxQuerySet[T]) First(ctx context.Context) (*T, error) {
+	results, err := qs.Limit(1).All(ctx)
 	if err != nil {
 		return nil, err
 	}

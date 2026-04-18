@@ -174,10 +174,10 @@ All hooks run within the same database transaction as the operation. This means:
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     // Both inserts (and their hooks) share the same transaction.
     // If the second insert's Validate() fails, both are rolled back.
-    if err := den.TxInsert(tx, article1); err != nil {
+    if err := den.Insert(ctx, tx, article1); err != nil {
         return err
     }
-    return den.TxInsert(tx, article2)
+    return den.Insert(ctx, tx, article2)
 })
 ```
 

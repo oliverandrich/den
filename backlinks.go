@@ -7,9 +7,11 @@ import (
 )
 
 // BackLinks finds all documents of type T that reference the given target ID
-// through the specified link field. For example, BackLinks[House](db, "door", doorID)
-// returns all Houses whose "door" link points to doorID.
-func BackLinks[T any](ctx context.Context, db *DB, linkField string, targetID string) ([]*T, error) {
+// through the specified link field. For example, BackLinks[House](ctx, db, "door", doorID)
+// returns all Houses whose "door" link points to doorID. The scope parameter
+// accepts either a *DB or a *Tx.
+func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error) {
+	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
@@ -17,7 +19,7 @@ func BackLinks[T any](ctx context.Context, db *DB, linkField string, targetID st
 
 	q := NewQuery[T](db, where.Field(linkField).Eq(targetID)).buildBackendQuery(col)
 
-	iter, err := db.backend.Query(ctx, col.meta.Name, q)
+	iter, err := s.readWriter().Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return nil, err
 	}

@@ -1525,12 +1525,12 @@ All transactional work is wrapped in `den.RunInTransaction`. Return `nil` to com
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    sender, err := den.TxFindByID[Account](tx, senderID)
+    sender, err := den.FindByID[Account](ctx, tx, senderID)
     if err != nil {
         return err // rolls back
     }
 
-    receiver, err := den.TxFindByID[Account](tx, receiverID)
+    receiver, err := den.FindByID[Account](ctx, tx, receiverID)
     if err != nil {
         return err // rolls back
     }
@@ -1538,10 +1538,10 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     sender.Balance -= amount
     receiver.Balance += amount
 
-    if err := den.TxUpdate(tx, sender); err != nil {
+    if err := den.Update(ctx, tx, sender); err != nil {
         return err // rolls back
     }
-    if err := den.TxUpdate(tx, receiver); err != nil {
+    if err := den.Update(ctx, tx, receiver); err != nil {
         return err // rolls back
     }
 
@@ -1551,48 +1551,49 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ## Transaction Functions
 
-Inside a transaction closure, use the `Tx`-prefixed variants of Den's CRUD functions:
+CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Insert(ctx, scope, &doc)` works outside and inside a transaction:
 
-| Standard API | Transaction API |
-|---|---|
-| `den.FindByID[T](ctx, db, id)` | `den.TxFindByID[T](tx, id)` |
-| `den.Insert(ctx, db, &doc)` | `den.TxInsert(tx, &doc)` |
-| `den.Update(ctx, db, &doc)` | `den.TxUpdate(tx, &doc)` |
-| `den.Delete(ctx, db, &doc)` | `den.TxDelete(tx, &doc)` |
-| — (transaction-only) | `den.TxLockByID[T](tx, id)` |
+```go
+den.Insert(ctx, db, &product)                 // outside a transaction
+den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    return den.Insert(ctx, tx, &product)      // inside — same function
+})
+```
 
-These functions operate on the `*den.Tx` instead of the `*den.DB`, ensuring all reads and writes go through the same underlying database transaction.
+`Scope` is sealed (unexported methods): only `*DB` and `*Tx` satisfy it. Backend authors are unaffected.
+
+A small set of APIs remains transaction-only because their semantics require transaction lifetime: `LockByID`, `RawGet`, `RawPut`, `AdvisoryLock`, and `NewTxQuery[T](tx).ForUpdate(...)`. They take `*den.Tx` directly rather than `Scope`.
 
 ## Row-Level Locking
 
-`den.TxLockByID[T](tx, id)` reads a document and acquires a row-level lock that is held until the transaction commits or rolls back. Other transactions trying to lock the same row block until the holder releases.
+`den.LockByID[T](ctx, tx, id)` reads a document and acquires a row-level lock that is held until the transaction commits or rolls back. Other transactions trying to lock the same row block until the holder releases.
 
 ```go
 den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    item, err := den.TxLockByID[Inventory](tx, itemID)
+    item, err := den.LockByID[Inventory](ctx, tx, itemID)
     if err != nil { return err }
     if item.Stock < qty { return ErrOutOfStock }
     item.Stock -= qty
-    return den.TxUpdate(tx, item)
+    return den.Update(ctx, tx, item)
 })
 ```
 
 There is no non-transaction variant — a lock outside a transaction releases immediately, so the `*den.Tx` parameter enforces correct usage at compile time.
 
 **PostgreSQL**: emits `SELECT ... FOR UPDATE`. Lock held until transaction end.
-**SQLite**: no-op, delegates to `TxFindByID`. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing.
+**SQLite**: no-op, delegates to `FindByID`. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing.
 
-Prefer revision control (`den.Settings{UseRevision: true}`) for most read-modify-write scenarios — it works identically across backends and does not hold database locks. Reach for `TxLockByID` only when retry storms are a concern, or when the work between read and write is too expensive to repeat on conflict.
+Prefer revision control (`den.Settings{UseRevision: true}`) for most read-modify-write scenarios — it works identically across backends and does not hold database locks. Reach for `LockByID` only when retry storms are a concern, or when the work between read and write is too expensive to repeat on conflict.
 
 ### Lock Modifiers
 
-Pass one of the following `LockOption` values to `TxLockByID` to change how contention is handled on PostgreSQL (no-op on SQLite):
+Pass one of the following `LockOption` values to `LockByID` to change how contention is handled on PostgreSQL (no-op on SQLite):
 
 - `den.SkipLocked()` — if another transaction holds the row, return `ErrNotFound`. Maps to `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive.
 - `den.NoWait()` — if another transaction holds the row, return `ErrLocked` immediately. Maps to `FOR UPDATE NOWAIT`.
 
 ```go
-job, err := den.TxLockByID[Job](tx, candidateID, den.SkipLocked())
+job, err := den.LockByID[Job](ctx, tx, candidateID, den.SkipLocked())
 if errors.Is(err, den.ErrNotFound) {
     return nil // another worker owns it, or the row does not exist
 }
@@ -1611,7 +1612,7 @@ orders, err := den.NewTxQuery[Order](tx).
     All()
 ```
 
-Supported chain methods: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First`. Options are the same as `TxLockByID` (`SkipLocked`, `NoWait`). On SQLite `ForUpdate` is a no-op. Use the non-transaction `NewQuery` for reads and aggregations outside the lock use case.
+Supported chain methods: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First`. Options are the same as `LockByID` (`SkipLocked`, `NoWait`). On SQLite `ForUpdate` is a no-op. Use the non-transaction `NewQuery` for reads and aggregations outside the lock use case.
 
 ## Commit and Rollback
 
@@ -1640,7 +1641,7 @@ Use revision control (`den.Settings{UseRevision: true}`) for application-level c
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    job, err := den.TxFindByID[Job](tx, jobID)
+    job, err := den.FindByID[Job](ctx, tx, jobID)
     if err != nil {
         return err
     }
@@ -1652,7 +1653,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     job.Status = "running"
     job.StartedAt = time.Now()
 
-    return den.TxUpdate(tx, job)
+    return den.Update(ctx, tx, job)
 })
 ```
 
@@ -2040,14 +2041,14 @@ Revision control is *optimistic* -- it detects conflicts after the fact. When yo
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    p, err := den.TxFindByID[Product](tx, id)
+    p, err := den.FindByID[Product](ctx, tx, id)
     if err != nil {
         return err
     }
 
     p.Price = 29.99
 
-    return den.TxUpdate(tx, p)
+    return den.Update(ctx, tx, p)
 })
 ```
 
@@ -2209,7 +2210,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Title = note.Name
-                if err := den.TxUpdate(tx, note); err != nil {
+                if err := den.Update(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -2221,7 +2222,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Name = note.Title
-                if err := den.TxUpdate(tx, note); err != nil {
+                if err := den.Update(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -2402,31 +2403,31 @@ Module: `github.com/oliverandrich/den`
 
 | Function | Signature | Description |
 |---|---|---|
-| `Insert[T]` | `Insert[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, db *DB, docs []*T) error` | Insert multiple documents in a single batch |
+| `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
+| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T) error` | Insert multiple documents in a single batch |
 
 ### Read
 
 | Function | Signature | Description |
 |---|---|---|
-| `FindByID[T]` | `FindByID[T](ctx context.Context, db *DB, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
-| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, db *DB, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
+| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
+| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
 
 ### Update
 
 | Function | Signature | Description |
 |---|---|---|
-| `Update[T]` | `Update[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
-| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, db *DB, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
-| `Refresh[T]` | `Refresh[T](ctx context.Context, db *DB, doc *T) error` | Re-read the document from storage, replacing all field values |
+| `Update[T]` | `Update[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
+| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
+| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T) error` | Re-read the document from storage, replacing all field values |
 
 ### Delete
 
 | Function | Signature | Description |
 |---|---|---|
-| `Delete[T]` | `Delete[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
-| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
-| `HardDelete` | `HardDelete() CRUDOption` | `Delete` / `TxDelete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, db, doc, den.HardDelete())` |
+| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
+| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
+| `HardDelete` | `HardDelete() CRUDOption` | `Delete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, scope, doc, den.HardDelete())` |
 
 ## Query
 
@@ -2489,9 +2490,9 @@ Every terminal takes `ctx context.Context` as its first argument so the same `Qu
 | Function | Signature | Description |
 |---|---|---|
 | `NewLink[T]` | `NewLink[T any](doc *T) Link[T]` | Create a Link from an existing document, extracting its ID |
-| `FetchLink[T]` | `FetchLink[T](ctx context.Context, db *DB, doc *T, field string) error` | Fetch and resolve a single link field on a document |
-| `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, db *DB, doc *T) error` | Fetch and resolve all link fields on a document |
-| `BackLinks[T]` | `BackLinks[T](ctx context.Context, db *DB, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
+| `FetchLink[T]` | `FetchLink[T](ctx context.Context, s Scope, doc *T, field string) error` | Fetch and resolve a single link field on a document |
+| `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, s Scope, doc *T) error` | Fetch and resolve all link fields on a document |
+| `BackLinks[T]` | `BackLinks[T](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
 | `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
 
 ### Link Rules
@@ -2514,19 +2515,18 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 
 ## Transactions
 
+Standard CRUD (`Insert`, `Update`, `Delete`, `FindByID`, `FindByIDs`, `FindOneAndUpdate`, `Refresh`, `InsertMany`, `DeleteMany`, `FetchLink`, `FetchAllLinks`, `BackLinks`) accept a `Scope` parameter satisfied by both `*DB` and `*Tx` — pass whichever you have. The APIs below are the transaction-only ones because their semantics are tied to transaction lifetime.
+
 | Function | Signature | Description |
 |---|---|---|
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
-| `TxFindByID[T]` | `TxFindByID[T](tx *Tx, id string) (*T, error)` | Find a document by ID within a transaction |
-| `TxLockByID[T]` | `TxLockByID[T](tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (PostgreSQL `FOR UPDATE`; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
-| `SkipLocked` | `SkipLocked() LockOption` | `TxLockByID` / `TxQuerySet.ForUpdate` modifier: skip rows locked by other transactions (PostgreSQL `FOR UPDATE SKIP LOCKED`). Queue-consumer primitive |
-| `NoWait` | `NoWait() LockOption` | `TxLockByID` / `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately on contention (PostgreSQL `FOR UPDATE NOWAIT`). Mutually exclusive with `SkipLocked` |
-| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First` |
-| `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
-| `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
-| `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |
-| `TxRawGet` | `TxRawGet(tx *Tx, collection string, id string) ([]byte, error)` | Raw bytes escape hatch for infrastructure code (for example, a migration log). Prefer `TxFindByID` for normal document reads |
-| `TxRawPut` | `TxRawPut(tx *Tx, collection string, id string, data []byte) error` | Raw bytes escape hatch paired with `TxRawGet`. Prefer `TxInsert` / `TxUpdate` for normal document writes |
+| `LockByID[T]` | `LockByID[T](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (PostgreSQL `FOR UPDATE`; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
+| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` / `TxQuerySet.ForUpdate` modifier: skip rows locked by other transactions (PostgreSQL `FOR UPDATE SKIP LOCKED`). Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `LockByID` / `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately on contention (PostgreSQL `FOR UPDATE NOWAIT`). Mutually exclusive with `SkipLocked` |
+| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All(ctx)`, `First(ctx)` |
+| `RawGet` | `RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error)` | Raw bytes escape hatch for infrastructure code (for example, a migration log). Prefer `FindByID` for normal document reads |
+| `RawPut` | `RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error` | Raw bytes escape hatch paired with `RawGet`. Prefer `Insert` / `Update` for normal document writes |
+| `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
 
 ## Metadata
 
@@ -2700,7 +2700,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot for rollback | `Rollback` when the document was never loaded from the database or does not embed `TrackedBase` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails |
-| `ErrLocked` | Row is locked by another transaction | `TxLockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only) |
+| `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only) |
 | `ErrDeadlock` | PostgreSQL reported a deadlock (SQLSTATE 40P01) | Any operation when the server cancels the query with a deadlock. Callers retry the transaction |
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized (SQLSTATE 40001) | PostgreSQL under stricter isolation |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend has no `FTSProvider` |

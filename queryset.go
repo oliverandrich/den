@@ -290,7 +290,7 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		// Drain the iterator to completion before issuing any writes. pgx's
 		// cursor pins the transaction's connection, so running TxUpdate while
 		// the cursor is still open would hit "conn busy" on PostgreSQL.
-		iter, err := tx.tx.Query(tx.ctx, col.meta.Name, q)
+		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 					return err
 				}
 			}
-			if err := TxUpdate(tx, doc); err != nil {
+			if err := Update(ctx, tx, doc); err != nil {
 				return err
 			}
 			count++

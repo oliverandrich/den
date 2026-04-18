@@ -19,13 +19,61 @@ func TestBuildSelectSQL_NoConditions(t *testing.T) {
 }
 
 func TestBuildSelectSQL_Eq(t *testing.T) {
+	// Simple top-level Eq with a scalar value is rewritten to a containment
+	// clause so the GIN(data jsonb_path_ops) index can serve the query.
 	q := &den.Query{
 		Collection: "products",
 		Conditions: []where.Condition{where.Field("name").Eq("Widget")},
 	}
 	sql, args := buildSelectSQL("products", q)
-	assert.Contains(t, sql, "jsonb_extract_path(data, 'name') = $1::jsonb")
-	assert.Equal(t, []any{[]byte(`"Widget"`)}, args)
+	assert.Contains(t, sql, "data @> $1::jsonb")
+	assert.NotContains(t, sql, "jsonb_extract_path(data, 'name') =")
+	assert.Equal(t, []any{[]byte(`{"name":"Widget"}`)}, args)
+}
+
+func TestBuildSelectSQL_Eq_RewriteTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		cond    where.Condition
+		wantArg []byte
+	}{
+		{"string", where.Field("status").Eq("published"), []byte(`{"status":"published"}`)},
+		{"int", where.Field("stock").Eq(42), []byte(`{"stock":42}`)},
+		{"int64", where.Field("stock").Eq(int64(42)), []byte(`{"stock":42}`)},
+		{"float", where.Field("price").Eq(3.5), []byte(`{"price":3.5}`)},
+		{"bool", where.Field("active").Eq(true), []byte(`{"active":true}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := &den.Query{Collection: "t", Conditions: []where.Condition{tt.cond}}
+			sql, args := buildSelectSQL("t", q)
+			assert.Contains(t, sql, "data @> $1::jsonb")
+			assert.Equal(t, []any{tt.wantArg}, args)
+		})
+	}
+}
+
+func TestBuildSelectSQL_Eq_NoRewrite(t *testing.T) {
+	// Cases where Eq must NOT be rewritten to containment — either the
+	// semantics differ (@> is subset, not equality) or we can't build a
+	// safe top-level JSONB object.
+	tests := []struct {
+		name string
+		cond where.Condition
+	}{
+		{"nested field", where.Field("address.city").Eq("Berlin")},
+		{"slice value", where.Field("tags").Eq([]string{"a", "b"})},
+		{"map value", where.Field("metadata").Eq(map[string]any{"k": "v"})},
+		{"nil value", where.Field("status").Eq(nil)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := &den.Query{Collection: "t", Conditions: []where.Condition{tt.cond}}
+			sql, _ := buildSelectSQL("t", q)
+			assert.NotContains(t, sql, "data @>")
+			assert.Contains(t, sql, "jsonb_extract_path(data,")
+		})
+	}
 }
 
 func TestBuildSelectSQL_Sort(t *testing.T) {
@@ -275,7 +323,8 @@ func TestBuildExistsSQL(t *testing.T) {
 	sql, args := buildExistsSQL("products", q)
 	assert.Contains(t, sql, "SELECT EXISTS(")
 	assert.Contains(t, sql, "LIMIT 1")
-	assert.Equal(t, []any{[]byte(`"Alpha"`)}, args)
+	assert.Contains(t, sql, "data @> $1::jsonb")
+	assert.Equal(t, []any{[]byte(`{"name":"Alpha"}`)}, args)
 }
 
 func TestBuildAggregateSQL_Sum(t *testing.T) {
@@ -296,7 +345,8 @@ func TestBuildAggregateSQL_AvgWithFilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, sql, `AVG((jsonb_extract_path_text(data, 'price'))::float)`)
 	assert.Contains(t, sql, "WHERE")
-	assert.Equal(t, []any{[]byte(`"X"`)}, args)
+	assert.Contains(t, sql, "data @> $1::jsonb")
+	assert.Equal(t, []any{[]byte(`{"category":"X"}`)}, args)
 }
 
 func TestBuildAggregateSQL_UnsupportedOp(t *testing.T) {

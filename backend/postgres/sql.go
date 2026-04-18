@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	json "github.com/goccy/go-json"
@@ -251,6 +252,10 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 
 	switch op {
 	case where.OpEq:
+		if canRewriteEqToContainment(rawField, value) {
+			obj := map[string]any{rawField: value}
+			return fmt.Sprintf("data @> $%d::jsonb", paramN), []any{toJSONBParam(obj)}, paramN + 1
+		}
 		return fmt.Sprintf("%s = $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
 	case where.OpNe:
 		return fmt.Sprintf("%s != $%d::jsonb", typed, paramN), []any{toJSONBParam(value)}, paramN + 1
@@ -312,6 +317,33 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 		return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", text, paramN), []any{"%" + escapeLike(fmt.Sprintf("%v", value)) + "%"}, paramN + 1
 	default:
 		return "", nil, paramN
+	}
+}
+
+// canRewriteEqToContainment reports whether a where.Field(name).Eq(value)
+// predicate can be rewritten from `jsonb_extract_path(data, 'name') = $N::jsonb`
+// to `data @> $N::jsonb`. The rewrite lets the GIN(data jsonb_path_ops) index
+// serve the query; the functional extract form bypasses it.
+//
+// Only top-level fields with scalar values qualify — containment on arrays or
+// objects has subset semantics that differ from equality, and nested paths
+// would require building a recursive JSON object (fine conceptually, deferred
+// to a future bean). FieldRef comparisons are filtered out earlier.
+func canRewriteEqToContainment(field string, value any) bool {
+	if value == nil {
+		return false
+	}
+	if strings.Contains(field, ".") {
+		return false
+	}
+	switch reflect.ValueOf(value).Kind() { //nolint:exhaustive // only scalar kinds rewrite; everything else must fall back
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
 	}
 }
 

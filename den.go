@@ -81,10 +81,17 @@ func WithTypes(types ...any) Option {
 	}
 }
 
-// SetTagValidator registers a function that validates documents using struct tags.
-// Called automatically before insert and update operations.
-func (db *DB) SetTagValidator(fn func(any) error) {
-	db.tagValidator = fn
+// WithTagValidator returns an Option that installs a function for validating
+// documents by their struct tags. The function is invoked before insert and
+// update operations; any error it returns is wrapped with ErrValidation.
+//
+// The option composes with WithTypes and WithValidation from the validate
+// package and is applied at Open, so validation is set once up-front and not
+// racy against concurrent Register calls.
+func WithTagValidator(fn func(any) error) Option {
+	return func(db *DB) {
+		db.tagValidator = fn
+	}
 }
 
 // Close closes the database and its underlying backend.

@@ -72,7 +72,7 @@ func TestHardDelete(t *testing.T) {
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// Hard delete permanently removes
-	require.NoError(t, den.HardDelete(ctx, db, p))
+	require.NoError(t, den.Delete(ctx, db, p, den.HardDelete()))
 
 	_, err := den.FindByID[SoftProduct](ctx, db, p.ID)
 	require.ErrorIs(t, err, den.ErrNotFound)

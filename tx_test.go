@@ -228,7 +228,7 @@ func TestRunInTransaction_PanicRecovery(t *testing.T) {
 	assert.InDelta(t, 10.0, found.Price, 0.001)
 }
 
-func TestTxGet_Direct(t *testing.T) {
+func TestTxRawGet_Direct(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
@@ -236,7 +236,7 @@ func TestTxGet_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		data, err := den.TxGet(tx, "product", p.ID)
+		data, err := den.TxRawGet(tx, "product", p.ID)
 		if err != nil {
 			return err
 		}
@@ -246,7 +246,7 @@ func TestTxGet_Direct(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestTxPut_Direct(t *testing.T) {
+func TestTxRawPut_Direct(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
@@ -254,7 +254,7 @@ func TestTxPut_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.TxPut(tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
+		return den.TxRawPut(tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
 	})
 	require.NoError(t, err)
 

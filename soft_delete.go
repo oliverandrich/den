@@ -9,14 +9,13 @@ import (
 	"github.com/oliverandrich/den/internal"
 )
 
-// HardDelete permanently removes a document from storage, bypassing soft-delete.
-// Hooks and link cascade are applied as with regular Delete.
-func HardDelete[T any](ctx context.Context, db *DB, document *T, opts ...CRUDOption) error {
-	opts = append(opts, hardDeleteOption())
-	return deleteCore(ctx, db, db.backend, document, opts...)
-}
-
-func hardDeleteOption() CRUDOption {
+// HardDelete returns a CRUDOption that makes Delete permanently remove a
+// document from storage, bypassing soft-delete. Hooks and link cascade are
+// still applied. Compose with other CRUDOptions such as WithLinkRule:
+//
+//	den.Delete(ctx, db, doc, den.HardDelete())
+//	den.Delete(ctx, db, doc, den.HardDelete(), den.WithLinkRule(den.LinkDelete))
+func HardDelete() CRUDOption {
 	return func(o *crudOpts) {
 		o.hardDelete = true
 	}

@@ -47,7 +47,7 @@ Module: `github.com/oliverandrich/den`
 |---|---|---|
 | `Delete[T]` | `Delete[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
-| `HardDelete[T]` | `HardDelete[T](ctx context.Context, db *DB, doc *T) error` | Permanently remove a document, bypassing soft-delete |
+| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete`/`TxDelete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, db, doc, den.HardDelete())` |
 
 ---
 
@@ -175,8 +175,8 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 | `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
 | `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
 | `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |
-| `TxGet` | `TxGet(tx *Tx, collection string, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction |
-| `TxPut` | `TxPut(tx *Tx, collection string, id string, data []byte) error` | Put raw document bytes by collection and ID within a transaction |
+| `TxRawGet` | `TxRawGet(tx *Tx, collection string, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction. Intended for infrastructure code (for example, a migration log) writing its own bookkeeping collection; prefer `TxFindByID` for normal reads |
+| `TxRawPut` | `TxRawPut(tx *Tx, collection string, id string, data []byte) error` | Write raw bytes into a transaction under the given collection and ID, bypassing encoding and registry checks. Same audience as `TxRawGet` |
 
 > **Note:** All standard CRUD operations have `Tx` variants for use inside transactions.
 

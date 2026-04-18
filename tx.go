@@ -206,13 +206,19 @@ func TxDelete[T any](tx *Tx, document *T, opts ...CRUDOption) error {
 	return deleteCore(tx.ctx, tx.db, tx.tx, document, opts...)
 }
 
-// TxGet performs a raw key lookup within the transaction.
-func TxGet(tx *Tx, collection, id string) ([]byte, error) {
+// TxRawGet performs a raw key lookup within the transaction, returning the
+// stored bytes verbatim without decoding or registry validation. Intended
+// for infrastructure code that stores unregistered bookkeeping collections
+// (for example, the migration log). Prefer TxFindByID for normal reads.
+func TxRawGet(tx *Tx, collection, id string) ([]byte, error) {
 	return tx.tx.Get(tx.ctx, collection, id)
 }
 
-// TxPut performs a raw key write within the transaction.
-func TxPut(tx *Tx, collection, id string, data []byte) error {
+// TxRawPut writes raw bytes into the transaction under the given collection
+// and id, bypassing encoding and registry checks. Same audience as TxRawGet:
+// infrastructure code writing its own bookkeeping collections. Prefer
+// TxInsert / TxUpdate for normal writes.
+func TxRawPut(tx *Tx, collection, id string, data []byte) error {
 	return tx.tx.Put(tx.ctx, collection, id, data)
 }
 

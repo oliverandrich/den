@@ -249,7 +249,7 @@ func loadApplied(ctx context.Context, db *den.DB) ([]string, error) {
 }
 
 func loadEntriesFromTx(tx *den.Tx) ([]migrationEntry, error) {
-	data, err := den.TxGet(tx, migrationsCollection, "log")
+	data, err := den.TxRawGet(tx, migrationsCollection, "log")
 	if err != nil {
 		if errors.Is(err, den.ErrNotFound) {
 			return nil, nil
@@ -269,5 +269,5 @@ func saveEntriesToTx(tx *den.Tx, entries []migrationEntry) error {
 	if err != nil {
 		return err
 	}
-	return den.TxPut(tx, migrationsCollection, "log", data)
+	return den.TxRawPut(tx, migrationsCollection, "log", data)
 }

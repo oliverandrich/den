@@ -48,11 +48,9 @@ func ValidateStruct(doc any) error {
 // are validated automatically before insert and update operations.
 func WithValidation() den.Option {
 	v := validator.New()
-	return func(db *den.DB) {
-		db.SetTagValidator(func(doc any) error {
-			return validateWithInstance(v, doc)
-		})
-	}
+	return den.WithTagValidator(func(doc any) error {
+		return validateWithInstance(v, doc)
+	})
 }
 
 func validateWithInstance(v *validator.Validate, doc any) error {

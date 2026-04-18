@@ -141,14 +141,14 @@ err := den.Delete(ctx, db, &product)
 ```
 
 !!! note
-    If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Use `den.HardDelete` to permanently remove a soft-deleted document.
+    If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
 
 ```go
 // Soft-delete (sets DeletedAt, document remains in storage)
 err := den.Delete(ctx, db, &product)
 
 // Permanent removal
-err := den.HardDelete(ctx, db, &product)
+err := den.Delete(ctx, db, &product, den.HardDelete())
 ```
 
 ### DeleteMany

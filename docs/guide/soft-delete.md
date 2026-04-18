@@ -49,14 +49,16 @@ all, _ := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
 
 ## Permanent Removal
 
-Use `HardDelete` to permanently remove a document from storage:
+Pass `HardDelete()` as a `CRUDOption` to `Delete` to permanently remove a document from storage:
 
 ```go
-err := den.HardDelete(ctx, db, product)
+err := den.Delete(ctx, db, product, den.HardDelete())
 ```
 
+`HardDelete()` composes with other CRUDOptions, so you can combine it with things like `WithLinkRule(LinkDelete)`.
+
 !!! warning
-    `HardDelete` is irreversible. The document is permanently removed from the backend — there is no way to recover it.
+    `HardDelete()` is irreversible. The document is permanently removed from the backend — there is no way to recover it.
 
 ## Checking Delete Status
 

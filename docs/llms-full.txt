@@ -668,14 +668,14 @@ Delete a specific document:
 err := den.Delete(ctx, db, &product)
 ```
 
-If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Use `den.HardDelete` to permanently remove a soft-deleted document.
+If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
 
 ```go
 // Soft-delete (sets DeletedAt, document remains in storage)
 err := den.Delete(ctx, db, &product)
 
 // Permanent removal
-err := den.HardDelete(ctx, db, &product)
+err := den.Delete(ctx, db, &product, den.HardDelete())
 ```
 
 ### DeleteMany
@@ -1830,13 +1830,13 @@ all, _ := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
 
 ## Permanent Removal
 
-Use `HardDelete` to permanently remove a document from storage:
+Pass `HardDelete()` as a `CRUDOption` to `Delete` to permanently remove a document from storage:
 
 ```go
-err := den.HardDelete(ctx, db, product)
+err := den.Delete(ctx, db, product, den.HardDelete())
 ```
 
-`HardDelete` is irreversible. The document is permanently removed from the backend.
+`HardDelete()` composes with other CRUDOptions such as `WithLinkRule(LinkDelete)`. It is irreversible — the document is permanently removed from the backend.
 
 ## Checking Delete Status
 

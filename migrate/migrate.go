@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	json "github.com/goccy/go-json"
@@ -28,6 +29,15 @@ type registeredMigration struct {
 // Registry holds registered migrations and provides the runner API.
 type Registry struct {
 	migrations []registeredMigration
+
+	// ensureTableOnce collapses concurrent in-process Up/Down starters into
+	// a single EnsureCollection call for the migration log. Without this,
+	// 8 goroutines simultaneously asking PostgreSQL for the auto GIN index
+	// via CREATE INDEX CONCURRENTLY IF NOT EXISTS deadlock on the shared
+	// ShareUpdateExclusiveLock acquisition. One goroutine runs the setup
+	// once; the rest wait and reuse the result (including any error).
+	ensureTableOnce sync.Once
+	ensureTableErr  error
 }
 
 // NewRegistry creates a new migration registry.
@@ -51,7 +61,7 @@ func (r *Registry) Register(version string, m Migration) {
 // Concurrent starters serialize on an advisory lock; every registered
 // migration runs exactly once across processes.
 func (r *Registry) Up(ctx context.Context, db *den.DB) error {
-	if err := ensureMigrationTable(ctx, db); err != nil {
+	if err := r.ensureMigrationTable(ctx, db); err != nil {
 		return err
 	}
 	for _, m := range r.migrations {
@@ -66,10 +76,10 @@ func (r *Registry) Up(ctx context.Context, db *den.DB) error {
 // Loads the current applied set to find the first pending version; the
 // actual "apply exactly once" guarantee comes from the lock in runForward.
 func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
-	if err := ensureMigrationTable(ctx, db); err != nil {
+	if err := r.ensureMigrationTable(ctx, db); err != nil {
 		return err
 	}
-	applied, err := loadApplied(ctx, db)
+	applied, err := r.loadApplied(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -85,7 +95,7 @@ func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
 
 // DownOne rolls back the last applied migration in a transaction.
 func (r *Registry) DownOne(ctx context.Context, db *den.DB) error {
-	applied, err := loadApplied(ctx, db)
+	applied, err := r.loadApplied(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -108,7 +118,7 @@ func (r *Registry) DownOne(ctx context.Context, db *den.DB) error {
 
 // Down rolls back all applied migrations in reverse order, each in its own transaction.
 func (r *Registry) Down(ctx context.Context, db *den.DB) error {
-	applied, err := loadApplied(ctx, db)
+	applied, err := r.loadApplied(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -220,12 +230,18 @@ type migrationEntry struct {
 
 const migrationsCollection = "_den_migrations"
 
-func ensureMigrationTable(ctx context.Context, db *den.DB) error {
-	return db.Backend().EnsureCollection(ctx, migrationsCollection, den.CollectionMeta{Name: migrationsCollection})
+// ensureMigrationTable runs EnsureCollection at most once per Registry.
+// Concurrent callers block on sync.Once so only one goroutine drives the
+// DDL; everyone else observes the cached result.
+func (r *Registry) ensureMigrationTable(ctx context.Context, db *den.DB) error {
+	r.ensureTableOnce.Do(func() {
+		r.ensureTableErr = db.Backend().EnsureCollection(ctx, migrationsCollection, den.CollectionMeta{Name: migrationsCollection})
+	})
+	return r.ensureTableErr
 }
 
-func loadApplied(ctx context.Context, db *den.DB) ([]string, error) {
-	if err := ensureMigrationTable(ctx, db); err != nil {
+func (r *Registry) loadApplied(ctx context.Context, db *den.DB) ([]string, error) {
+	if err := r.ensureMigrationTable(ctx, db); err != nil {
 		return nil, err
 	}
 	data, err := db.Backend().Get(ctx, migrationsCollection, "log")

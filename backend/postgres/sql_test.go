@@ -25,7 +25,7 @@ func TestBuildSelectSQL_Eq(t *testing.T) {
 	}
 	sql, args := buildSelectSQL("products", q)
 	assert.Contains(t, sql, "jsonb_extract_path(data, 'name') = $1::jsonb")
-	assert.Equal(t, []any{`"Widget"`}, args)
+	assert.Equal(t, []any{[]byte(`"Widget"`)}, args)
 }
 
 func TestBuildSelectSQL_Sort(t *testing.T) {
@@ -91,7 +91,7 @@ func TestBuildSelectSQL_In(t *testing.T) {
 	}
 	sql, args := buildSelectSQL("products", q)
 	assert.Contains(t, sql, "IN ($1::jsonb, $2::jsonb)")
-	assert.Equal(t, []any{`"a"`, `"b"`}, args)
+	assert.Equal(t, []any{[]byte(`"a"`), []byte(`"b"`)}, args)
 }
 
 func TestBuildSelectSQL_NotIn(t *testing.T) {
@@ -159,7 +159,7 @@ func TestBuildSelectSQL_NestedField(t *testing.T) {
 	}
 	sql, args := buildSelectSQL("products", q)
 	assert.Contains(t, sql, "jsonb_extract_path(data, 'address', 'city') = $1::jsonb")
-	assert.Equal(t, []any{`"Berlin"`}, args)
+	assert.Equal(t, []any{[]byte(`"Berlin"`)}, args)
 }
 
 func TestBuildSelectSQL_NestedFieldSort(t *testing.T) {
@@ -179,7 +179,7 @@ func TestBuildSelectSQL_StringGt(t *testing.T) {
 	sql, args := buildSelectSQL("products", q)
 	assert.Contains(t, sql, "jsonb_extract_path(data, 'name') > $1::jsonb")
 	assert.NotContains(t, sql, "::float")
-	assert.Equal(t, []any{`"A"`}, args)
+	assert.Equal(t, []any{[]byte(`"A"`)}, args)
 }
 
 func TestBuildSelectSQL_ContainsAll(t *testing.T) {
@@ -257,7 +257,7 @@ func TestBuildCountSQL(t *testing.T) {
 	}
 	sql, args := buildCountSQL("products", q)
 	assert.Contains(t, sql, `SELECT COUNT(*) FROM "products" WHERE`)
-	assert.Equal(t, []any{"10"}, args)
+	assert.Equal(t, []any{[]byte("10")}, args)
 }
 
 func TestBuildCountSQL_NoConditions(t *testing.T) {
@@ -275,7 +275,7 @@ func TestBuildExistsSQL(t *testing.T) {
 	sql, args := buildExistsSQL("products", q)
 	assert.Contains(t, sql, "SELECT EXISTS(")
 	assert.Contains(t, sql, "LIMIT 1")
-	assert.Equal(t, []any{`"Alpha"`}, args)
+	assert.Equal(t, []any{[]byte(`"Alpha"`)}, args)
 }
 
 func TestBuildAggregateSQL_Sum(t *testing.T) {
@@ -296,7 +296,7 @@ func TestBuildAggregateSQL_AvgWithFilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, sql, `AVG((jsonb_extract_path_text(data, 'price'))::float)`)
 	assert.Contains(t, sql, "WHERE")
-	assert.Equal(t, []any{`"X"`}, args)
+	assert.Equal(t, []any{[]byte(`"X"`)}, args)
 }
 
 func TestBuildAggregateSQL_UnsupportedOp(t *testing.T) {

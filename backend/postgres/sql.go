@@ -14,13 +14,15 @@ import (
 
 // toJSONBParam serializes a Go value to its JSON representation for use as a
 // $N::jsonb parameter. This preserves type information: strings become JSON
-// strings, numbers become JSON numbers, etc.
-func toJSONBParam(v any) string {
+// strings, numbers become JSON numbers, etc. Returns the marshaled bytes
+// directly so pgx can stream them without a string conversion; the ::jsonb
+// cast in the surrounding SQL accepts bytea-equivalent input.
+func toJSONBParam(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Sprintf("%v", v)
+		return fmt.Appendf(nil, "%v", v)
 	}
-	return string(b)
+	return b
 }
 
 var sanitizeFieldName = internal.SanitizeFieldName

@@ -238,6 +238,51 @@ func TestMyFeature(t *testing.T) {
 }
 ```
 
+## Benchmarks
+
+Measured on an Apple M4 Pro (14 cores), Go 1.25, PostgreSQL 17 on localhost. The fixture is a ~1 KB article document (title, body, status, category, tags, price, indexed timestamp, embedded author link, metadata map) — closer to a real blog or catalog entry than a minimal struct.
+
+Reproduce locally with `just bench-readme`. Numbers exclude connection-setup overhead (the bench helper opens the DB once and reuses it).
+
+### Serial workloads
+
+Single-goroutine latency per operation. Lower is better.
+
+<!-- BENCH:SERIAL -->
+| Scenario | SQLite | Postgres | SQLite allocs | Postgres allocs |
+|---|---:|---:|---:|---:|
+| Insert (single) | 134.7 µs | 178.9 µs | 30 | 28 |
+| InsertMany (100) | 8.95 ms | 14.54 ms | 3407 | 2907 |
+| InsertMany (1000) | 82.66 ms | 143.82 ms | 33969 | 28976 |
+| FindByID | 5.0 µs | 37.4 µs | 42 | 31 |
+| FindByIDs (10) | 261.3 µs | 863.8 µs | 343 | 328 |
+| Query + Sort + Limit(10) | 708.5 µs | 2.17 ms | 328 | 289 |
+| Query + Sort + Limit(100) | 1.95 ms | 2.85 ms | 2941 | 2541 |
+| Iter (1000 rows) | 2.70 ms | 2.80 ms | 29047 | 25035 |
+| Count(filter) | 24.9 µs | 877.6 µs | 29 | 29 |
+| Sum(filter) | 174.3 µs | 1.09 ms | 35 | 39 |
+| FTS Search | 863.9 µs | 1.88 ms | 603 | 513 |
+| WithFetchLinks (20 rows) | 107.8 µs | 1.62 ms | 1085 | 783 |
+| Update (single) | 118.0 µs | 304.8 µs | 62 | 49 |
+| QuerySet.Update (100) | 8.77 ms | 19.25 ms | 5248 | 4342 |
+| RunInTransaction | 160.9 µs | 302.5 µs | 78 | 55 |
+
+<!-- /BENCH:SERIAL -->
+
+### Concurrent workloads
+
+`b.RunParallel` with Go's default `GOMAXPROCS`. Higher ops/sec is better. SQLite serializes writers by design (BEGIN IMMEDIATE), so write-heavy numbers plateau at single-writer speed; PostgreSQL's MVCC scales writes across connections.
+
+<!-- BENCH:CONCURRENT -->
+| Scenario | SQLite | Postgres |
+|---|---:|---:|
+| FindByID | 71.7k ops/s | 80.5k ops/s |
+| Insert (single) | 510 ops/s | 26.8k ops/s |
+| Mixed reads/writes 80/20 | 11.1k ops/s | 63.3k ops/s |
+| Queue consumer (SkipLocked) | 285 ops/s | 19.6k ops/s |
+
+<!-- /BENCH:CONCURRENT -->
+
 ## Development
 
 Den uses [just](https://github.com/casey/just) as command runner:

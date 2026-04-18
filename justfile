@@ -29,6 +29,18 @@ coverage:
 bench count="1":
     go test -bench=. -benchmem -count={{count}} -run='^$$' .
 
+# Run realworld + concurrent benchmarks and refresh the README tables.
+# Requires a reachable PostgreSQL via DEN_POSTGRES_URL; falls back to the
+# default local DSN used by dentest when unset.
+bench-readme:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$(mktemp -t den-bench.XXXXXX)
+    trap 'rm -f "$out"' EXIT
+    go test -bench='Benchmark(RW|Concurrent)_' -benchmem -run='^$$' -benchtime=2s . | tee "$out"
+    go run ./scripts/bench_report.go -readme=README.md < "$out"
+    echo "README.md benchmark tables updated."
+
 # Tidy module dependencies
 tidy:
     go mod tidy

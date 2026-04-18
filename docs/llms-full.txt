@@ -945,14 +945,18 @@ houses, err := den.NewQuery[House](db).WithFetchLinks().All(ctx)
 // houses[0].Windows[0].Value != nil
 ```
 
+`.All(ctx)` runs one batched `WHERE _id IN (…)` per target type per nesting level, deduplicates IDs across parents, and shares decoded pointers. Streaming `.Iter(ctx)` keeps its per-row resolver. See the Relations section below for the full behavior.
+
 ### WithNestingDepth
 
 Control how deep link resolution recurses (default: 3):
 
 ```go
 houses, err := den.NewQuery[House](db).
-    WithFetchLinks().WithNestingDepth(1).All(ctx)
+    WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
+
+Recursion runs on `.All` / `.AllWithCount` / `.Search`; streaming `.Iter` only resolves the direct level.
 
 ### IncludeDeleted
 
@@ -1114,7 +1118,7 @@ houses[0].Door.IsLoaded() // false
 
 ### Eager (WithFetchLinks)
 
-Resolve all links during the query. Additional lookups happen within the same transaction for read consistency:
+Resolve all links during the query:
 
 ```go
 houses, err := den.NewQuery[House](db,
@@ -1125,6 +1129,10 @@ houses[0].Door.Value     // *Door{Height: 200, Width: 90}
 houses[0].Door.IsLoaded() // true
 houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 ```
+
+`.All(ctx)` drains the result first, then runs one batched `WHERE _id IN (…)` query per target type per nesting level. IDs are deduplicated across parents, so a hot target referenced by many rows is fetched once and the decoded pointer is shared into every matching slot — `houses[0].Door.Value == houses[1].Door.Value` when they refer to the same ID. `AllWithCount` and `Search` use the same batched path.
+
+`.Iter(ctx).WithFetchLinks()` keeps per-row resolution because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract.
 
 ### On-Demand (FetchLink / FetchAllLinks)
 
@@ -1226,10 +1234,12 @@ The default maximum nesting depth is **3 levels**.
 
 ```go
 houses, err := den.NewQuery[House](db).
-    WithFetchLinks().WithNestingDepth(1).All(ctx)
+    WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
 
-When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved -- they contain the ID but `Value` is `nil` and `IsLoaded()` returns `false`. This prevents infinite loops and bounds resource consumption.
+With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query for the `Mid` target type, then one query for the `Leaf` target type on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
+
+Nested resolution only descends in the batched paths (`.All`, `.AllWithCount`, `.Search`). Streaming `.Iter(ctx)` resolves only the direct level of every yielded document because it cannot coherently batch without buffering.
 
 ## Complete Example
 
@@ -2379,8 +2389,10 @@ Module: `github.com/oliverandrich/den`
 
 | Function | Signature | Description |
 |---|---|---|
-| `OpenURL` | `OpenURL(dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import) |
+| `Open` | `Open(ctx context.Context, b Backend, opts ...Option) (*DB, error)` | Open a database around an existing `Backend`. The context governs setup work triggered by options |
+| `OpenURL` | `OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import). The context governs connection dialing and any option-driven setup |
 | `Register` | `Register(ctx context.Context, db *DB, docs ...any) error` | Register document types; creates collections and indexes |
+| `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
 
@@ -2414,7 +2426,7 @@ Module: `github.com/oliverandrich/den`
 |---|---|---|
 | `Delete[T]` | `Delete[T](ctx context.Context, db *DB, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, db *DB, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
-| `HardDelete[T]` | `HardDelete[T](ctx context.Context, db *DB, doc *T) error` | Permanently remove a document, bypassing soft-delete |
+| `HardDelete` | `HardDelete() CRUDOption` | `Delete` / `TxDelete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, db, doc, den.HardDelete())` |
 
 ## Query
 
@@ -2440,16 +2452,18 @@ q := den.NewQuery[T](db, conditions...)
 
 ### Terminal Methods
 
+Every terminal takes `ctx context.Context` as its first argument so the same `QuerySet` can be executed against different contexts.
+
 | Method | Signature | Description |
 |---|---|---|
-| `All` | `All() ([]*T, error)` | Execute query, return all matching documents |
-| `First` | `First() (*T, error)` | Execute query, return the first matching document |
-| `Count` | `Count() (int64, error)` | Count matching documents |
-| `Exists` | `Exists() (bool, error)` | Check whether at least one matching document exists |
-| `AllWithCount` | `AllWithCount() ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
-| `Iter` | `Iter() iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range` |
-| `Update` | `Update(fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
-| `Search` | `Search(query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL) |
+| `All` | `All(ctx context.Context) ([]*T, error)` | Execute query, return all matching documents |
+| `First` | `First(ctx context.Context) (*T, error)` | Execute query, return the first matching document. Returns `ErrNotFound` if nothing matches |
+| `Count` | `Count(ctx context.Context) (int64, error)` | Count matching documents |
+| `Exists` | `Exists(ctx context.Context) (bool, error)` | Check whether at least one matching document exists |
+| `AllWithCount` | `AllWithCount(ctx context.Context) ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
+| `Iter` | `Iter(ctx context.Context) iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range`. Terminates on the first error |
+| `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
+| `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
 ## Aggregation
 
@@ -2457,18 +2471,18 @@ q := den.NewQuery[T](db, conditions...)
 
 | Method | Signature | Description |
 |---|---|---|
-| `Avg` | `Avg(field string) (float64, error)` | Average of a numeric field across matching documents |
-| `Sum` | `Sum(field string) (float64, error)` | Sum of a numeric field across matching documents |
-| `Min` | `Min(field string) (float64, error)` | Minimum value of a field across matching documents |
-| `Max` | `Max(field string) (float64, error)` | Maximum value of a field across matching documents |
+| `Avg` | `Avg(ctx context.Context, field string) (float64, error)` | Average of a numeric field across matching documents |
+| `Sum` | `Sum(ctx context.Context, field string) (float64, error)` | Sum of a numeric field across matching documents |
+| `Min` | `Min(ctx context.Context, field string) (float64, error)` | Minimum value of a field across matching documents |
+| `Max` | `Max(ctx context.Context, field string) (float64, error)` | Maximum value of a field across matching documents |
 
 ### Grouped Aggregations
 
 | Method | Signature | Description |
 |---|---|---|
 | `GroupBy` | `GroupBy(field string) *GroupByBuilder[T]` | Group results by a field |
-| `Into` | `Into(dest any) error` | Execute grouped aggregation into a target slice of structs |
-| `Project` | `Project(dest any) error` | Project query results into a struct with a subset of fields |
+| `Into` | `Into(ctx context.Context, dest any) error` | Execute grouped aggregation into a target slice of structs |
+| `Project` | `Project(ctx context.Context, dest any) error` | Project query results into a struct with a subset of fields |
 
 ## Relations
 
@@ -2504,11 +2518,15 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 |---|---|---|
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
 | `TxFindByID[T]` | `TxFindByID[T](tx *Tx, id string) (*T, error)` | Find a document by ID within a transaction |
+| `TxLockByID[T]` | `TxLockByID[T](tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (PostgreSQL `FOR UPDATE`; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
+| `SkipLocked` | `SkipLocked() LockOption` | `TxLockByID` / `TxQuerySet.ForUpdate` modifier: skip rows locked by other transactions (PostgreSQL `FOR UPDATE SKIP LOCKED`). Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `TxLockByID` / `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately on contention (PostgreSQL `FOR UPDATE NOWAIT`). Mutually exclusive with `SkipLocked` |
+| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All`, `First` |
 | `TxInsert[T]` | `TxInsert[T](tx *Tx, doc *T) error` | Insert a document within a transaction |
 | `TxUpdate` | `TxUpdate(tx *Tx, doc any) error` | Update a document within a transaction |
 | `TxDelete[T]` | `TxDelete[T](tx *Tx, doc *T) error` | Delete a document within a transaction |
-| `TxGet` | `TxGet(tx *Tx, collection string, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction |
-| `TxPut` | `TxPut(tx *Tx, collection string, id string, data []byte) error` | Put raw document bytes by collection and ID within a transaction |
+| `TxRawGet` | `TxRawGet(tx *Tx, collection string, id string) ([]byte, error)` | Raw bytes escape hatch for infrastructure code (for example, a migration log). Prefer `TxFindByID` for normal document reads |
+| `TxRawPut` | `TxRawPut(tx *Tx, collection string, id string, data []byte) error` | Raw bytes escape hatch paired with `TxRawGet`. Prefer `TxInsert` / `TxUpdate` for normal document writes |
 
 ## Metadata
 
@@ -2682,6 +2700,10 @@ Import: `github.com/oliverandrich/den`
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot for rollback | `Rollback` when the document was never loaded from the database or does not embed `TrackedBase` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails |
+| `ErrLocked` | Row is locked by another transaction | `TxLockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only) |
+| `ErrDeadlock` | PostgreSQL reported a deadlock (SQLSTATE 40P01) | Any operation when the server cancels the query with a deadlock. Callers retry the transaction |
+| `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized (SQLSTATE 40001) | PostgreSQL under stricter isolation |
+| `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend has no `FTSProvider` |
 
 ## Usage with errors.Is
 

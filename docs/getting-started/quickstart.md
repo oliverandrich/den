@@ -87,6 +87,20 @@ func main() {
 }
 ```
 
+## One-Expression Setup
+
+`den.WithTypes(...)` registers document types at Open time so the whole setup reads as a single expression. Registration errors abort `OpenURL` and surface as its return value.
+
+```go
+db, err := den.OpenURL(ctx, "sqlite:///products.db", den.WithTypes(&Product{}))
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+Use explicit `den.Register(ctx, db, ...)` (as in the full example above) when you need a different context for registration than for Open, or when types become known only after Open.
+
 ## Switching to PostgreSQL
 
 Change the import and the DSN — the rest of your code stays identical.

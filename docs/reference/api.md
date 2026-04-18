@@ -10,8 +10,10 @@ Module: `github.com/oliverandrich/den`
 
 | Function | Signature | Description |
 |---|---|---|
-| `OpenURL` | `OpenURL(dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import) |
+| `Open` | `Open(ctx context.Context, b Backend, opts ...Option) (*DB, error)` | Open a database around an existing `Backend`. The context governs any setup work triggered by options (for example `WithTypes`) |
+| `OpenURL` | `OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import). The context governs connection dialing and any setup work triggered by options |
 | `Register` | `Register(ctx context.Context, db *DB, docs ...any) error` | Register document types; creates collections and indexes |
+| `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
 
@@ -61,7 +63,7 @@ q := den.NewQuery[T](db, conditions...)
 
 | Function | Signature | Description |
 |---|---|---|
-| `NewQuery[T]` | `NewQuery[T](ctx context.Context, db *DB, conditions ...where.Condition) QuerySet[T]` | Create a new chainable query for type T |
+| `NewQuery[T]` | `NewQuery[T](db *DB, conditions ...where.Condition) QuerySet[T]` | Create a new chainable query for type T. The context is supplied later by the terminal method, so one `QuerySet` can be reused across different contexts |
 
 ### Chainable Methods
 
@@ -83,16 +85,18 @@ All chainable methods return `QuerySet[T]` and can be composed in any order.
 
 Terminal methods execute the query and return results.
 
+Every terminal takes `ctx context.Context` as its first argument, so the same `QuerySet` can be executed against different contexts (different timeouts, different cancellation scopes).
+
 | Method | Signature | Description |
 |---|---|---|
-| `All` | `All() ([]*T, error)` | Execute query, return all matching documents |
-| `First` | `First() (*T, error)` | Execute query, return the first matching document |
-| `Count` | `Count() (int64, error)` | Count matching documents |
-| `Exists` | `Exists() (bool, error)` | Check whether at least one matching document exists |
-| `AllWithCount` | `AllWithCount() ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
-| `Iter` | `Iter() iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range` |
-| `Update` | `Update(fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
-| `Search` | `Search(query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL) |
+| `All` | `All(ctx context.Context) ([]*T, error)` | Execute query, return all matching documents |
+| `First` | `First(ctx context.Context) (*T, error)` | Execute query, return the first matching document. Returns `ErrNotFound` if nothing matches |
+| `Count` | `Count(ctx context.Context) (int64, error)` | Count matching documents |
+| `Exists` | `Exists(ctx context.Context) (bool, error)` | Check whether at least one matching document exists |
+| `AllWithCount` | `AllWithCount(ctx context.Context) ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
+| `Iter` | `Iter(ctx context.Context) iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range`. Terminates on the first error |
+| `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
+| `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
 ---
 
@@ -104,18 +108,18 @@ Aggregation methods are chained onto a `QuerySet[T]`.
 
 | Method | Signature | Description |
 |---|---|---|
-| `Avg` | `Avg(field string) (float64, error)` | Average of a numeric field across matching documents |
-| `Sum` | `Sum(field string) (float64, error)` | Sum of a numeric field across matching documents |
-| `Min` | `Min(field string) (float64, error)` | Minimum value of a field across matching documents |
-| `Max` | `Max(field string) (float64, error)` | Maximum value of a field across matching documents |
+| `Avg` | `Avg(ctx context.Context, field string) (float64, error)` | Average of a numeric field across matching documents |
+| `Sum` | `Sum(ctx context.Context, field string) (float64, error)` | Sum of a numeric field across matching documents |
+| `Min` | `Min(ctx context.Context, field string) (float64, error)` | Minimum value of a field across matching documents |
+| `Max` | `Max(ctx context.Context, field string) (float64, error)` | Maximum value of a field across matching documents |
 
 ### Grouped Aggregations
 
 | Method | Signature | Description |
 |---|---|---|
 | `GroupBy` | `GroupBy(field string) *GroupByBuilder[T]` | Group results by a field |
-| `Into` | `Into(dest any) error` | Execute grouped aggregation into a target slice of structs |
-| `Project` | `Project(dest any) error` | Project query results into a struct with a subset of fields |
+| `Into` | `Into(ctx context.Context, dest any) error` | Execute grouped aggregation into a target slice of structs |
+| `Project` | `Project(ctx context.Context, dest any) error` | Project query results into a struct with a subset of fields |
 
 ```go
 // GroupBy example
@@ -195,7 +199,7 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 
 | Function | Signature | Description |
 |---|---|---|
-| `DropStaleIndexes` | `DropStaleIndexes(ctx, db *DB, opts ...DropStaleOption) (DropStaleResult, error)` | Drop indexes previously created by `Register()` that no longer correspond to any `IndexDefinition`. Managed indexes (GIN, FTS) are never touched |
+| `DropStaleIndexes` | `DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (DropStaleResult, error)` | Drop indexes previously created by `Register()` that no longer correspond to any `IndexDefinition`. Managed indexes (GIN, FTS) are never touched |
 | `DryRun` | `DryRun() DropStaleOption` | Option for `DropStaleIndexes`; reports the plan without mutating the database |
 
 `DropStaleResult` contains two slices:

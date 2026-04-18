@@ -69,6 +69,9 @@ type Product struct {
 !!! note
     The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries options.
 
+!!! warning "Field name validation"
+    `Register` rejects JSON field names that do not match `^[A-Za-z_][A-Za-z0-9_]*$` — identifiers only, no spaces, dots, quotes, or punctuation. The error wraps `den.ErrValidation`. This protects the JSONB path expressions used by Den's SQL builder against tag-sourced injection. In practice you will hit it only when migrating data from a system that used unusual field names.
+
 ## Collection Naming
 
 Den derives collection names automatically: lowercase struct name, no pluralization.

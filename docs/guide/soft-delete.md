@@ -36,7 +36,7 @@ All standard queries automatically exclude soft-deleted documents:
 
 ```go
 // Returns only non-deleted products
-products, _ := den.NewQuery[Product](ctx, db).All()
+products, _ := den.NewQuery[Product](db).All(ctx)
 ```
 
 ## Including Deleted Documents
@@ -44,7 +44,7 @@ products, _ := den.NewQuery[Product](ctx, db).All()
 Use `IncludeDeleted()` to bypass the automatic filter:
 
 ```go
-all, _ := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
 ## Permanent Removal

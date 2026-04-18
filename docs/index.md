@@ -55,9 +55,9 @@ func main() {
     den.Register(ctx, db, &Product{})
     den.Insert(ctx, db, &Product{Name: "Widget", Price: 9.99})
 
-    products, _ := den.NewQuery[Product](ctx, db,
+    products, _ := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
-    ).Sort("name", den.Asc).All()
+    ).Sort("name", den.Asc).All(ctx)
 
     for _, p := range products {
         fmt.Printf("%s — $%.2f\n", p.Name, p.Price)

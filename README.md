@@ -25,7 +25,7 @@ Den provides a MongoDB/Beanie-style document model using native Go structs. Stor
 ## Features
 
 - **Two backends, one API** — SQLite (embedded, pure Go, no CGO) and PostgreSQL (server-based, JSONB + GIN indexes)
-- **Chainable QuerySet** — `NewQuery[T](ctx, db).Where(...).Sort(...).Limit(n).All()` with lazy evaluation
+- **Chainable QuerySet** — `NewQuery[T](db).Where(...).Sort(...).Limit(n).All(ctx)` with lazy evaluation
 - **Range iteration** — `Iter()` returns `iter.Seq2[*T, error]` for memory-efficient streaming with Go's `range`
 - **Typed relations** — `Link[T]` for one-to-one, `[]Link[T]` for one-to-many, with cascade write/delete and eager/lazy fetch
 - **Back-references** — `BackLinks[T]` finds all documents referencing a given target
@@ -72,7 +72,7 @@ func main() {
     ctx := context.Background()
 
     // Open a SQLite database
-    db, err := den.OpenURL("sqlite:///products.db")
+    db, err := den.OpenURL(ctx, "sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -91,9 +91,9 @@ func main() {
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
 
     // Query
-    products, err := den.NewQuery[Product](ctx, db,
+    products, err := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
-    ).Sort("name", den.Asc).All()
+    ).Sort("name", den.Asc).All(ctx)
     if err != nil {
         log.Fatal(err)
     }
@@ -102,7 +102,7 @@ func main() {
     }
 
     // Iterate (streaming, memory-efficient)
-    for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+    for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
         if err != nil {
             log.Fatal(err)
         }

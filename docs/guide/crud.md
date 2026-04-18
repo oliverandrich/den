@@ -79,9 +79,9 @@ err := den.Update(ctx, db, product, den.IgnoreRevision())
 Update specific fields on all documents matching a query. Returns the number of modified documents:
 
 ```go
-count, err := den.NewQuery[Product](ctx, db,
+count, err := den.NewQuery[Product](db,
     where.Field("category").Eq("old"),
-).Update(den.SetFields{"category": "new"})
+).Update(ctx, den.SetFields{"category": "new"})
 // count = number of documents updated
 ```
 

@@ -56,7 +56,7 @@ Module: `github.com/oliverandrich/den`
 ### Creating a Query
 
 ```go
-q := den.NewQuery[T](ctx, db, conditions...)
+q := den.NewQuery[T](db, conditions...)
 ```
 
 | Function | Signature | Description |
@@ -125,7 +125,7 @@ type Stats struct {
     Count    int64   `den:"count"`
 }
 
-err := den.NewQuery[Product](ctx, db).GroupBy("category.name").Into(&results)
+err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 ```
 
 ---

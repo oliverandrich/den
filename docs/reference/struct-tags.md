@@ -159,9 +159,9 @@ type CategoryStats struct {
 }
 
 var results []CategoryStats
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).GroupBy("category.name").Into(&results)
+).GroupBy("category.name").Into(ctx, &results)
 ```
 
 ---
@@ -193,10 +193,10 @@ type ProductView struct {
 }
 
 var summaries []ProductSummary
-err := den.NewQuery[Product](ctx, db).Project(&summaries)
+err := den.NewQuery[Product](db).Project(ctx, &summaries)
 
 var views []ProductView
-err := den.NewQuery[Product](ctx, db).Project(&views)
+err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
 ---

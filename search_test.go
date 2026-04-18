@@ -30,7 +30,7 @@ func TestSearch_SQLite(t *testing.T) {
 		{Title: "Cooking Tips", Body: "How to make pasta", Category: "food"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "Go")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Go Programming", results[0].Title)
@@ -46,7 +46,7 @@ func TestSearch_SQLite_MultipleResults(t *testing.T) {
 		{Title: "Python Basics", Body: "Learn Python", Category: "tech"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "Go")
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -60,7 +60,7 @@ func TestSearch_SQLite_WithFilter(t *testing.T) {
 		{Title: "Go Cooking", Body: "Go to recipes for beginners", Category: "food"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db, where.Field("category").Eq("tech")).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db, where.Field("category").Eq("tech")).Search(ctx, "Go")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Go Web", results[0].Title)
@@ -76,7 +76,7 @@ func TestSearch_SQLite_WithLimit(t *testing.T) {
 		{Title: "Go Three", Body: "Third Go article", Category: "tech"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Limit(2).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db).Limit(2).Search(ctx, "Go")
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -87,7 +87,7 @@ func TestSearch_SQLite_NoResults(t *testing.T) {
 
 	require.NoError(t, den.Insert(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Search("nonexistent")
+	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -102,7 +102,7 @@ func TestSearch_Postgres(t *testing.T) {
 		{Title: "Cooking Tips", Body: "How to make pasta", Category: "food"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Search("programming")
+	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "programming")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Go Programming", results[0].Title)
@@ -117,7 +117,7 @@ func TestSearch_Postgres_WithFilter(t *testing.T) {
 		{Title: "Go Cooking", Body: "Go to recipes for beginners", Category: "food"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db, where.Field("category").Eq("tech")).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db, where.Field("category").Eq("tech")).Search(ctx, "Go")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Go Web", results[0].Title)
@@ -133,7 +133,7 @@ func TestSearch_Postgres_WithLimit(t *testing.T) {
 		{Title: "Go Three", Body: "Third Go article", Category: "tech"},
 	}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Limit(2).Search("Go")
+	results, err := den.NewQuery[FTSArticle](db).Limit(2).Search(ctx, "Go")
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -144,7 +144,7 @@ func TestSearch_Postgres_NoResults(t *testing.T) {
 
 	require.NoError(t, den.Insert(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
 
-	results, err := den.NewQuery[FTSArticle](ctx, db).Search("nonexistent")
+	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }

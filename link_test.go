@@ -178,9 +178,9 @@ func TestWithFetchLinks_Eager(t *testing.T) {
 	}
 	require.NoError(t, den.Insert(ctx, db, house))
 
-	results, err := den.NewQuery[House](ctx, db,
+	results, err := den.NewQuery[House](db,
 		where.Field("name").Eq("Bungalow"),
-	).WithFetchLinks().All()
+	).WithFetchLinks().All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Door.IsLoaded())
@@ -334,9 +334,9 @@ func TestWithNestingDepth(t *testing.T) {
 	house := &House{Name: "Depth", Door: den.NewLink(door)}
 	require.NoError(t, den.Insert(ctx, db, house))
 
-	results, err := den.NewQuery[House](ctx, db,
+	results, err := den.NewQuery[House](db,
 		where.Field("name").Eq("Depth"),
-	).WithFetchLinks().WithNestingDepth(1).All()
+	).WithFetchLinks().WithNestingDepth(1).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Door.IsLoaded())

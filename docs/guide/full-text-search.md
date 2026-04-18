@@ -24,7 +24,7 @@ When `den.Register()` processes this struct, it automatically creates the FTS in
 
 ```go
 // Basic full-text search
-articles, err := den.NewQuery[Article](ctx, db).Limit(20).Search("golang embedded database")
+articles, err := den.NewQuery[Article](db).Limit(20).Search(ctx, "golang embedded database")
 ```
 
 `Search` is a terminal method -- it executes the query and returns `([]*T, error)` directly. Results are ranked by relevance (FTS5 `rank` on SQLite, `ts_rank` on PostgreSQL).
@@ -34,9 +34,9 @@ articles, err := den.NewQuery[Article](ctx, db).Limit(20).Search("golang embedde
 Full-text search can be combined with regular where conditions and query options:
 
 ```go
-articles, err := den.NewQuery[Article](ctx, db,
+articles, err := den.NewQuery[Article](db,
     where.Field("tags").Eq("tutorial"),
-).Sort("_created_at", den.Desc).Search("golang")
+).Sort("_created_at", den.Desc).Search(ctx, "golang")
 ```
 
 The FTS filter and the where conditions are applied together -- the database engine intersects both result sets using its query planner.

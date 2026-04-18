@@ -8,26 +8,26 @@ Scalar aggregations return a single value computed over matching documents.
 
 ```go
 // Average price of chocolate products
-avgPrice, err := den.NewQuery[Product](ctx, db,
+avgPrice, err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Avg("price")
+).Avg(ctx, "price")
 
 // Sum over the entire collection
-totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
+totalRevenue, err := den.NewQuery[Product](db).Sum(ctx, "price")
 
 // Min / Max
-cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
-mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+cheapest, err := den.NewQuery[Product](db).Min(ctx, "price")
+mostExpensive, err := den.NewQuery[Product](db).Max(ctx, "price")
 ```
 
 All scalar aggregations accept the same chainable filters as regular queries:
 
 ```go
 // Average price of active products above $10
-avg, err := den.NewQuery[Product](ctx, db,
+avg, err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
     where.Field("price").Gt(10),
-).Avg("price")
+).Avg(ctx, "price")
 ```
 
 **Return types:**
@@ -46,12 +46,12 @@ Count works with or without filter conditions.
 
 ```go
 // Total documents in the collection
-total, err := den.NewQuery[Product](ctx, db).Count()
+total, err := den.NewQuery[Product](db).Count(ctx)
 
 // Filtered count
-activeCount, err := den.NewQuery[Product](ctx, db,
+activeCount, err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).Count()
+).Count(ctx)
 ```
 
 !!! tip
@@ -73,9 +73,9 @@ type CategoryStats struct {
 
 var results []CategoryStats
 
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).GroupBy("category.name").Into(&results)
+).GroupBy("category.name").Into(ctx, &results)
 ```
 
 ### GroupBy Struct Tag Reference
@@ -106,9 +106,9 @@ type ProductSummary struct {
 
 var summaries []ProductSummary
 
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Project(&summaries)
+).Project(ctx, &summaries)
 ```
 
 For nested fields or field renaming, use the `from:` prefix in the `den` tag:
@@ -121,7 +121,7 @@ type ProductView struct {
 
 var views []ProductView
 
-err := den.NewQuery[Product](ctx, db).Project(&views)
+err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
 !!! note

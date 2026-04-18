@@ -75,7 +75,7 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 		wg.Add(1)
 		go func(gi int) {
 			defer wg.Done()
-			results, _, err := den.NewQuery[House](deadline, db).WithFetchLinks().AllWithCount()
+			results, _, err := den.NewQuery[House](db).WithFetchLinks().AllWithCount(deadline)
 			errs[gi] = err
 			allResults[gi] = results
 		}(g)

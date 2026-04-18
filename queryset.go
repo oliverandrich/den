@@ -15,9 +15,8 @@ import (
 //
 // The zero value is not usable — always obtain a QuerySet via NewQuery.
 // Calling terminal methods on a zero-value QuerySet panics because the
-// backend and context are nil.
+// backend reference is nil.
 type QuerySet[T any] struct {
-	ctx            context.Context
 	db             *DB
 	conditions     []where.Condition
 	sortFields     []SortEntry
@@ -31,8 +30,10 @@ type QuerySet[T any] struct {
 }
 
 // NewQuery creates a new QuerySet. Conditions can optionally be passed directly.
-func NewQuery[T any](ctx context.Context, db *DB, conditions ...where.Condition) QuerySet[T] {
-	qs := QuerySet[T]{ctx: ctx, db: db, nestDepth: 3}
+// The context is supplied later when a terminal method (All, First, Iter, …) runs,
+// so the same QuerySet can be executed against different contexts.
+func NewQuery[T any](db *DB, conditions ...where.Condition) QuerySet[T] {
+	qs := QuerySet[T]{db: db, nestDepth: 3}
 	if len(conditions) > 0 {
 		qs.conditions = conditions
 	}
@@ -98,13 +99,13 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 // --- Terminal methods (execute the query) ---
 
 // All executes the query and returns all matching documents.
-func (qs QuerySet[T]) All() ([]*T, error) {
+func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
 	// Pre-allocate when limit is known to avoid repeated slice growth.
 	var results []*T
 	if qs.limitN > 0 {
 		results = make([]*T, 0, qs.limitN)
 	}
-	for doc, err := range qs.Iter() {
+	for doc, err := range qs.Iter(ctx) {
 		if err != nil {
 			return nil, err
 		}
@@ -114,8 +115,8 @@ func (qs QuerySet[T]) All() ([]*T, error) {
 }
 
 // First returns the first matching document. Returns ErrNotFound if none match.
-func (qs QuerySet[T]) First() (*T, error) {
-	results, err := qs.Limit(1).All()
+func (qs QuerySet[T]) First(ctx context.Context) (*T, error) {
+	results, err := qs.Limit(1).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -126,29 +127,29 @@ func (qs QuerySet[T]) First() (*T, error) {
 }
 
 // Count returns the number of matching documents.
-func (qs QuerySet[T]) Count() (int64, error) {
+func (qs QuerySet[T]) Count(ctx context.Context) (int64, error) {
 	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return 0, err
 	}
 
 	q := qs.buildBackendQuery(col)
-	return qs.db.backend.Count(qs.ctx, col.meta.Name, q)
+	return qs.db.backend.Count(ctx, col.meta.Name, q)
 }
 
 // Exists returns true if at least one document matches.
-func (qs QuerySet[T]) Exists() (bool, error) {
+func (qs QuerySet[T]) Exists(ctx context.Context) (bool, error) {
 	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return false, err
 	}
 
 	q := qs.buildBackendQuery(col)
-	return qs.db.backend.Exists(qs.ctx, col.meta.Name, q)
+	return qs.db.backend.Exists(ctx, col.meta.Name, q)
 }
 
 // AllWithCount returns matching documents and the total unpaginated count.
-func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
+func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return nil, 0, err
@@ -165,13 +166,13 @@ func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
 	dataQ := qs.buildBackendQuery(col)
 
 	// Run Count + Query in a single read transaction for consistency
-	tx, err := qs.db.backend.Begin(qs.ctx, false)
+	tx, err := qs.db.backend.Begin(ctx, false)
 	if err != nil {
 		return nil, 0, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	total, err := tx.Count(qs.ctx, col.meta.Name, countQ)
+	total, err := tx.Count(ctx, col.meta.Name, countQ)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -180,11 +181,11 @@ func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
 	// connection to the open rows; issuing tx.Get while the iterator is
 	// live returns "conn busy". Materialize results first, close, then
 	// resolve links on the same tx (and therefore the same pooled conn).
-	iter, err := tx.Query(qs.ctx, col.meta.Name, dataQ)
+	iter, err := tx.Query(ctx, col.meta.Name, dataQ)
 	if err != nil {
 		return nil, 0, err
 	}
-	results, err := drainIter[T](qs.ctx, iter, qs.db, tx, false, 0, qs.limitN)
+	results, err := drainIter[T](ctx, iter, qs.db, tx, false, 0, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, 0, err
@@ -192,7 +193,7 @@ func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
 
 	if qs.fetchLinks {
 		for _, item := range results {
-			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, tx, item, qs.nestDepth); err != nil {
+			if err := fetchAllLinksOnDoc(ctx, qs.db, tx, item, qs.nestDepth); err != nil {
 				return nil, 0, err
 			}
 		}
@@ -235,7 +236,7 @@ func drainIter[T any](ctx context.Context, iter Iterator, db *DB, rw ReadWriter,
 
 // Update applies field updates to all matching documents in a single transaction.
 // Returns the number of updated documents.
-func (qs QuerySet[T]) Update(fields SetFields) (int64, error) {
+func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, error) {
 	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return 0, err
@@ -254,7 +255,7 @@ func (qs QuerySet[T]) Update(fields SetFields) (int64, error) {
 	q := qs.buildBackendQuery(col)
 
 	var count int64
-	txErr := RunInTransaction(qs.ctx, qs.db, func(tx *Tx) error {
+	txErr := RunInTransaction(ctx, qs.db, func(tx *Tx) error {
 		// Drain the iterator to completion before issuing any writes. pgx's
 		// cursor pins the transaction's connection, so running TxUpdate while
 		// the cursor is still open would hit "conn busy" on PostgreSQL.

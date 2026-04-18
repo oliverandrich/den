@@ -55,9 +55,9 @@ func main() {
     den.Register(ctx, db, &Product{})
     den.Insert(ctx, db, &Product{Name: "Widget", Price: 9.99})
 
-    products, _ := den.NewQuery[Product](ctx, db,
+    products, _ := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
-    ).Sort("name", den.Asc).All()
+    ).Sort("name", den.Asc).All(ctx)
 
     for _, p := range products {
         fmt.Printf("%s — $%.2f\n", p.Name, p.Price)
@@ -191,9 +191,9 @@ func main() {
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
 
     // Query with conditions
-    products, err := den.NewQuery[Product](ctx, db,
+    products, err := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
-    ).Sort("name", den.Asc).All()
+    ).Sort("name", den.Asc).All(ctx)
     if err != nil {
         log.Fatal(err)
     }
@@ -202,7 +202,7 @@ func main() {
     }
 
     // Iterate (streaming, memory-efficient)
-    for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+    for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
         if err != nil {
             log.Fatal(err)
         }
@@ -608,9 +608,9 @@ err := den.Update(ctx, db, product, den.IgnoreRevision())
 Update specific fields on all documents matching a query. Returns the number of modified documents:
 
 ```go
-count, err := den.NewQuery[Product](ctx, db,
+count, err := den.NewQuery[Product](db,
     where.Field("category").Eq("old"),
-).Update(den.SetFields{"category": "new"})
+).Update(ctx, den.SetFields{"category": "new"})
 // count = number of documents updated
 ```
 
@@ -721,10 +721,10 @@ If the document has been deleted, `Refresh` returns `ErrNotFound`.
 `den.NewQuery[T]` returns a chainable, lazy query builder. No database call is made until you invoke an execution method (`All`, `First`, `Count`, etc.):
 
 ```go
-products, err := den.NewQuery[Product](ctx, db,
+products, err := den.NewQuery[Product](db,
     where.Field("price").Gte(10.0),
     where.Field("category.name").Eq("Electronics"),
-).Sort("price", den.Asc).Limit(20).Skip(10).All()
+).Sort("price", den.Asc).Limit(20).Skip(10).All(ctx)
 ```
 
 ## Execution Methods
@@ -739,24 +739,24 @@ products, err := den.NewQuery[Product](ctx, db,
 
 ```go
 // First matching document
-product, err := den.NewQuery[Product](ctx, db,
+product, err := den.NewQuery[Product](db,
     where.Field("name").Eq("Widget"),
-).First()
+).First(ctx)
 
 // Count
-count, err := den.NewQuery[Product](ctx, db,
+count, err := den.NewQuery[Product](db,
     where.Field("price").Gt(100),
-).Count()
+).Count(ctx)
 
 // Exists
-exists, err := den.NewQuery[Product](ctx, db,
+exists, err := den.NewQuery[Product](db,
     where.Field("sku").Eq("ABC123"),
-).Exists()
+).Exists(ctx)
 
 // All with total count (for pagination UI)
-notes, total, err := den.NewQuery[Note](ctx, db,
+notes, total, err := den.NewQuery[Note](db,
     where.Field("user").Eq(userID),
-).Sort("_created_at", den.Desc).Limit(20).Skip(40).AllWithCount()
+).Sort("_created_at", den.Desc).Limit(20).Skip(40).AllWithCount(ctx)
 // total = 347 -> compute TotalPages, HasMore
 ```
 
@@ -765,7 +765,7 @@ notes, total, err := den.NewQuery[Note](ctx, db,
 `Iter()` returns a Go range-compatible iterator that streams documents without loading them all into memory:
 
 ```go
-for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
     if err != nil {
         return err
     }
@@ -872,7 +872,7 @@ where.Field("tags.0").Eq("featured")   // array index access
 ## Sort, Limit, Skip
 
 ```go
-den.NewQuery[Product](ctx, db).
+den.NewQuery[Product](db).
     Sort("price", den.Asc).    // ascending by price
     Sort("name", den.Desc).    // then descending by name
     Limit(20).                 // at most 20 results
@@ -886,21 +886,21 @@ For large result sets, cursor-based pagination with `After` / `Before` is more e
 
 ```go
 // First page
-page1, err := den.NewQuery[Entry](ctx, db,
+page1, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).Limit(20).All()
+).Sort("published", den.Desc).Limit(20).All(ctx)
 
 // Next page: pass the last document's ID as cursor
 lastID := page1[len(page1)-1].ID
-page2, err := den.NewQuery[Entry](ctx, db,
+page2, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).After(lastID).Limit(20).All()
+).Sort("published", den.Desc).After(lastID).Limit(20).All(ctx)
 
 // Previous page (backward pagination)
 firstID := page2[0].ID
-prevPage, err := den.NewQuery[Entry](ctx, db,
+prevPage, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).Before(firstID).Limit(20).All()
+).Sort("published", den.Desc).Before(firstID).Limit(20).All(ctx)
 ```
 
 `Skip(n)` works for small offsets but degrades at high page numbers (O(n) skip cost). `After` / `Before` use row-value comparisons like `WHERE (sort_field, id) < (?, ?)`, giving O(log n) performance regardless of position. Always prefer cursor-based pagination for user-facing paginated lists.
@@ -916,9 +916,9 @@ type ProductSummary struct {
 }
 
 var summaries []ProductSummary
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Project(&summaries)
+).Project(ctx, &summaries)
 ```
 
 For projections that extract nested fields, use `den:"from:..."`:
@@ -930,7 +930,7 @@ type ProductView struct {
 }
 
 var views []ProductView
-err := den.NewQuery[Product](ctx, db).Project(&views)
+err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
 ## Query Options
@@ -940,7 +940,7 @@ err := den.NewQuery[Product](ctx, db).Project(&views)
 Eagerly resolve all `Link[T]` fields during the query:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).WithFetchLinks().All()
+houses, err := den.NewQuery[House](db).WithFetchLinks().All(ctx)
 // houses[0].Door.Value != nil
 // houses[0].Windows[0].Value != nil
 ```
@@ -950,8 +950,8 @@ houses, err := den.NewQuery[House](ctx, db).WithFetchLinks().All()
 Control how deep link resolution recurses (default: 3):
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).
-    WithFetchLinks().WithNestingDepth(1).All()
+houses, err := den.NewQuery[House](db).
+    WithFetchLinks().WithNestingDepth(1).All(ctx)
 ```
 
 ### IncludeDeleted
@@ -959,7 +959,7 @@ houses, err := den.NewQuery[House](ctx, db).
 Include soft-deleted documents in results (only relevant for types embedding `document.SoftBase`):
 
 ```go
-all, err := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+all, err := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
 ## Full-Text Search
@@ -967,7 +967,7 @@ all, err := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
 For fields tagged with `den:"fts"`, use the `Search` method:
 
 ```go
-results, err := den.NewQuery[Article](ctx, db).Search("golang concurrency")
+results, err := den.NewQuery[Article](db).Search(ctx, "golang concurrency")
 ```
 
 SQLite translates to FTS5 `MATCH` queries against a virtual table. PostgreSQL translates to `tsvector` / `tsquery` operations with GIN index acceleration.
@@ -977,13 +977,13 @@ SQLite translates to FTS5 `MATCH` queries against a virtual table. PostgreSQL tr
 ### Scalar Aggregations
 
 ```go
-avgPrice, err := den.NewQuery[Product](ctx, db,
+avgPrice, err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Avg("price")
+).Avg(ctx, "price")
 
-totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
-cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
-mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+totalRevenue, err := den.NewQuery[Product](db).Sum(ctx, "price")
+cheapest, err := den.NewQuery[Product](db).Min(ctx, "price")
+mostExpensive, err := den.NewQuery[Product](db).Max(ctx, "price")
 ```
 
 ### GroupBy
@@ -1001,9 +1001,9 @@ type CategoryStats struct {
 }
 
 var results []CategoryStats
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).GroupBy("category.name").Into(&results)
+).GroupBy("category.name").Into(ctx, &results)
 ```
 
 The `den` tag on the stats struct declares the aggregation function:
@@ -1103,9 +1103,9 @@ house := &House{
 Links contain only IDs. No additional queries are performed:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db,
+houses, err := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).All()
+).All(ctx)
 
 houses[0].Door.ID        // "01HQ4..."
 houses[0].Door.Value     // nil
@@ -1117,9 +1117,9 @@ houses[0].Door.IsLoaded() // false
 Resolve all links during the query. Additional lookups happen within the same transaction for read consistency:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db,
+houses, err := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).WithFetchLinks().All()
+).WithFetchLinks().All(ctx)
 
 houses[0].Door.Value     // *Door{Height: 200, Width: 90}
 houses[0].Door.IsLoaded() // true
@@ -1131,9 +1131,9 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 Fetch individual link fields or all link fields after the initial query:
 
 ```go
-house, _ := den.NewQuery[House](ctx, db,
+house, _ := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).First()
+).First(ctx)
 
 // Fetch a single link field
 err := den.FetchLink(ctx, db, house, "door")
@@ -1225,8 +1225,8 @@ The default maximum nesting depth is **3 levels**.
 ### Per-Query Override
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).
-    WithFetchLinks().WithNestingDepth(1).All()
+houses, err := den.NewQuery[House](db).
+    WithFetchLinks().WithNestingDepth(1).All(ctx)
 ```
 
 When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved -- they contain the ID but `Value` is `nil` and `IsLoaded()` returns `false`. This prevents infinite loops and bounds resource consumption.
@@ -1274,9 +1274,9 @@ func main() {
     den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 
     // Query with eager fetch
-    found, _ := den.NewQuery[House](ctx, db,
+    found, _ := den.NewQuery[House](db,
         where.Field("name").Eq("Lakehouse"),
-    ).WithFetchLinks().First()
+    ).WithFetchLinks().First(ctx)
 
     fmt.Println(found.Door.Value.Height)      // 200
     fmt.Println(found.Windows[0].Value.X)      // 100
@@ -1302,26 +1302,26 @@ Scalar aggregations return a single value computed over matching documents.
 
 ```go
 // Average price of chocolate products
-avgPrice, err := den.NewQuery[Product](ctx, db,
+avgPrice, err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Avg("price")
+).Avg(ctx, "price")
 
 // Sum over the entire collection
-totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
+totalRevenue, err := den.NewQuery[Product](db).Sum(ctx, "price")
 
 // Min / Max
-cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
-mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+cheapest, err := den.NewQuery[Product](db).Min(ctx, "price")
+mostExpensive, err := den.NewQuery[Product](db).Max(ctx, "price")
 ```
 
 All scalar aggregations accept the same chainable filters as regular queries:
 
 ```go
 // Average price of active products above $10
-avg, err := den.NewQuery[Product](ctx, db,
+avg, err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
     where.Field("price").Gt(10),
-).Avg("price")
+).Avg(ctx, "price")
 ```
 
 **Return types:**
@@ -1340,12 +1340,12 @@ Count works with or without filter conditions.
 
 ```go
 // Total documents in the collection
-total, err := den.NewQuery[Product](ctx, db).Count()
+total, err := den.NewQuery[Product](db).Count(ctx)
 
 // Filtered count
-activeCount, err := den.NewQuery[Product](ctx, db,
+activeCount, err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).Count()
+).Count(ctx)
 ```
 
 When you need both results and a total count (e.g. for pagination), use `AllWithCount()` instead of issuing separate `All()` and `Count()` calls.
@@ -1366,9 +1366,9 @@ type CategoryStats struct {
 
 var results []CategoryStats
 
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).GroupBy("category.name").Into(&results)
+).GroupBy("category.name").Into(ctx, &results)
 ```
 
 ### GroupBy Struct Tag Reference
@@ -1398,9 +1398,9 @@ type ProductSummary struct {
 
 var summaries []ProductSummary
 
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Project(&summaries)
+).Project(ctx, &summaries)
 ```
 
 For nested fields or field renaming, use the `from:` prefix in the `den` tag:
@@ -1413,7 +1413,7 @@ type ProductView struct {
 
 var views []ProductView
 
-err := den.NewQuery[Product](ctx, db).Project(&views)
+err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
 Projections fetch full documents from the database and map the requested fields in Go memory. They reduce decode overhead for downstream code but do not reduce I/O at the SQL level.
@@ -1445,7 +1445,7 @@ If no fields carry `den:"fts"`, no FTS infrastructure is created. There is zero 
 
 ```go
 // Basic full-text search
-articles, err := den.NewQuery[Article](ctx, db).Limit(20).Search("golang embedded database")
+articles, err := den.NewQuery[Article](db).Limit(20).Search(ctx, "golang embedded database")
 ```
 
 `Search` is a terminal method -- it executes the query and returns `([]*T, error)` directly. Results are ranked by relevance (FTS5 `rank` on SQLite, `ts_rank` on PostgreSQL).
@@ -1455,9 +1455,9 @@ articles, err := den.NewQuery[Article](ctx, db).Limit(20).Search("golang embedde
 Full-text search can be combined with regular where conditions and query options:
 
 ```go
-articles, err := den.NewQuery[Article](ctx, db,
+articles, err := den.NewQuery[Article](db,
     where.Field("tags").Eq("tutorial"),
-).Sort("_created_at", den.Desc).Search("golang")
+).Sort("_created_at", den.Desc).Search(ctx, "golang")
 ```
 
 The FTS filter and the where conditions are applied together -- the database engine intersects both result sets using its query planner.
@@ -1817,7 +1817,7 @@ All standard queries automatically exclude soft-deleted documents:
 
 ```go
 // Returns only non-deleted products
-products, _ := den.NewQuery[Product](ctx, db).All()
+products, _ := den.NewQuery[Product](db).All(ctx)
 ```
 
 ## Including Deleted Documents
@@ -1825,7 +1825,7 @@ products, _ := den.NewQuery[Product](ctx, db).All()
 Use `IncludeDeleted()` to bypass the automatic filter:
 
 ```go
-all, _ := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
 ## Permanent Removal
@@ -1896,7 +1896,7 @@ Den automatically captures a byte-level snapshot of the serialized document afte
 Use `den.IsChanged` to check if a document has been modified since it was last loaded or saved:
 
 ```go
-p, _ := den.NewQuery[Product](ctx, db, where.Field("name").Eq("Widget")).First()
+p, _ := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).First(ctx)
 
 changed, _ := den.IsChanged(db, p) // false
 
@@ -2194,7 +2194,7 @@ func setupMigrations() *migrate.Registry {
 
     r.Register("20250402_001_rename_name_to_title", migrate.Migration{
         Forward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[OldNote](ctx, db).Iter() {
+            for note, err := range den.NewQuery[OldNote](db).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -2206,7 +2206,7 @@ func setupMigrations() *migrate.Registry {
             return nil
         },
         Backward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[Note](ctx, db).Iter() {
+            for note, err := range den.NewQuery[Note](db).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -2342,9 +2342,9 @@ func TestProductLifecycle(t *testing.T) {
     assert.NotEmpty(t, p.ID)
 
     // Query
-    products, err := den.NewQuery[Product](ctx, db,
+    products, err := den.NewQuery[Product](db,
         where.Field("price").Gt(10.0),
-    ).All()
+    ).All(ctx)
     require.NoError(t, err)
     assert.Len(t, products, 1)
     assert.Equal(t, "Gadget", products[0].Name)
@@ -2421,7 +2421,7 @@ Module: `github.com/oliverandrich/den`
 ### Creating a Query
 
 ```go
-q := den.NewQuery[T](ctx, db, conditions...)
+q := den.NewQuery[T](db, conditions...)
 ```
 
 ### Chainable Methods
@@ -2571,20 +2571,20 @@ Import: `github.com/oliverandrich/den/where`
 import "github.com/oliverandrich/den/where"
 
 // Single condition
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("price").Gt(10.0),
-).All()
+).All(ctx)
 
 // Multiple conditions (implicit AND)
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("price").Gte(10),
     where.Field("category").Eq("Electronics"),
-).All()
+).All(ctx)
 
 // Nested field access via dot notation
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("address.city").Eq("Berlin"),
-).All()
+).All(ctx)
 ```
 
 ## Comparison Operators

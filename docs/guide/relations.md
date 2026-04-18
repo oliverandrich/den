@@ -83,9 +83,9 @@ house := &House{
 Links contain only IDs. No additional queries are performed:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db,
+houses, err := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).All()
+).All(ctx)
 
 houses[0].Door.ID        // "01HQ4..."
 houses[0].Door.Value     // nil
@@ -97,9 +97,9 @@ houses[0].Door.IsLoaded() // false
 Resolve all links during the query. Additional lookups happen within the same transaction for read consistency:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db,
+houses, err := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).WithFetchLinks().All()
+).WithFetchLinks().All(ctx)
 
 houses[0].Door.Value     // *Door{Height: 200, Width: 90}
 houses[0].Door.IsLoaded() // true
@@ -119,9 +119,9 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 Fetch individual link fields or all link fields after the initial query:
 
 ```go
-house, _ := den.NewQuery[House](ctx, db,
+house, _ := den.NewQuery[House](db,
     where.Field("name").Eq("Lakehouse"),
-).First()
+).First(ctx)
 
 // Fetch a single link field
 err := den.FetchLink(ctx, db, house, "door")
@@ -218,8 +218,8 @@ The default maximum nesting depth is **3 levels**.
 Override the depth for a specific query:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).
-    WithFetchLinks().WithNestingDepth(1).All()
+houses, err := den.NewQuery[House](db).
+    WithFetchLinks().WithNestingDepth(1).All(ctx)
 ```
 
 !!! note
@@ -268,9 +268,9 @@ func main() {
     den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 
     // Query with eager fetch
-    found, _ := den.NewQuery[House](ctx, db,
+    found, _ := den.NewQuery[House](db,
         where.Field("name").Eq("Lakehouse"),
-    ).WithFetchLinks().First()
+    ).WithFetchLinks().First(ctx)
 
     fmt.Println(found.Door.Value.Height)      // 200
     fmt.Println(found.Windows[0].Value.X)      // 100

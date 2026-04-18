@@ -29,7 +29,7 @@ func TestSoftDelete(t *testing.T) {
 	assert.True(t, p.IsDeleted())
 
 	// Should be hidden from normal queries
-	results, err := den.NewQuery[SoftProduct](ctx, db).All()
+	results, err := den.NewQuery[SoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -43,7 +43,7 @@ func TestSoftDelete_IncludeDeleted(t *testing.T) {
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// IncludeDeleted shows soft-deleted docs
-	results, err := den.NewQuery[SoftProduct](ctx, db).IncludeDeleted().All()
+	results, err := den.NewQuery[SoftProduct](db).IncludeDeleted().All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.True(t, results[0].IsDeleted())
@@ -88,7 +88,7 @@ func TestSoftDelete_Count(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p2))
 	require.NoError(t, den.Delete(ctx, db, p2))
 
-	count, err := den.NewQuery[SoftProduct](ctx, db).Count()
+	count, err := den.NewQuery[SoftProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }

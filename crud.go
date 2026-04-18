@@ -86,7 +86,7 @@ func FindByIDs[T any](ctx context.Context, db *DB, ids []string) ([]*T, error) {
 		anyIDs[i] = id
 	}
 
-	return NewQuery[T](ctx, db, where.Field("_id").In(anyIDs...)).All()
+	return NewQuery[T](db, where.Field("_id").In(anyIDs...)).All(ctx)
 }
 
 // FindByID retrieves a document by its ID.
@@ -277,7 +277,7 @@ func FindOneAndUpdate[T any](ctx context.Context, db *DB, fields SetFields, cond
 		}
 	}
 
-	qs := NewQuery[T](ctx, db, conditions...).Limit(1)
+	qs := NewQuery[T](db, conditions...).Limit(1)
 	q := qs.buildBackendQuery(col)
 
 	var result *T
@@ -355,7 +355,7 @@ func DeleteMany[T any](ctx context.Context, db *DB, conditions []where.Condition
 		return 0, err
 	}
 
-	qs := NewQuery[T](ctx, db, conditions...)
+	qs := NewQuery[T](db, conditions...)
 	q := qs.buildBackendQuery(col)
 
 	var count int64

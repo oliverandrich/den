@@ -21,7 +21,7 @@ Den automatically captures a byte-level snapshot of the serialized document afte
 Use `den.IsChanged` to check if a document has been modified since it was last loaded or saved:
 
 ```go
-p, _ := den.NewQuery[Product](ctx, db, where.Field("name").Eq("Widget")).First()
+p, _ := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).First(ctx)
 
 changed, _ := den.IsChanged(db, p) // false
 

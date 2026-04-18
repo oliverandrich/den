@@ -24,7 +24,7 @@ func TestIter(t *testing.T) {
 	}))
 
 	var names []string
-	for p, err := range den.NewQuery[Product](ctx, db).Iter() {
+	for p, err := range den.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}
@@ -36,7 +36,7 @@ func TestIter_Empty(t *testing.T) {
 	ctx := context.Background()
 
 	count := 0
-	for _, err := range den.NewQuery[Product](ctx, db).Iter() {
+	for _, err := range den.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		count++
 	}
@@ -54,7 +54,7 @@ func TestIter_Break(t *testing.T) {
 	}))
 
 	count := 0
-	for _, err := range den.NewQuery[Product](ctx, db).Iter() {
+	for _, err := range den.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		count++
 		if count == 1 {
@@ -76,7 +76,7 @@ func TestIter_ExcludesSoftDeleted(t *testing.T) {
 	require.NoError(t, den.Delete(ctx, db, products[1]))
 
 	var names []string
-	for p, err := range den.NewQuery[SoftProduct](ctx, db).Iter() {
+	for p, err := range den.NewQuery[SoftProduct](db).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}
@@ -108,7 +108,7 @@ func TestIter_WithFetchLinks(t *testing.T) {
 	require.NoError(t, den.InsertMany(ctx, db, docs))
 
 	count := 0
-	for d, err := range den.NewQuery[IterLinkedDoc](ctx, db).WithFetchLinks().Iter() {
+	for d, err := range den.NewQuery[IterLinkedDoc](db).WithFetchLinks().Iter(ctx) {
 		require.NoError(t, err)
 		require.True(t, d.Ref.IsLoaded())
 		assert.Equal(t, "Target", d.Ref.Value.Label)
@@ -139,7 +139,7 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 
 	var errs []error
 	var names []string
-	for d, err := range den.NewQuery[IterLinkedDoc](ctx, db).Sort("_id", den.Asc).WithFetchLinks().Iter() {
+	for d, err := range den.NewQuery[IterLinkedDoc](db).Sort("_id", den.Asc).WithFetchLinks().Iter(ctx) {
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -163,7 +163,7 @@ func TestIter_WithConditions(t *testing.T) {
 	}))
 
 	var names []string
-	for p, err := range den.NewQuery[Product](ctx, db, where.Field("price").Gt(15.0)).Iter() {
+	for p, err := range den.NewQuery[Product](db, where.Field("price").Gt(15.0)).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}

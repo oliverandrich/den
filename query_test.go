@@ -43,7 +43,7 @@ func TestFind_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).All()
+	results, err := den.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -53,7 +53,7 @@ func TestFind_WithCondition(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("A")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 	for _, r := range results {
@@ -66,7 +66,7 @@ func TestFind_SortAsc(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).Sort("price", den.Asc).All()
+	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
 	assert.InDelta(t, 10.0, results[0].Price, 0.001)
@@ -78,7 +78,7 @@ func TestFind_SortDesc(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).Sort("price", den.Desc).All()
+	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Desc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
 	assert.InDelta(t, 30.0, results[0].Price, 0.001)
@@ -90,7 +90,7 @@ func TestFind_Limit(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).Sort("price", den.Asc).Limit(3).All()
+	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).Limit(3).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 }
@@ -100,7 +100,7 @@ func TestFind_Skip(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).Sort("price", den.Asc).Skip(2).All()
+	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).Skip(2).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 	assert.InDelta(t, 20.0, results[0].Price, 0.001)
@@ -111,10 +111,10 @@ func TestFind_RangeCondition(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db,
+	results, err := den.NewQuery[QueryProduct](db,
 		where.Field("price").Gte(15.0),
 		where.Field("price").Lte(25.0),
-	).All()
+	).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3) // 15, 20, 25
 }
@@ -124,7 +124,7 @@ func TestFindOne(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	p, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Beta")).First()
+	p, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Beta")).First(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, "Beta", p.Name)
 }
@@ -134,7 +134,7 @@ func TestFindOne_NotFound(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Nonexistent")).First()
+	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).First(ctx)
 	require.ErrorIs(t, err, den.ErrNotFound)
 }
 
@@ -143,7 +143,7 @@ func TestFindAll(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).All()
+	results, err := den.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -153,7 +153,7 @@ func TestCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("A")).Count()
+	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }
@@ -163,7 +163,7 @@ func TestCount_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](ctx, db).Count()
+	count, err := den.NewQuery[QueryProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count)
 }
@@ -173,11 +173,11 @@ func TestExists(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	exists, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Alpha")).Exists()
+	exists, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).Exists(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	exists, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Nonexistent")).Exists()
+	exists, err = den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).Exists(ctx)
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -190,17 +190,17 @@ func TestFind_CursorPagination(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	// After a very high ID should return nothing
-	results, err := den.NewQuery[QueryProduct](ctx, db).After("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").All()
+	results, err := den.NewQuery[QueryProduct](db).After("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	// Before a very low ID should return nothing
-	results, err = den.NewQuery[QueryProduct](ctx, db).Before("00000000000000000000000000").All()
+	results, err = den.NewQuery[QueryProduct](db).Before("00000000000000000000000000").All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	// After a very low ID should return all
-	results, err = den.NewQuery[QueryProduct](ctx, db).After("00000000000000000000000000").All()
+	results, err = den.NewQuery[QueryProduct](db).After("00000000000000000000000000").All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 }
@@ -211,7 +211,7 @@ func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
 	ctx := context.Background()
 
 	// Get all products sorted by ID to have deterministic ordering
-	all, err := den.NewQuery[QueryProduct](ctx, db).All()
+	all, err := den.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(all), 3)
 
@@ -219,10 +219,10 @@ func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
 	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
 
 	// Both After and Before set — should exclude first and last
-	results, err := den.NewQuery[QueryProduct](ctx, db).
+	results, err := den.NewQuery[QueryProduct](db).
 		After(all[0].ID).
 		Before(all[len(all)-1].ID).
-		All()
+		All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, len(all)-2)
 }
@@ -232,10 +232,10 @@ func TestFindWithCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, total, err := den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("A")).
+	results, total, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
 		Sort("price", den.Asc).
 		Limit(2).
-		AllWithCount()
+		AllWithCount(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), total)
 	assert.Len(t, results, 2)
@@ -248,7 +248,7 @@ func TestQuerySet_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).All()
+	results, err := den.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -258,9 +258,9 @@ func TestQuerySet_Where(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).
+	results, err := den.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
-		All()
+		All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 }
@@ -270,10 +270,10 @@ func TestQuerySet_SortAndLimit(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db).
+	results, err := den.NewQuery[QueryProduct](db).
 		Sort("price", den.Asc).
 		Limit(2).
-		All()
+		All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	assert.InDelta(t, 10.0, results[0].Price, 0.001)
@@ -285,9 +285,9 @@ func TestQuerySet_First(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	p, err := den.NewQuery[QueryProduct](ctx, db).
+	p, err := den.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Beta")).
-		First()
+		First(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, "Beta", p.Name)
 }
@@ -297,9 +297,9 @@ func TestQuerySet_CountChain(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](ctx, db).
+	count, err := den.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
-		Count()
+		Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }
@@ -309,15 +309,15 @@ func TestQuerySet_Exists(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	exists, err := den.NewQuery[QueryProduct](ctx, db).
+	exists, err := den.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Alpha")).
-		Exists()
+		Exists(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	exists, err = den.NewQuery[QueryProduct](ctx, db).
+	exists, err = den.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Nonexistent")).
-		Exists()
+		Exists(ctx)
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -327,11 +327,11 @@ func TestQuerySet_AllWithCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, total, err := den.NewQuery[QueryProduct](ctx, db).
+	results, total, err := den.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
 		Sort("price", den.Asc).
 		Limit(2).
-		AllWithCount()
+		AllWithCount(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), total)
 	assert.Len(t, results, 2)
@@ -343,15 +343,15 @@ func TestQuerySet_Lazy(t *testing.T) {
 	ctx := context.Background()
 
 	// Base query — no execution yet
-	base := den.NewQuery[QueryProduct](ctx, db).
+	base := den.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A"))
 
 	// Derive two different queries from the same base
-	sorted, err := base.Sort("price", den.Asc).All()
+	sorted, err := base.Sort("price", den.Asc).All(ctx)
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, sorted[0].Price, 0.001)
 
-	count, err := base.Count()
+	count, err := base.Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }
@@ -363,18 +363,18 @@ func TestQuerySet_Update(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("A")).
-		Update(den.SetFields{"category": "Z"})
+	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
+		Update(ctx, den.SetFields{"category": "Z"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 
 	// Verify the update
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("Z")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("Z")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 
 	// Original category B should be untouched
-	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("category").Eq("B")).All()
+	results, err = den.NewQuery[QueryProduct](db, where.Field("category").Eq("B")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -385,12 +385,12 @@ func TestStringContains(t *testing.T) {
 	ctx := context.Background()
 
 	// "Alpha" and "Gamma" both contain "a"
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("lpha")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StringContains("lpha")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Alpha
 
 	// "elt" matches Delta and Epsilon? No — only Delta
-	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("elt")).All()
+	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StringContains("elt")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Delta
 }
@@ -400,11 +400,11 @@ func TestStartsWith(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StartsWith("Al")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Al")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Alpha
 
-	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StartsWith("Ep")).All()
+	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Ep")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Epsilon
 }
@@ -414,7 +414,7 @@ func TestEndsWith(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").EndsWith("ta")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("name").EndsWith("ta")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2) // Beta, Delta
 }
@@ -428,12 +428,12 @@ func TestStringContains_EscapesSpecialChars(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	// Search for literal "%" — should not match everything
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("%")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StringContains("%")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 
 	// Search for literal "_" — should not match single chars
-	results, err = den.NewQuery[QueryProduct](ctx, db, where.Field("name").StringContains("_")).All()
+	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StringContains("_")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 }
@@ -442,8 +442,8 @@ func TestQuerySet_Update_NoMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Nonexistent")).
-		Update(den.SetFields{"price": 99.0})
+	count, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
+		Update(ctx, den.SetFields{"price": 99.0})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 }
@@ -453,8 +453,8 @@ func TestQuerySet_Update_InvalidField(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](ctx, db).
-		Update(den.SetFields{"nonexistent": "x"})
+	_, err := den.NewQuery[QueryProduct](db).
+		Update(ctx, den.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -464,8 +464,8 @@ func TestQuerySet_Update_TypeMismatch(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](ctx, db).
-		Update(den.SetFields{"price": "not-a-float"})
+	_, err := den.NewQuery[QueryProduct](db).
+		Update(ctx, den.SetFields{"price": "not-a-float"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot assign")
 }
@@ -488,17 +488,17 @@ func TestQuerySet_Update_Postgres_NoDeadlock(t *testing.T) {
 		require.NoError(t, den.Insert(parent, db, p))
 	}
 
-	count, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("bulk")).
-		Update(den.SetFields{"category": "done"})
+	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
+		Update(parent, den.SetFields{"category": "done"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(25), count)
 
 	// Confirm the writes landed.
-	remaining, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("bulk")).Count()
+	remaining, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Count(parent)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), remaining)
 
-	done, err := den.NewQuery[QueryProduct](parent, db, where.Field("category").Eq("done")).Count()
+	done, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("done")).Count(parent)
 	require.NoError(t, err)
 	assert.Equal(t, int64(25), done)
 }
@@ -509,11 +509,11 @@ func TestQuerySet_Update_NilValue(t *testing.T) {
 	ctx := context.Background()
 
 	// nil value should set the zero value, not panic
-	_, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Alpha")).
-		Update(den.SetFields{"category": nil})
+	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).
+		Update(ctx, den.SetFields{"category": nil})
 	require.NoError(t, err)
 
-	results, err := den.NewQuery[QueryProduct](ctx, db, where.Field("name").Eq("Alpha")).All()
+	results, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).All(ctx)
 	require.NoError(t, err)
 	for _, r := range results {
 		assert.Empty(t, r.Category)

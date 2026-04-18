@@ -55,7 +55,7 @@ func setupMigrations() *migrate.Registry {
 
     r.Register("20250402_001_rename_name_to_title", migrate.Migration{
         Forward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[OldNote](ctx, db).Iter() {
+            for note, err := range den.NewQuery[OldNote](db).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -67,7 +67,7 @@ func setupMigrations() *migrate.Registry {
             return nil
         },
         Backward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[Note](ctx, db).Iter() {
+            for note, err := range den.NewQuery[Note](db).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -127,7 +127,7 @@ For migrations that touch many documents, use `Iter()` to stream documents witho
 ```go
 r.Register("20250410_001_normalize_prices", migrate.Migration{
     Forward: func(ctx context.Context, tx *den.Tx) error {
-        for product, err := range den.NewQuery[Product](ctx, db).Iter() {
+        for product, err := range den.NewQuery[Product](db).Iter(ctx) {
             if err != nil {
                 return err
             }

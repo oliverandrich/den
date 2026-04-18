@@ -74,7 +74,7 @@ func TestParity_FindWithFilter(t *testing.T) {
 				{Name: "C", Price: 30, Category: "X"},
 			}))
 
-			results, err := den.NewQuery[ParityProduct](ctx, db, where.Field("category").Eq("X")).All()
+			results, err := den.NewQuery[ParityProduct](db, where.Field("category").Eq("X")).All(ctx)
 			require.NoError(t, err)
 			assert.Len(t, results, 2)
 		})
@@ -91,10 +91,10 @@ func TestParity_FindSortLimitSkip(t *testing.T) {
 				{Name: "C", Price: 20},
 			}))
 
-			results, err := den.NewQuery[ParityProduct](ctx, db).
+			results, err := den.NewQuery[ParityProduct](db).
 				Sort("price", den.Asc).
 				Limit(2).
-				All()
+				All(ctx)
 			require.NoError(t, err)
 			require.Len(t, results, 2)
 			assert.InDelta(t, 10.0, results[0].Price, 0.001)
@@ -113,7 +113,7 @@ func TestParity_Count(t *testing.T) {
 				{Name: "C", Price: 30, Category: "X"},
 			}))
 
-			count, err := den.NewQuery[ParityProduct](ctx, db, where.Field("category").Eq("X")).Count()
+			count, err := den.NewQuery[ParityProduct](db, where.Field("category").Eq("X")).Count(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, int64(2), count)
 		})
@@ -162,7 +162,7 @@ func TestParity_FindOne(t *testing.T) {
 				{Name: "Beta", Price: 20},
 			}))
 
-			p, err := den.NewQuery[ParityProduct](ctx, db, where.Field("name").Eq("Beta")).First()
+			p, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Beta")).First(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, "Beta", p.Name)
 		})
@@ -175,11 +175,11 @@ func TestParity_Exists(t *testing.T) {
 			ctx := context.Background()
 			require.NoError(t, den.Insert(ctx, db, &ParityProduct{Name: "Exists", Price: 10}))
 
-			exists, err := den.NewQuery[ParityProduct](ctx, db, where.Field("name").Eq("Exists")).Exists()
+			exists, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Exists")).Exists(ctx)
 			require.NoError(t, err)
 			assert.True(t, exists)
 
-			exists, err = den.NewQuery[ParityProduct](ctx, db, where.Field("name").Eq("Nope")).Exists()
+			exists, err = den.NewQuery[ParityProduct](db, where.Field("name").Eq("Nope")).Exists(ctx)
 			require.NoError(t, err)
 			assert.False(t, exists)
 		})
@@ -197,7 +197,7 @@ func TestParity_NumericSortOrder(t *testing.T) {
 				{Name: "Expensive", Price: 100},
 			}))
 
-			results, err := den.NewQuery[ParityProduct](ctx, db).Sort("price", den.Asc).All()
+			results, err := den.NewQuery[ParityProduct](db).Sort("price", den.Asc).All(ctx)
 			require.NoError(t, err)
 			require.Len(t, results, 3)
 			assert.InDelta(t, 9.0, results[0].Price, 0.001)
@@ -218,13 +218,13 @@ func TestParity_StringComparison(t *testing.T) {
 			}))
 
 			// Gt on a string field must not crash (was casting to ::float on PG)
-			results, err := den.NewQuery[ParityProduct](ctx, db, where.Field("name").Gt("Beta")).All()
+			results, err := den.NewQuery[ParityProduct](db, where.Field("name").Gt("Beta")).All(ctx)
 			require.NoError(t, err)
 			assert.Len(t, results, 1)
 			assert.Equal(t, "Gamma", results[0].Name)
 
 			// Lte on a string field
-			results, err = den.NewQuery[ParityProduct](ctx, db, where.Field("name").Lte("Beta")).All()
+			results, err = den.NewQuery[ParityProduct](db, where.Field("name").Lte("Beta")).All(ctx)
 			require.NoError(t, err)
 			assert.Len(t, results, 2)
 		})
@@ -242,12 +242,12 @@ func TestParity_NestedFieldQuery(t *testing.T) {
 			}))
 
 			// Query on nested field
-			results, err := den.NewQuery[ParityPerson](ctx, db, where.Field("address.city").Eq("Berlin")).All()
+			results, err := den.NewQuery[ParityPerson](db, where.Field("address.city").Eq("Berlin")).All(ctx)
 			require.NoError(t, err)
 			assert.Len(t, results, 2)
 
 			// Sort on nested field
-			results, err = den.NewQuery[ParityPerson](ctx, db).Sort("address.city", den.Asc).All()
+			results, err = den.NewQuery[ParityPerson](db).Sort("address.city", den.Asc).All(ctx)
 			require.NoError(t, err)
 			require.Len(t, results, 3)
 			assert.Equal(t, "Berlin", results[0].Address.City)
@@ -279,7 +279,7 @@ func TestParity_GroupBySQL(t *testing.T) {
 			}
 
 			var stats []CatStats
-			err := den.NewQuery[ParityProduct](ctx, db).GroupBy("category").Into(&stats)
+			err := den.NewQuery[ParityProduct](db).GroupBy("category").Into(ctx, &stats)
 			require.NoError(t, err)
 			require.Len(t, stats, 2)
 
@@ -320,7 +320,7 @@ func TestParity_NumericEqConsistency(t *testing.T) {
 			}))
 
 			// Eq with numeric value must match correctly
-			results, err := den.NewQuery[ParityProduct](ctx, db, where.Field("price").Eq(float64(10))).All()
+			results, err := den.NewQuery[ParityProduct](db, where.Field("price").Eq(float64(10))).All(ctx)
 			require.NoError(t, err)
 			assert.Len(t, results, 1)
 			assert.Equal(t, "A", results[0].Name)

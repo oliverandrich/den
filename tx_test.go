@@ -121,7 +121,7 @@ func TestTxDelete_SoftDelete(t *testing.T) {
 	assert.True(t, found.IsDeleted())
 
 	// Should be hidden from normal queries
-	results, err := den.NewQuery[SoftProduct](ctx, db).All()
+	results, err := den.NewQuery[SoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -197,13 +197,13 @@ func TestDeleteMany_SoftDelete(t *testing.T) {
 	assert.Equal(t, int64(2), count)
 
 	// Soft-deleted should be hidden from normal queries
-	remaining, err := den.NewQuery[SoftProduct](ctx, db).All()
+	remaining, err := den.NewQuery[SoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1)
 	assert.Equal(t, "Keep", remaining[0].Name)
 
 	// But still accessible with IncludeDeleted
-	all, err := den.NewQuery[SoftProduct](ctx, db).IncludeDeleted().All()
+	all, err := den.NewQuery[SoftProduct](db).IncludeDeleted().All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 }
@@ -288,7 +288,7 @@ func TestInsertMany_Rollback(t *testing.T) {
 	require.Error(t, err)
 
 	// No documents should persist after transaction rollback
-	all, err := den.NewQuery[FailBeforeDoc](ctx, db).All()
+	all, err := den.NewQuery[FailBeforeDoc](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, all, "no documents should persist after transaction rollback")
 }

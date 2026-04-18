@@ -351,7 +351,7 @@ func TestInsertMany(t *testing.T) {
 		assert.NotEmpty(t, p.ID)
 	}
 
-	all, err := den.NewQuery[Product](ctx, db).All()
+	all, err := den.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 }
@@ -371,7 +371,7 @@ func TestDeleteMany(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
-	remaining, err := den.NewQuery[Product](ctx, db).All()
+	remaining, err := den.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1)
 	assert.Equal(t, "Keep", remaining[0].Name)

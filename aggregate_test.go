@@ -38,7 +38,7 @@ func TestAvg(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](ctx, db).Avg("price")
+	avg, err := den.NewQuery[AggProduct](db).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 30.0, avg, 0.001) // (10+20+30+40+50)/5
 }
@@ -48,7 +48,7 @@ func TestAvg_WithFilter(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](ctx, db, where.Field("category").Eq("X")).Avg("price")
+	avg, err := den.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 15.0, avg, 0.001) // (10+20)/2
 }
@@ -58,7 +58,7 @@ func TestSum(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	sum, err := den.NewQuery[AggProduct](ctx, db).Sum("price")
+	sum, err := den.NewQuery[AggProduct](db).Sum(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 150.0, sum, 0.001)
 }
@@ -68,7 +68,7 @@ func TestMin(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	min, err := den.NewQuery[AggProduct](ctx, db).Min("price")
+	min, err := den.NewQuery[AggProduct](db).Min(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, min, 0.001)
 }
@@ -78,7 +78,7 @@ func TestMax(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	max, err := den.NewQuery[AggProduct](ctx, db).Max("price")
+	max, err := den.NewQuery[AggProduct](db).Max(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 50.0, max, 0.001)
 }
@@ -87,7 +87,7 @@ func TestAvg_Empty(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](ctx, db).Avg("price")
+	avg, err := den.NewQuery[AggProduct](db).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.0, avg, 0.001)
 }
@@ -107,7 +107,7 @@ func TestGroupBy(t *testing.T) {
 	}
 
 	var stats []CatStats
-	err := den.NewQuery[AggProduct](ctx, db).GroupBy("category").Into(&stats)
+	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
 	require.NoError(t, err)
 	require.Len(t, stats, 2)
 
@@ -148,7 +148,7 @@ func TestProject(t *testing.T) {
 	}
 
 	var summaries []Summary
-	err := den.NewQuery[AggProduct](ctx, db).Sort("price", den.Asc).Project(&summaries)
+	err := den.NewQuery[AggProduct](db).Sort("price", den.Asc).Project(ctx, &summaries)
 	require.NoError(t, err)
 	require.Len(t, summaries, 5)
 	assert.Equal(t, "A", summaries[0].Name)
@@ -165,7 +165,7 @@ func TestProject_WithFilter(t *testing.T) {
 	}
 
 	var summaries []Summary
-	err := den.NewQuery[AggProduct](ctx, db, where.Field("category").Eq("X")).Project(&summaries)
+	err := den.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Project(ctx, &summaries)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 2)
 }
@@ -182,12 +182,12 @@ func TestGroupBy_CacheHit(t *testing.T) {
 
 	// First call — populates cache
 	var stats1 []CatStats
-	require.NoError(t, den.NewQuery[AggProduct](ctx, db).GroupBy("category").Into(&stats1))
+	require.NoError(t, den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats1))
 	require.Len(t, stats1, 2)
 
 	// Second call with same target type — should hit cache
 	var stats2 []CatStats
-	require.NoError(t, den.NewQuery[AggProduct](ctx, db).GroupBy("category").Into(&stats2))
+	require.NoError(t, den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats2))
 	require.Len(t, stats2, 2)
 }
 
@@ -198,7 +198,7 @@ func TestProject_InvalidTarget(t *testing.T) {
 
 	// Not a pointer to slice — should error
 	var single struct{ Name string }
-	err := den.NewQuery[AggProduct](ctx, db).Project(&single)
+	err := den.NewQuery[AggProduct](db).Project(ctx, &single)
 	require.Error(t, err)
 }
 
@@ -207,7 +207,7 @@ func TestQuerySet_Count(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[AggProduct](ctx, db, where.Field("category").Eq("Y")).Count()
+	count, err := den.NewQuery[AggProduct](db, where.Field("category").Eq("Y")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }

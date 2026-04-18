@@ -52,7 +52,7 @@ func TestHasKey(t *testing.T) {
 		{Name: "C", Metadata: map[string]any{"color": "blue"}},
 	}))
 
-	results, err := den.NewQuery[DocWithMap](ctx, db, where.Field("metadata").HasKey("color")).All()
+	results, err := den.NewQuery[DocWithMap](db, where.Field("metadata").HasKey("color")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -65,7 +65,7 @@ func TestHasKey_NoMatch(t *testing.T) {
 		Name: "A", Metadata: map[string]any{"size": "large"},
 	}))
 
-	results, err := den.NewQuery[DocWithMap](ctx, db, where.Field("metadata").HasKey("color")).All()
+	results, err := den.NewQuery[DocWithMap](db, where.Field("metadata").HasKey("color")).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -78,10 +78,10 @@ func TestMultiSort(t *testing.T) {
 	ctx := context.Background()
 
 	// Sort by category ASC, then priority DESC
-	results, err := den.NewQuery[Event](ctx, db).
+	results, err := den.NewQuery[Event](db).
 		Sort("category", den.Asc).
 		Sort("priority", den.Desc).
-		All()
+		All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 4)
 
@@ -99,7 +99,7 @@ func TestRegExp(t *testing.T) {
 	seedEvents(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[Event](ctx, db, where.Field("name").RegExp(".*Meeting.*")).All()
+	results, err := den.NewQuery[Event](db, where.Field("name").RegExp(".*Meeting.*")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 	assert.Equal(t, "Alpha Meeting", results[0].Name)
@@ -111,7 +111,7 @@ func TestRegExp_Compiled(t *testing.T) {
 	ctx := context.Background()
 
 	re := regexp.MustCompile(`^(Alpha|Delta)`)
-	results, err := den.NewQuery[Event](ctx, db, where.Field("name").RegExp(re)).All()
+	results, err := den.NewQuery[Event](db, where.Field("name").RegExp(re)).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -121,7 +121,7 @@ func TestRegExp_NoMatch(t *testing.T) {
 	seedEvents(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[Event](ctx, db, where.Field("name").RegExp("^Nonexistent")).All()
+	results, err := den.NewQuery[Event](db, where.Field("name").RegExp("^Nonexistent")).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -136,7 +136,7 @@ func TestFieldRef(t *testing.T) {
 	// Find events where end - start > 15 (long events)
 	// We can't do arithmetic, but we can compare: end > start + threshold
 	// Simple case: find events where end > 20
-	results, err := den.NewQuery[Event](ctx, db, where.Field("end").Gt(where.FieldRef("start"))).All()
+	results, err := den.NewQuery[Event](db, where.Field("end").Gt(where.FieldRef("start"))).All(ctx)
 	require.NoError(t, err)
 	// All events have end > start
 	assert.Len(t, results, 4)
@@ -152,7 +152,7 @@ func TestFieldRef_Filtered(t *testing.T) {
 		{Name: "Equal", Start: 15, End: 15},   // end == start
 	}))
 
-	results, err := den.NewQuery[Event](ctx, db, where.Field("end").Gt(where.FieldRef("start"))).All()
+	results, err := den.NewQuery[Event](db, where.Field("end").Gt(where.FieldRef("start"))).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Valid", results[0].Name)
@@ -167,7 +167,7 @@ func TestFieldRef_Eq(t *testing.T) {
 		{Name: "Different", Start: 10, End: 20},
 	}))
 
-	results, err := den.NewQuery[Event](ctx, db, where.Field("end").Eq(where.FieldRef("start"))).All()
+	results, err := den.NewQuery[Event](db, where.Field("end").Eq(where.FieldRef("start"))).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Same", results[0].Name)

@@ -15,7 +15,7 @@ func BackLinks[T any](ctx context.Context, db *DB, linkField string, targetID st
 		return nil, err
 	}
 
-	q := NewQuery[T](ctx, db, where.Field(linkField).Eq(targetID)).buildBackendQuery(col)
+	q := NewQuery[T](db, where.Field(linkField).Eq(targetID)).buildBackendQuery(col)
 
 	iter, err := db.backend.Query(ctx, col.meta.Name, q)
 	if err != nil {

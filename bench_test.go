@@ -78,7 +78,7 @@ func runQueryAllBenchmark(b *testing.B, db *den.DB, n int) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchProduct](ctx, db).All()
+		results, err := den.NewQuery[BenchProduct](db).All(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func runQueryIterBenchmark(b *testing.B, db *den.DB, n int) {
 	b.ReportAllocs()
 	for b.Loop() {
 		count := 0
-		for _, err := range den.NewQuery[BenchProduct](ctx, db).Iter() {
+		for _, err := range den.NewQuery[BenchProduct](db).Iter(ctx) {
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -151,9 +151,9 @@ func runQueryWithConditionBenchmark(b *testing.B, db *den.DB) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchProduct](ctx, db,
+		results, err := den.NewQuery[BenchProduct](db,
 			where.Field("price").Gt(50.0),
-		).Sort("price", den.Asc).Limit(10).All()
+		).Sort("price", den.Asc).Limit(10).All(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}

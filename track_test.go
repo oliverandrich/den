@@ -183,7 +183,7 @@ func TestIsChanged_ViaIter(t *testing.T) {
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
 	require.NoError(t, den.Insert(ctx, db, p))
 
-	for doc, err := range den.NewQuery[TrackedProduct](ctx, db).Iter() {
+	for doc, err := range den.NewQuery[TrackedProduct](db).Iter(ctx) {
 		require.NoError(t, err)
 		doc.Price = 42.0
 		changed, err := den.IsChanged(db, doc)
@@ -219,7 +219,7 @@ func TestTrackedSoftBase_TrackingAndSoftDelete(t *testing.T) {
 	assert.True(t, found.IsDeleted())
 
 	// Hidden from normal queries
-	results, err := den.NewQuery[TrackedSoftProduct](ctx, db).All()
+	results, err := den.NewQuery[TrackedSoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }

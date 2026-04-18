@@ -12,7 +12,7 @@ type FTSProvider interface {
 }
 
 // Search performs a full-text search on the QuerySet.
-func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
+func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error) {
 	col, err := collectionFor[T](qs.db)
 	if err != nil {
 		return nil, err
@@ -25,13 +25,13 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 
 	q := qs.buildBackendQuery(col)
 
-	iter, err := fts.Search(qs.ctx, col.meta.Name, queryText, q)
+	iter, err := fts.Search(ctx, col.meta.Name, queryText, q)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = iter.Close() }()
 
-	return drainIter[T](qs.ctx, iter, qs.db, qs.db.backend, qs.fetchLinks, qs.nestDepth, qs.limitN)
+	return drainIter[T](ctx, iter, qs.db, qs.db.backend, qs.fetchLinks, qs.nestDepth, qs.limitN)
 }
 
 // ensureFTSForCollection sets up FTS infrastructure during Register()

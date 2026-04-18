@@ -5,10 +5,10 @@
 `den.NewQuery[T]` returns a chainable, lazy query builder. No database call is made until you invoke an execution method (`All`, `First`, `Count`, etc.):
 
 ```go
-products, err := den.NewQuery[Product](ctx, db,
+products, err := den.NewQuery[Product](db,
     where.Field("price").Gte(10.0),
     where.Field("category.name").Eq("Electronics"),
-).Sort("price", den.Asc).Limit(20).Skip(10).All()
+).Sort("price", den.Asc).Limit(20).Skip(10).All(ctx)
 ```
 
 ## Execution Methods
@@ -23,24 +23,24 @@ products, err := den.NewQuery[Product](ctx, db,
 
 ```go
 // First matching document
-product, err := den.NewQuery[Product](ctx, db,
+product, err := den.NewQuery[Product](db,
     where.Field("name").Eq("Widget"),
-).First()
+).First(ctx)
 
 // Count
-count, err := den.NewQuery[Product](ctx, db,
+count, err := den.NewQuery[Product](db,
     where.Field("price").Gt(100),
-).Count()
+).Count(ctx)
 
 // Exists
-exists, err := den.NewQuery[Product](ctx, db,
+exists, err := den.NewQuery[Product](db,
     where.Field("sku").Eq("ABC123"),
-).Exists()
+).Exists(ctx)
 
 // All with total count (for pagination UI)
-notes, total, err := den.NewQuery[Note](ctx, db,
+notes, total, err := den.NewQuery[Note](db,
     where.Field("user").Eq(userID),
-).Sort("_created_at", den.Desc).Limit(20).Skip(40).AllWithCount()
+).Sort("_created_at", den.Desc).Limit(20).Skip(40).AllWithCount(ctx)
 // total = 347 -> compute TotalPages, HasMore
 ```
 
@@ -49,7 +49,7 @@ notes, total, err := den.NewQuery[Note](ctx, db,
 `Iter()` returns a Go range-compatible iterator that streams documents without loading them all into memory:
 
 ```go
-for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
     if err != nil {
         return err
     }
@@ -158,7 +158,7 @@ where.Field("tags.0").Eq("featured")   // array index access
 ## Sort, Limit, Skip
 
 ```go
-den.NewQuery[Product](ctx, db).
+den.NewQuery[Product](db).
     Sort("price", den.Asc).    // ascending by price
     Sort("name", den.Desc).    // then descending by name
     Limit(20).                 // at most 20 results
@@ -172,21 +172,21 @@ For large result sets, cursor-based pagination with `After` / `Before` is more e
 
 ```go
 // First page
-page1, err := den.NewQuery[Entry](ctx, db,
+page1, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).Limit(20).All()
+).Sort("published", den.Desc).Limit(20).All(ctx)
 
 // Next page: pass the last document's ID as cursor
 lastID := page1[len(page1)-1].ID
-page2, err := den.NewQuery[Entry](ctx, db,
+page2, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).After(lastID).Limit(20).All()
+).Sort("published", den.Desc).After(lastID).Limit(20).All(ctx)
 
 // Previous page (backward pagination)
 firstID := page2[0].ID
-prevPage, err := den.NewQuery[Entry](ctx, db,
+prevPage, err := den.NewQuery[Entry](db,
     where.Field("read_at").IsNil(),
-).Sort("published", den.Desc).Before(firstID).Limit(20).All()
+).Sort("published", den.Desc).Before(firstID).Limit(20).All(ctx)
 ```
 
 !!! tip
@@ -203,9 +203,9 @@ type ProductSummary struct {
 }
 
 var summaries []ProductSummary
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Project(&summaries)
+).Project(ctx, &summaries)
 ```
 
 For projections that extract nested fields, use `den:"from:..."`:
@@ -217,7 +217,7 @@ type ProductView struct {
 }
 
 var views []ProductView
-err := den.NewQuery[Product](ctx, db).Project(&views)
+err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
 ## Query Options
@@ -227,7 +227,7 @@ err := den.NewQuery[Product](ctx, db).Project(&views)
 Eagerly resolve all `Link[T]` fields during the query:
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).WithFetchLinks().All()
+houses, err := den.NewQuery[House](db).WithFetchLinks().All(ctx)
 // houses[0].Door.Value != nil
 // houses[0].Windows[0].Value != nil
 ```
@@ -237,8 +237,8 @@ houses, err := den.NewQuery[House](ctx, db).WithFetchLinks().All()
 Control how deep link resolution recurses (default: 3):
 
 ```go
-houses, err := den.NewQuery[House](ctx, db).
-    WithFetchLinks().WithNestingDepth(1).All()
+houses, err := den.NewQuery[House](db).
+    WithFetchLinks().WithNestingDepth(1).All(ctx)
 ```
 
 ### IncludeDeleted
@@ -246,7 +246,7 @@ houses, err := den.NewQuery[House](ctx, db).
 Include soft-deleted documents in results (only relevant for types embedding `document.SoftBase`):
 
 ```go
-all, err := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
+all, err := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
 ## Full-Text Search
@@ -254,7 +254,7 @@ all, err := den.NewQuery[Product](ctx, db).IncludeDeleted().All()
 For fields tagged with `den:"fts"`, use the `Search` method:
 
 ```go
-results, err := den.NewQuery[Article](ctx, db).Search("golang concurrency")
+results, err := den.NewQuery[Article](db).Search(ctx, "golang concurrency")
 ```
 
 === "SQLite"
@@ -270,13 +270,13 @@ results, err := den.NewQuery[Article](ctx, db).Search("golang concurrency")
 ### Scalar Aggregations
 
 ```go
-avgPrice, err := den.NewQuery[Product](ctx, db,
+avgPrice, err := den.NewQuery[Product](db,
     where.Field("category.name").Eq("Chocolate"),
-).Avg("price")
+).Avg(ctx, "price")
 
-totalRevenue, err := den.NewQuery[Product](ctx, db).Sum("price")
-cheapest, err := den.NewQuery[Product](ctx, db).Min("price")
-mostExpensive, err := den.NewQuery[Product](ctx, db).Max("price")
+totalRevenue, err := den.NewQuery[Product](db).Sum(ctx, "price")
+cheapest, err := den.NewQuery[Product](db).Min(ctx, "price")
+mostExpensive, err := den.NewQuery[Product](db).Max(ctx, "price")
 ```
 
 ### GroupBy
@@ -294,9 +294,9 @@ type CategoryStats struct {
 }
 
 var results []CategoryStats
-err := den.NewQuery[Product](ctx, db,
+err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
-).GroupBy("category.name").Into(&results)
+).GroupBy("category.name").Into(ctx, &results)
 ```
 
 The `den` tag on the stats struct declares the aggregation function:

@@ -67,9 +67,9 @@ func main() {
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
 
     // Query with conditions
-    products, err := den.NewQuery[Product](ctx, db,
+    products, err := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
-    ).Sort("name", den.Asc).All()
+    ).Sort("name", den.Asc).All(ctx)
     if err != nil {
         log.Fatal(err)
     }
@@ -78,7 +78,7 @@ func main() {
     }
 
     // Iterate (streaming, memory-efficient)
-    for doc, err := range den.NewQuery[Product](ctx, db).Iter() {
+    for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
         if err != nil {
             log.Fatal(err)
         }

@@ -157,7 +157,7 @@ func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 }
 
 // TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock verifies that two
-// concurrent ForUpdate().All() callers locking overlapping result sets do
+// concurrent ForUpdate().All(ctx) callers locking overlapping result sets do
 // NOT deadlock. Without the default ORDER BY id in buildSelectSQL, PG would
 // return rows in heap order and the two callers could acquire locks in
 // different orders → 40P01.

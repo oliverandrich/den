@@ -71,9 +71,9 @@ func TestProductLifecycle(t *testing.T) {
     assert.NotEmpty(t, p.ID)
 
     // Query
-    products, err := den.NewQuery[Product](ctx, db,
+    products, err := den.NewQuery[Product](db,
         where.Field("price").Gt(10.0),
-    ).All()
+    ).All(ctx)
     require.NoError(t, err)
     assert.Len(t, products, 1)
     assert.Equal(t, "Gadget", products[0].Name)

@@ -12,20 +12,20 @@ Import: `github.com/oliverandrich/den/where`
 import "github.com/oliverandrich/den/where"
 
 // Single condition
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("price").Gt(10.0),
-).All()
+).All(ctx)
 
 // Multiple conditions (implicit AND)
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("price").Gte(10),
     where.Field("category").Eq("Electronics"),
-).All()
+).All(ctx)
 
 // Nested field access via dot notation
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Field("address.city").Eq("Berlin"),
-).All()
+).All(ctx)
 ```
 
 ---
@@ -101,28 +101,28 @@ Logical operators compose multiple conditions.
 
 ```go
 // AND: price between 10 and 100
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.And(
         where.Field("price").Gt(10),
         where.Field("price").Lt(100),
     ),
-).All()
+).All(ctx)
 
 // OR: active or featured
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Or(
         where.Field("status").Eq("active"),
         where.Field("featured").Eq(true),
     ),
-).All()
+).All(ctx)
 
 // NOT: exclude deleted
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.Not(where.Field("deleted").Eq(true)),
-).All()
+).All(ctx)
 
 // Combined
-results, err := den.NewQuery[Product](ctx, db,
+results, err := den.NewQuery[Product](db,
     where.And(
         where.Field("price").Gte(10),
         where.Or(
@@ -130,7 +130,7 @@ results, err := den.NewQuery[Product](ctx, db,
             where.Field("featured").Eq(true),
         ),
     ),
-).All()
+).All(ctx)
 ```
 
 ---

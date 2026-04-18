@@ -60,12 +60,12 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 ### Creating a Query
 
 ```go
-q := den.NewQuery[T](db, conditions...)
+q := den.NewQuery[T](scope, conditions...) // scope is *DB or *Tx
 ```
 
 | Function | Signature | Description |
 |---|---|---|
-| `NewQuery[T]` | `NewQuery[T](db *DB, conditions ...where.Condition) QuerySet[T]` | Create a new chainable query for type T. The context is supplied later by the terminal method, so one `QuerySet` can be reused across different contexts |
+| `NewQuery[T]` | `NewQuery[T](scope Scope, conditions ...where.Condition) QuerySet[T]` | Create a new chainable query for type T. Scope is `*DB` (outside a transaction) or `*Tx` (inside one). The context is supplied later by the terminal method, so one `QuerySet` can be reused across contexts |
 
 ### Chainable Methods
 
@@ -82,6 +82,7 @@ All chainable methods return `QuerySet[T]` and can be composed in any order.
 | `WithFetchLinks` | `WithFetchLinks() QuerySet[T]` | Eagerly resolve all `Link[T]` fields on results |
 | `WithNestingDepth` | `WithNestingDepth(n int) QuerySet[T]` | Override max link-fetching depth for this query |
 | `IncludeDeleted` | `IncludeDeleted() QuerySet[T]` | Include soft-deleted documents in results |
+| `ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquire row-level locks on every matching row. Requires `*Tx` scope — terminal methods return `ErrLockRequiresTransaction` otherwise |
 
 ### Terminal Methods
 
@@ -176,9 +177,9 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 |---|---|---|
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
 | `LockByID[T]` | `LockByID[T](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (`SELECT ... FOR UPDATE` on PostgreSQL; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
-| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
-| `NoWait` | `NoWait() LockOption` | `LockByID` and `TxQuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
-| `NewTxQuery[T]` | `NewTxQuery[T](tx *Tx, conditions ...where.Condition) TxQuerySet[T]` | Create a transaction-scoped query builder. Chainable: `Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`. Terminals: `All(ctx)`, `First(ctx)` |
+| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
+| `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquires a row-level lock on every matching row in one statement. Only valid when the QuerySet is bound to a `*Tx`; terminal methods return `ErrLockRequiresTransaction` if the scope is a `*DB` |
 | `RawGet` | `RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction. Intended for infrastructure code (for example, a migration log) writing its own bookkeeping collection; prefer `FindByID` for normal reads |
 | `RawPut` | `RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error` | Write raw bytes into a transaction under the given collection and ID, bypassing encoding and registry checks. Same audience as `RawGet` |
 | `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |

@@ -12,13 +12,23 @@ type FTSProvider interface {
 }
 
 // Search performs a full-text search on the QuerySet.
+//
+// Search always routes through the backend's FTSProvider implementation
+// because full-text indexes live at the backend level (FTS5 virtual tables
+// on SQLite, tsvector columns on PostgreSQL). Tx-bound QuerySets are
+// accepted but delegate the FTS query to the DB's backend rather than the
+// transaction — FTS reads do not need the in-transaction snapshot.
 func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error) {
-	col, err := collectionFor[T](qs.db)
+	if err := qs.preflight(); err != nil {
+		return nil, err
+	}
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
-	fts, ok := qs.db.backend.(FTSProvider)
+	fts, ok := db.backend.(FTSProvider)
 	if !ok {
 		return nil, ErrFTSNotSupported
 	}
@@ -29,14 +39,14 @@ func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error
 	if err != nil {
 		return nil, err
 	}
-	results, err := drainIter[T](qs.db, iter, qs.limitN)
+	results, err := drainIter[T](db, iter, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, err
 	}
 
 	if qs.fetchLinks {
-		if err := batchResolveLinks(ctx, qs.db, qs.db.backend, results, qs.nestDepth); err != nil {
+		if err := batchResolveLinks(ctx, db, qs.scope.readWriter(), results, qs.nestDepth); err != nil {
 			return nil, err
 		}
 	}

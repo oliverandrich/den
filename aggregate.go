@@ -92,12 +92,12 @@ func (qs QuerySet[T]) Max(ctx context.Context, field string) (float64, error) {
 }
 
 func (qs QuerySet[T]) aggregate(ctx context.Context, op AggregateOp, field string) (float64, error) {
-	col, err := collectionFor[T](qs.db)
+	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return 0, err
 	}
 	q := qs.buildBackendQuery(col)
-	result, err := qs.db.backend.Aggregate(ctx, col.meta.Name, op, field, q)
+	result, err := qs.scope.readWriter().Aggregate(ctx, col.meta.Name, op, field, q)
 	if err != nil {
 		return 0, err
 	}
@@ -110,13 +110,13 @@ func (qs QuerySet[T]) aggregate(ctx context.Context, op AggregateOp, field strin
 // Project executes the query and decodes results into the projection type.
 // Target must be a pointer to a slice of structs with json/den tags.
 func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
-	col, err := collectionFor[T](qs.db)
+	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return err
 	}
 
 	q := qs.buildBackendQuery(col)
-	iter, err := qs.db.backend.Query(ctx, col.meta.Name, q)
+	iter, err := qs.scope.readWriter().Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
 
 	sliceVal := rv.Elem()
 	elemType := sliceVal.Type().Elem()
-	enc := qs.db.getEncoder()
+	enc := qs.scope.db().getEncoder()
 
 	for iter.Next() {
 		rawBytes := make([]byte, len(iter.Bytes()))
@@ -180,7 +180,7 @@ func (qs QuerySet[T]) GroupBy(field string) GroupByBuilder[T] {
 // Into executes the group-by aggregation and maps results into the target slice.
 // The query is pushed down to the database as a SQL GROUP BY statement.
 func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
-	col, err := collectionFor[T](gb.qs.db)
+	col, err := collectionFor[T](gb.qs.scope.db())
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	aggs, aggIndices := buildAggsFromMappings(mappings)
 
 	q := gb.qs.buildBackendQuery(col)
-	rows, err := gb.qs.db.backend.GroupBy(ctx, col.meta.Name, gb.field, aggs, q)
+	rows, err := gb.qs.scope.readWriter().GroupBy(ctx, col.meta.Name, gb.field, aggs, q)
 	if err != nil {
 		return err
 	}

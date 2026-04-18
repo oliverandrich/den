@@ -15,4 +15,9 @@ var (
 	ErrDeadlock          = errors.New("den: deadlock detected")
 	ErrSerialization     = errors.New("den: serialization failure")
 	ErrFTSNotSupported   = errors.New("den: backend does not support full-text search")
+	// ErrLockRequiresTransaction is returned when a terminal method runs on a
+	// QuerySet whose ForUpdate was set but whose scope is a *DB. Row locking
+	// is only meaningful inside a transaction because the lock is released
+	// when the enclosing statement commits.
+	ErrLockRequiresTransaction = errors.New("den: ForUpdate requires a transaction scope (*Tx)")
 )

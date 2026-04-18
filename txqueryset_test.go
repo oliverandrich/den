@@ -27,7 +27,7 @@ func TestNewTxQuery_All(t *testing.T) {
 			require.NoError(t, den.Insert(ctx, db, &Product{Name: "C", Price: 3}))
 
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				items, err := den.NewTxQuery[Product](tx).
+				items, err := den.NewQuery[Product](tx).
 					Where(where.Field("price").Gte(2.0)).
 					Sort("price", den.Asc).
 					All(ctx)
@@ -50,7 +50,7 @@ func TestNewTxQuery_First(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Only"}))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.NewTxQuery[Product](tx).First(ctx)
+		found, err := den.NewQuery[Product](tx).First(ctx)
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func TestNewTxQuery_First_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewTxQuery[Product](tx).First(ctx)
+		_, err := den.NewQuery[Product](tx).First(ctx)
 		return err
 	})
 	require.ErrorIs(t, err, den.ErrNotFound)
@@ -85,7 +85,7 @@ func TestNewTxQuery_ForUpdate_SkipLocked(t *testing.T) {
 
 	start := time.Now()
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		items, err := den.NewTxQuery[Product](tx).
+		items, err := den.NewQuery[Product](tx).
 			Sort("name", den.Asc).
 			ForUpdate(den.SkipLocked()).
 			All(ctx)
@@ -117,7 +117,7 @@ func TestNewTxQuery_ForUpdate_NoWait(t *testing.T) {
 
 	start := time.Now()
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewTxQuery[Product](tx).
+		_, err := den.NewQuery[Product](tx).
 			ForUpdate(den.NoWait()).
 			All(ctx)
 		return err
@@ -138,7 +138,7 @@ func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 	// The error is captured on the query set in ForUpdate and surfaces on
 	// the terminal method — verify both All() and First() report it.
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewTxQuery[Product](tx).
+		_, err := den.NewQuery[Product](tx).
 			ForUpdate(den.SkipLocked(), den.NoWait()).
 			All(ctx)
 		return err
@@ -147,7 +147,7 @@ func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 	assert.Contains(t, err.Error(), "mutually exclusive")
 
 	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewTxQuery[Product](tx).
+		_, err := den.NewQuery[Product](tx).
 			ForUpdate(den.NoWait(), den.SkipLocked()).
 			First(ctx)
 		return err
@@ -191,7 +191,7 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 		defer wg.Done()
 		<-startA
 		errA = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.NewTxQuery[Product](tx).
+			_, err := den.NewQuery[Product](tx).
 				Where(where.Field("price").Lte(15.0)).
 				ForUpdate().
 				All(ctx)
@@ -204,7 +204,7 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 		defer wg.Done()
 		<-startB
 		errB = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.NewTxQuery[Product](tx).
+			_, err := den.NewQuery[Product](tx).
 				Where(where.Field("price").Gte(5.0)).
 				ForUpdate().
 				All(ctx)
@@ -233,7 +233,7 @@ func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, &Product{Name: "B"}))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		items, err := den.NewTxQuery[Product](tx).
+		items, err := den.NewQuery[Product](tx).
 			ForUpdate(den.SkipLocked()).
 			All(ctx)
 		if err != nil {
@@ -243,4 +243,28 @@ func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// TestForUpdate_RequiresTransaction verifies the compile-time-plus-runtime
+// safeguard: ForUpdate is legal syntactically on any QuerySet scope, but the
+// terminal method refuses to execute when the scope is a *DB because a lock
+// outside a transaction releases immediately and would be meaningless. The
+// previous API enforced this at the type level (separate TxQuerySet type);
+// the unified API enforces it via ErrLockRequiresTransaction at terminal time.
+func TestForUpdate_RequiresTransaction(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "A"}))
+
+	_, err := den.NewQuery[Product](db).ForUpdate().All(ctx)
+	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
+
+	_, err = den.NewQuery[Product](db).ForUpdate(den.SkipLocked()).First(ctx)
+	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
+
+	// Count doesn't actually consult Lock at the SQL level, but the preflight
+	// should still surface the mismatch for callers who typed .Count(ctx)
+	// after .ForUpdate() by mistake.
+	_, err = den.NewQuery[Product](db).ForUpdate().Count(ctx)
+	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
 }

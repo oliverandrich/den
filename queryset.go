@@ -11,13 +11,19 @@ import (
 )
 
 // QuerySet is a lazy, immutable query builder. Chain methods return copies;
-// the query is only executed when a terminal method (All, First, Count, etc.) is called.
+// the query is only executed when a terminal method (All, First, Count, etc.)
+// is called.
+//
+// QuerySet binds to a Scope — either a *DB (operating outside a transaction)
+// or a *Tx (operating inside RunInTransaction). Row-level locking via
+// ForUpdate is only valid on a *Tx scope; calling it on a *DB-bound QuerySet
+// defers an error that surfaces on the terminal method.
 //
 // The zero value is not usable — always obtain a QuerySet via NewQuery.
 // Calling terminal methods on a zero-value QuerySet panics because the
-// backend reference is nil.
+// scope reference is nil.
 type QuerySet[T any] struct {
-	db             *DB
+	scope          Scope
 	conditions     []where.Condition
 	sortFields     []SortEntry
 	limitN         int
@@ -27,13 +33,25 @@ type QuerySet[T any] struct {
 	fetchLinks     bool
 	nestDepth      int
 	includeDeleted bool
+	// lock is set by ForUpdate. Only meaningful when scope is *Tx; terminal
+	// methods surface ErrLockRequiresTransaction otherwise.
+	lock *LockMode
+	// err captures a deferred error from a chainable method (notably
+	// ForUpdate with contradictory options, or any use of ForUpdate on a
+	// *DB scope at terminal time) so it can surface on the terminal call.
+	err error
 }
 
-// NewQuery creates a new QuerySet. Conditions can optionally be passed directly.
-// The context is supplied later when a terminal method (All, First, Iter, …) runs,
-// so the same QuerySet can be executed against different contexts.
-func NewQuery[T any](db *DB, conditions ...where.Condition) QuerySet[T] {
-	qs := QuerySet[T]{db: db, nestDepth: 3}
+// NewQuery creates a new QuerySet bound to the given scope. Conditions can
+// optionally be passed directly. The context is supplied later when a
+// terminal method (All, First, Iter, …) runs, so the same QuerySet can be
+// executed against different contexts.
+//
+// Pass a *DB for queries outside a transaction, or a *Tx from within a
+// RunInTransaction closure for a query that sees the transaction's view of
+// the data. Use ForUpdate only on a *Tx-bound QuerySet.
+func NewQuery[T any](scope Scope, conditions ...where.Condition) QuerySet[T] {
+	qs := QuerySet[T]{scope: scope, nestDepth: 3}
 	if len(conditions) > 0 {
 		qs.conditions = conditions
 	}
@@ -96,7 +114,49 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 	return qs
 }
 
+// ForUpdate acquires a row-level lock on every matching document, held until
+// the enclosing transaction commits or rolls back. Only valid on a QuerySet
+// bound to a *Tx — on a *DB-bound QuerySet the call is accepted but the
+// terminal method will return ErrLockRequiresTransaction.
+//
+// Pass SkipLocked to omit locked rows from the result set (queue-consumer
+// pattern) or NoWait to fail immediately with ErrLocked when a row is held
+// by another transaction. On SQLite these options are no-ops because
+// IMMEDIATE transactions already serialize writers.
+//
+// Passing both SkipLocked and NoWait is a programmer error (PG allows only
+// one); ForUpdate captures the error on the query set and surfaces it when
+// a terminal method runs.
+func (qs QuerySet[T]) ForUpdate(opts ...LockOption) QuerySet[T] {
+	cfg := lockConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	mode, err := cfg.resolve()
+	if err != nil {
+		qs.err = err
+		return qs
+	}
+	qs.lock = &mode
+	return qs
+}
+
 // --- Terminal methods (execute the query) ---
+
+// preflight checks deferred errors set by chain methods and enforces the
+// ForUpdate-requires-*Tx constraint. Every terminal method that touches the
+// lock state calls this first so the error surfaces consistently.
+func (qs QuerySet[T]) preflight() error {
+	if qs.err != nil {
+		return qs.err
+	}
+	if qs.lock != nil {
+		if _, ok := qs.scope.(*Tx); !ok {
+			return ErrLockRequiresTransaction
+		}
+	}
+	return nil
+}
 
 // All executes the query and returns all matching documents.
 //
@@ -108,6 +168,9 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 // which is already implicit in .All()'s contract. Callers who need true
 // streaming with link resolution should keep using .Iter().
 func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
+	if err := qs.preflight(); err != nil {
+		return nil, err
+	}
 	if qs.fetchLinks {
 		return qs.allBatched(ctx)
 	}
@@ -130,24 +193,26 @@ func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
 // so pgx's cursor has released the connection by the time the resolver
 // issues its IN-query through the same ReadWriter.
 func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
-	col, err := collectionFor[T](qs.db)
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
 	q := qs.buildBackendQuery(col)
+	rw := qs.scope.readWriter()
 
-	iter, err := qs.db.backend.Query(ctx, col.meta.Name, q)
+	iter, err := rw.Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return nil, err
 	}
-	results, err := drainIter[T](qs.db, iter, qs.limitN)
+	results, err := drainIter[T](db, iter, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := batchResolveLinks(ctx, qs.db, qs.db.backend, results, qs.nestDepth); err != nil {
+	if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -167,29 +232,43 @@ func (qs QuerySet[T]) First(ctx context.Context) (*T, error) {
 
 // Count returns the number of matching documents.
 func (qs QuerySet[T]) Count(ctx context.Context) (int64, error) {
-	col, err := collectionFor[T](qs.db)
+	if err := qs.preflight(); err != nil {
+		return 0, err
+	}
+	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return 0, err
 	}
 
 	q := qs.buildBackendQuery(col)
-	return qs.db.backend.Count(ctx, col.meta.Name, q)
+	return qs.scope.readWriter().Count(ctx, col.meta.Name, q)
 }
 
 // Exists returns true if at least one document matches.
 func (qs QuerySet[T]) Exists(ctx context.Context) (bool, error) {
-	col, err := collectionFor[T](qs.db)
+	if err := qs.preflight(); err != nil {
+		return false, err
+	}
+	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return false, err
 	}
 
 	q := qs.buildBackendQuery(col)
-	return qs.db.backend.Exists(ctx, col.meta.Name, q)
+	return qs.scope.readWriter().Exists(ctx, col.meta.Name, q)
 }
 
 // AllWithCount returns matching documents and the total unpaginated count.
+//
+// When the QuerySet is bound to a *DB, the count+query run in a read
+// transaction for consistency. When bound to a *Tx, they run through the
+// existing transaction and no nested tx is opened.
 func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
-	col, err := collectionFor[T](qs.db)
+	if err := qs.preflight(); err != nil {
+		return nil, 0, err
+	}
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -204,42 +283,52 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 	countQ := countQS.buildBackendQuery(col)
 	dataQ := qs.buildBackendQuery(col)
 
-	// Run Count + Query in a single read transaction for consistency
-	tx, err := qs.db.backend.Begin(ctx, false)
+	run := func(rw ReadWriter) ([]*T, int64, error) {
+		total, err := rw.Count(ctx, col.meta.Name, countQ)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// Drain the iterator fully BEFORE running link lookups. pgx pins the
+		// connection to the open rows; issuing rw.Get while the iterator is
+		// live returns "conn busy".
+		iter, err := rw.Query(ctx, col.meta.Name, dataQ)
+		if err != nil {
+			return nil, 0, err
+		}
+		results, err := drainIter[T](db, iter, qs.limitN)
+		_ = iter.Close()
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if qs.fetchLinks {
+			if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth); err != nil {
+				return nil, 0, err
+			}
+		}
+		return results, total, nil
+	}
+
+	// When already inside a transaction, reuse it.
+	if tx, ok := qs.scope.(*Tx); ok {
+		return run(tx.tx)
+	}
+
+	// DB path: open a read tx so count+query see a consistent snapshot.
+	tx, err := db.backend.Begin(ctx, false)
 	if err != nil {
 		return nil, 0, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	total, err := tx.Count(ctx, col.meta.Name, countQ)
+	results, total, err := run(tx)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	// Drain the iterator fully BEFORE running link lookups. pgx pins the
-	// connection to the open rows; issuing tx.Get while the iterator is
-	// live returns "conn busy". Materialize results first, close, then
-	// resolve links on the same tx (and therefore the same pooled conn).
-	iter, err := tx.Query(ctx, col.meta.Name, dataQ)
-	if err != nil {
-		return nil, 0, err
-	}
-	results, err := drainIter[T](qs.db, iter, qs.limitN)
-	_ = iter.Close()
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if qs.fetchLinks {
-		if err := batchResolveLinks(ctx, qs.db, tx, results, qs.nestDepth); err != nil {
-			return nil, 0, err
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, 0, fmt.Errorf("%w: %w", ErrTransactionFailed, err)
 	}
-
 	return results, total, nil
 }
 
@@ -265,10 +354,18 @@ func drainIter[T any](db *DB, iter Iterator, capHint int) ([]*T, error) {
 	return results, nil
 }
 
-// Update applies field updates to all matching documents in a single transaction.
-// Returns the number of updated documents.
+// Update applies field updates to all matching documents. Returns the number
+// of updated documents.
+//
+// When bound to a *DB, the scan + writes run in a new transaction so the
+// batch is atomic. When bound to a *Tx, they run inline in the caller's
+// transaction.
 func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, error) {
-	col, err := collectionFor[T](qs.db)
+	if err := qs.preflight(); err != nil {
+		return 0, err
+	}
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
 	if err != nil {
 		return 0, err
 	}
@@ -286,9 +383,9 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 	q := qs.buildBackendQuery(col)
 
 	var count int64
-	txErr := RunInTransaction(ctx, qs.db, func(tx *Tx) error {
+	body := func(tx *Tx) error {
 		// Drain the iterator to completion before issuing any writes. pgx's
-		// cursor pins the transaction's connection, so running TxUpdate while
+		// cursor pins the transaction's connection, so running Update while
 		// the cursor is still open would hit "conn busy" on PostgreSQL.
 		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
 		if err != nil {
@@ -297,7 +394,7 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		var docs []*T
 		for iter.Next() {
 			doc := new(T)
-			if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {
+			if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
 				_ = iter.Close()
 				return fmt.Errorf("decode: %w", err)
 			}
@@ -323,9 +420,16 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 			count++
 		}
 		return nil
-	})
-	if txErr != nil {
-		return 0, txErr
+	}
+
+	if tx, ok := qs.scope.(*Tx); ok {
+		if err := body(tx); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
+	if err := RunInTransaction(ctx, db, body); err != nil {
+		return 0, err
 	}
 	return count, nil
 }
@@ -341,6 +445,7 @@ func (qs QuerySet[T]) buildBackendQuery(col *collectionInfo) *Query {
 		SkipN:      qs.skipN,
 		AfterID:    qs.afterID,
 		BeforeID:   qs.beforeID,
+		Lock:       qs.lock,
 	}
 
 	q.Conditions = append(q.Conditions, qs.allConditions(col)...)

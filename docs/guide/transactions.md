@@ -58,7 +58,7 @@ A handful of APIs remain transaction-only because their semantics are tied to tr
 | `den.LockByID[T](ctx, tx, id, opts...)` | Row-level lock released on commit/rollback |
 | `den.RawGet(ctx, tx, coll, id)` / `den.RawPut(ctx, tx, coll, id, data)` | Raw-bytes escape hatch; rollback safety matters |
 | `den.AdvisoryLock(ctx, tx, key)` | Application-level lock released on commit/rollback |
-| `den.NewTxQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking |
+| `den.NewQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking (QuerySet refuses to run `ForUpdate` against a `*DB` scope) |
 
 ## Row-Level Locking
 
@@ -121,11 +121,11 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ### Multi-row Locking
 
-`den.NewTxQuery[T](tx)` provides a chainable query builder bound to the current transaction. Its `ForUpdate(opts ...LockOption)` method locks every matching row in a single statement — avoids the N+1 round-trips you would get from looping over `LockByID`.
+`NewQuery[T](tx)` bound to a `*Tx` supports `ForUpdate(opts ...LockOption)` — one SQL statement that locks every matching row, avoiding the N+1 round-trips you would get from looping over `LockByID`.
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    orders, err := den.NewTxQuery[Order](tx).
+    orders, err := den.NewQuery[Order](tx).
         Where(where.Field("customer").Eq(custID)).
         Where(where.Field("status").Eq("pending")).
         ForUpdate(den.SkipLocked()).
@@ -143,7 +143,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 })
 ```
 
-The `SkipLocked()` and `NoWait()` options work identically to `LockByID`. `NewTxQuery` is a minimal builder — `Where`, `Sort`, `Limit`, `Skip` on the chain side, `All(ctx)` and `First(ctx)` as terminals. Use `NewQuery` (non-transaction) for other reads or aggregations; locking only makes sense inside a transaction.
+`ForUpdate` is legal syntactically on any `QuerySet`, but a terminal method refuses to run (`ErrLockRequiresTransaction`) when the scope is a `*DB` — a lock outside a transaction releases immediately and would be meaningless. The `SkipLocked()` and `NoWait()` options work identically to `LockByID`.
 
 !!! tip "Deterministic lock order"
     On PostgreSQL, `ForUpdate().All(ctx)` without an explicit `Sort` emits `ORDER BY id ASC` automatically. The lock-acquisition order follows the SELECT's output order, and two concurrent callers with overlapping result sets would deadlock on PG if each walked rows in a different heap order. The default guarantees every caller locks the same way. Add your own `Sort(...)` call if you want a different order — but then it is your responsibility to keep that order consistent across callers.

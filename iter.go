@@ -16,7 +16,7 @@ import (
 //	}
 func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 	return func(yield func(*T, error) bool) {
-		col, err := collectionFor[T](qs.db)
+		col, err := collectionFor[T](qs.scope.db())
 		if err != nil {
 			yield(nil, err)
 			return
@@ -24,7 +24,7 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 
 		q := qs.buildBackendQuery(col)
 
-		it, err := qs.db.backend.Query(ctx, col.meta.Name, q)
+		it, err := qs.scope.readWriter().Query(ctx, col.meta.Name, q)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -33,13 +33,13 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 
 		for it.Next() {
 			doc := new(T)
-			if err := decodeIterRow(qs.db, it.Bytes(), doc); err != nil {
+			if err := decodeIterRow(qs.scope.db(), it.Bytes(), doc); err != nil {
 				yield(nil, fmt.Errorf("decode: %w", err))
 				return
 			}
 
 			if qs.fetchLinks {
-				if err := fetchAllLinksOnDoc(ctx, qs.db, qs.db.backend, doc, qs.nestDepth); err != nil {
+				if err := fetchAllLinksOnDoc(ctx, qs.scope.db(), qs.scope.db().backend, doc, qs.nestDepth); err != nil {
 					yield(nil, fmt.Errorf("fetch links: %w", err))
 					return
 				}

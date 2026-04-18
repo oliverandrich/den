@@ -288,6 +288,63 @@ func TestUp_ConcurrentStarters_Postgres(t *testing.T) {
 	concurrentUpTest(t, db)
 }
 
+// concurrentDownTest applies N migrations, then runs N goroutines calling
+// Down concurrently. Each migration's Backward must fire exactly once even
+// under contention — two concurrent starters must not both roll back the
+// same version.
+func concurrentDownTest(t *testing.T, db *den.DB) {
+	t.Helper()
+
+	const goroutines = 8
+	const migrations = 3
+
+	var backwardCounters [migrations]atomic.Int32
+
+	r := NewRegistry()
+	for i := range migrations {
+		idx := i
+		r.Register(versionName(idx), Migration{
+			Forward: func(_ context.Context, _ *den.Tx) error { return nil },
+			Backward: func(_ context.Context, _ *den.Tx) error {
+				backwardCounters[idx].Add(1)
+				return nil
+			},
+		})
+	}
+
+	require.NoError(t, r.Up(context.Background(), db))
+
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	for g := range goroutines {
+		wg.Add(1)
+		go func(gi int) {
+			defer wg.Done()
+			errs[gi] = r.Down(context.Background(), db)
+		}(g)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoErrorf(t, err, "goroutine %d", i)
+	}
+	for i := range backwardCounters {
+		assert.Equalf(t, int32(1), backwardCounters[i].Load(),
+			"migration %d Backward must run exactly once across %d concurrent Down starters", i, goroutines)
+	}
+}
+
+func TestDown_ConcurrentStarters_SQLite(t *testing.T) {
+	db := dentest.MustOpen(t)
+	concurrentDownTest(t, db)
+}
+
+func TestDown_ConcurrentStarters_Postgres(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL())
+	require.NoError(t, db.Backend().DropCollection(context.Background(), "_den_migrations"))
+	concurrentDownTest(t, db)
+}
+
 func TestDown_BackwardError(t *testing.T) {
 	r := NewRegistry()
 	ctx := context.Background()

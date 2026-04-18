@@ -170,10 +170,36 @@ func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
 
 func runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error {
 	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		if err := den.TxAdvisoryLock(tx, migrationLockKey); err != nil {
+			return err
+		}
+
+		entries, err := loadEntriesFromTx(tx)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, e := range entries {
+			if e.Version == m.version {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil // another starter rolled this back first
+		}
+
 		if err := m.migration.Backward(ctx, tx); err != nil {
 			return fmt.Errorf("%w: %s: %w", den.ErrMigrationFailed, m.version, err)
 		}
-		return unmarkApplied(ctx, tx, m.version)
+
+		filtered := entries[:0]
+		for _, e := range entries {
+			if e.Version != m.version {
+				filtered = append(filtered, e)
+			}
+		}
+		return saveEntriesToTx(tx, filtered)
 	})
 }
 
@@ -220,22 +246,6 @@ func loadApplied(ctx context.Context, db *den.DB) ([]string, error) {
 		versions[i] = e.Version
 	}
 	return versions, nil
-}
-
-func unmarkApplied(_ context.Context, tx *den.Tx, version string) error {
-	entries, err := loadEntriesFromTx(tx)
-	if err != nil {
-		return err
-	}
-
-	filtered := entries[:0]
-	for _, e := range entries {
-		if e.Version != version {
-			filtered = append(filtered, e)
-		}
-	}
-
-	return saveEntriesToTx(tx, filtered)
 }
 
 func loadEntriesFromTx(tx *den.Tx) ([]migrationEntry, error) {

@@ -2,6 +2,7 @@ package den_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,102 @@ func TestNewTxQuery_ForUpdate_NoWait(t *testing.T) {
 		"NoWait must not block; returned after %v", elapsed)
 
 	release()
+}
+
+func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "A"}))
+
+	// The error is captured on the query set in ForUpdate and surfaces on
+	// the terminal method — verify both All() and First() report it.
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.NewTxQuery[Product](tx).
+			ForUpdate(den.SkipLocked(), den.NoWait()).
+			All()
+		return err
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+
+	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.NewTxQuery[Product](tx).
+			ForUpdate(den.NoWait(), den.SkipLocked()).
+			First()
+		return err
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+// TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock verifies that two
+// concurrent ForUpdate().All() callers locking overlapping result sets do
+// NOT deadlock. Without the default ORDER BY id in buildSelectSQL, PG would
+// return rows in heap order and the two callers could acquire locks in
+// different orders → 40P01.
+func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	// 20 rows: goroutine A locks price<=15 (16 rows), B locks price>=5
+	// (16 rows) — 11 rows in common. Without deterministic ordering the
+	// heap-order of each side's SELECT would differ and lock acquisition
+	// would cross → deadlock.
+	const N = 20
+	for i := range N {
+		require.NoError(t, den.Insert(ctx, db, &Product{
+			Name:  "row",
+			Price: float64(i),
+		}))
+	}
+
+	// Serialize the two transactions enough to guarantee overlap: both
+	// BEGIN, both try to lock, the loser waits for the winner. With the
+	// fix neither deadlocks; without it the runtime reliably reports
+	// 40P01 and one goroutine errors out.
+	startA := make(chan struct{})
+	startB := make(chan struct{})
+	var wg sync.WaitGroup
+	var errA, errB error
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-startA
+		errA = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			_, err := den.NewTxQuery[Product](tx).
+				Where(where.Field("price").Lte(15.0)).
+				ForUpdate().
+				All()
+			// Small hold to guarantee both TXs overlap in the lock window.
+			time.Sleep(100 * time.Millisecond)
+			return err
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		<-startB
+		errB = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			_, err := den.NewTxQuery[Product](tx).
+				Where(where.Field("price").Gte(5.0)).
+				ForUpdate().
+				All()
+			time.Sleep(100 * time.Millisecond)
+			return err
+		})
+	}()
+
+	close(startA)
+	time.Sleep(20 * time.Millisecond) // let A acquire first lock before B starts
+	close(startB)
+	wg.Wait()
+
+	// Both must succeed: the second caller blocks briefly, then proceeds.
+	require.NoError(t, errA, "goroutine A")
+	require.NoError(t, errB, "goroutine B")
+	// And specifically neither should surface a deadlock.
+	require.NotErrorIs(t, errA, den.ErrDeadlock)
+	require.NotErrorIs(t, errB, den.ErrDeadlock)
 }
 
 func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {

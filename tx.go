@@ -92,11 +92,31 @@ func TxFindByID[T any](tx *Tx, id string) (*T, error) {
 	return result, nil
 }
 
-// LockOption configures TxLockByID.
+// LockOption configures TxLockByID and TxQuerySet.ForUpdate.
 type LockOption func(*lockConfig)
 
+// lockConfig tracks each option independently (rather than collapsing to a
+// single mode) so resolve() can detect and reject the caller passing both
+// SkipLocked and NoWait, which are mutually exclusive in PostgreSQL.
 type lockConfig struct {
-	mode LockMode
+	skipLocked bool
+	noWait     bool
+}
+
+// resolve collapses the option flags into a single LockMode, or returns an
+// error when the options contradict each other.
+func (c lockConfig) resolve() (LockMode, error) {
+	if c.skipLocked && c.noWait {
+		return LockDefault, fmt.Errorf("den: SkipLocked and NoWait are mutually exclusive")
+	}
+	switch {
+	case c.skipLocked:
+		return LockSkipLocked, nil
+	case c.noWait:
+		return LockNoWait, nil
+	default:
+		return LockDefault, nil
+	}
 }
 
 // SkipLocked makes TxLockByID return ErrNotFound immediately if another
@@ -108,16 +128,22 @@ type lockConfig struct {
 // Because PostgreSQL returns zero rows for both "locked by another tx" and
 // "row does not exist", the caller cannot distinguish these cases via the
 // error alone.
+//
+// Passing both SkipLocked and NoWait returns an error — they are mutually
+// exclusive in PostgreSQL.
 func SkipLocked() LockOption {
-	return func(c *lockConfig) { c.mode = LockSkipLocked }
+	return func(c *lockConfig) { c.skipLocked = true }
 }
 
 // NoWait makes TxLockByID return ErrLocked immediately if another transaction
 // already holds the row lock, instead of blocking. Maps to PostgreSQL's
 // FOR UPDATE NOWAIT. Useful when the caller wants to decide between retry,
 // abort, or an alternative code path. On SQLite this option is a no-op.
+//
+// Passing both SkipLocked and NoWait returns an error — they are mutually
+// exclusive in PostgreSQL.
 func NoWait() LockOption {
-	return func(c *lockConfig) { c.mode = LockNoWait }
+	return func(c *lockConfig) { c.noWait = true }
 }
 
 // TxLockByID retrieves a document by ID and acquires a row-level lock that
@@ -142,8 +168,12 @@ func TxLockByID[T any](tx *Tx, id string, opts ...LockOption) (*T, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	mode, err := cfg.resolve()
+	if err != nil {
+		return nil, err
+	}
 
-	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id, cfg.mode)
+	data, err := tx.tx.GetForUpdate(tx.ctx, col.meta.Name, id, mode)
 	if err != nil {
 		return nil, err
 	}

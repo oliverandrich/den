@@ -177,6 +177,10 @@ type Query struct {
 	SkipN      int // 0 = no skip
 	AfterID    string
 	BeforeID   string
-	ForUpdate  bool     // if true, append a row-level lock clause (PostgreSQL only)
-	LockMode   LockMode // only consulted when ForUpdate is true
+	// Lock requests a row-level lock on every matching row (PostgreSQL
+	// only; SQLite ignores it because IMMEDIATE tx already serializes
+	// writers). nil means no lock; a non-nil pointer's value selects the
+	// lock mode. The pointer form rules out the previously-possible
+	// invalid pair of (ForUpdate=false, LockMode!=LockDefault).
+	Lock *LockMode
 }

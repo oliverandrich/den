@@ -230,6 +230,10 @@ func mapPGError(err error) error {
 			return fmt.Errorf("%w: %w", den.ErrDuplicate, err)
 		case "55P03": // lock_not_available
 			return den.ErrLocked
+		case "40P01": // deadlock_detected
+			return fmt.Errorf("%w: %w", den.ErrDeadlock, err)
+		case "40001": // serialization_failure
+			return fmt.Errorf("%w: %w", den.ErrSerialization, err)
 		}
 	}
 	return err

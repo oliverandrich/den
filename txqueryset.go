@@ -17,8 +17,11 @@ type TxQuerySet[T any] struct {
 	sortFields []SortEntry
 	limitN     int
 	skipN      int
-	forUpdate  bool
-	lockMode   LockMode
+	lock       *LockMode
+	// err captures a deferred error from a chainable method (notably
+	// ForUpdate with contradictory options) so it can surface on the
+	// terminal All / First call — chainable methods can't return an error.
+	err error
 }
 
 // NewTxQuery creates a new TxQuerySet bound to the given transaction.
@@ -64,18 +67,29 @@ func (qs TxQuerySet[T]) Skip(n int) TxQuerySet[T] {
 // pattern) or NoWait to fail immediately with ErrLocked when a row is held
 // by another transaction. On SQLite these options are no-ops because
 // IMMEDIATE transactions already serialize writers.
+//
+// Passing both SkipLocked and NoWait is a programmer error (PG allows only
+// one); ForUpdate captures the error on the query set and surfaces it when
+// a terminal method (All, First) runs.
 func (qs TxQuerySet[T]) ForUpdate(opts ...LockOption) TxQuerySet[T] {
 	cfg := lockConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	qs.forUpdate = true
-	qs.lockMode = cfg.mode
+	mode, err := cfg.resolve()
+	if err != nil {
+		qs.err = err
+		return qs
+	}
+	qs.lock = &mode
 	return qs
 }
 
 // All executes the query and returns all matching documents.
 func (qs TxQuerySet[T]) All() ([]*T, error) {
+	if qs.err != nil {
+		return nil, qs.err
+	}
 	col, err := collectionFor[T](qs.tx.db)
 	if err != nil {
 		return nil, err
@@ -124,8 +138,7 @@ func (qs TxQuerySet[T]) buildBackendQuery(col *collectionInfo) *Query {
 		SortFields: qs.sortFields,
 		LimitN:     qs.limitN,
 		SkipN:      qs.skipN,
-		ForUpdate:  qs.forUpdate,
-		LockMode:   qs.lockMode,
+		Lock:       qs.lock,
 	}
 	q.Conditions = append(q.Conditions, qs.conditions...)
 	return q

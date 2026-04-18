@@ -3,6 +3,7 @@ package postgres
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -307,6 +308,37 @@ func TestBuildAggregateSQL_UnsupportedOp(t *testing.T) {
 
 func TestMapPGError_Nil(t *testing.T) {
 	assert.NoError(t, mapPGError(nil))
+}
+
+func TestMapPGError_Codes(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		sentinel error
+	}{
+		{"unique violation", "23505", den.ErrDuplicate},
+		{"lock not available", "55P03", den.ErrLocked},
+		{"deadlock detected", "40P01", den.ErrDeadlock},
+		{"serialization failure", "40001", den.ErrSerialization},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pgErr := &pgconn.PgError{Code: tt.code, Message: "synthesized"}
+			got := mapPGError(pgErr)
+			require.ErrorIs(t, got, tt.sentinel)
+		})
+	}
+}
+
+func TestMapPGError_UnknownCode(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: "99999", Message: "mystery"}
+	got := mapPGError(pgErr)
+	require.Error(t, got)
+	// Unknown codes pass through unwrapped; no sentinel match.
+	require.NotErrorIs(t, got, den.ErrDuplicate)
+	require.NotErrorIs(t, got, den.ErrLocked)
+	require.NotErrorIs(t, got, den.ErrDeadlock)
+	require.NotErrorIs(t, got, den.ErrSerialization)
 }
 
 func TestQuoteIdent(t *testing.T) {

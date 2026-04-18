@@ -85,6 +85,12 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 			}
 			fmt.Fprintf(&sb, "%s %s", jsonbPath(s.Field), dir)
 		}
+	} else if q.Lock != nil {
+		// FOR UPDATE acquires row locks in the plan's output order. With
+		// no explicit sort and overlapping result sets, two concurrent
+		// callers will pick different orders and deadlock. Force a stable
+		// order by primary key so every caller locks the same way.
+		sb.WriteString(" ORDER BY id ASC")
 	}
 
 	if q.LimitN > 0 {
@@ -94,9 +100,9 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 		fmt.Fprintf(&sb, " OFFSET %d", q.SkipN)
 	}
 
-	if q.ForUpdate {
+	if q.Lock != nil {
 		sb.WriteString(" FOR UPDATE")
-		switch q.LockMode {
+		switch *q.Lock {
 		case den.LockDefault:
 			// no modifier
 		case den.LockSkipLocked:

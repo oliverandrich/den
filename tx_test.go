@@ -491,22 +491,26 @@ func TestTxLockByID_Options_SQLiteNoop(t *testing.T) {
 	}
 }
 
-func TestTxLockByID_ConflictingOptions_LastWins(t *testing.T) {
-	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+func TestTxLockByID_ConflictingOptions_Rejected(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	p := &Product{Name: "LastWins"}
+	p := &Product{Name: "Conflict"}
 	require.NoError(t, den.Insert(ctx, db, p))
 
-	locked, release := runContendedTx(t, db, p.ID)
-	<-locked
-
-	// SkipLocked first, then NoWait — NoWait must win → ErrLocked, not ErrNotFound.
+	// SkipLocked and NoWait are mutually exclusive in PG; passing both used
+	// to silently let the second win. Now it must return a clear error.
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		_, err := den.TxLockByID[Product](tx, p.ID, den.SkipLocked(), den.NoWait())
 		return err
 	})
-	require.ErrorIs(t, err, den.ErrLocked)
-
-	release()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+	// Order of options must not matter.
+	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		_, err := den.TxLockByID[Product](tx, p.ID, den.NoWait(), den.SkipLocked())
+		return err
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }

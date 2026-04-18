@@ -87,6 +87,8 @@ Two options change how `TxLockByID` reacts to contention on PostgreSQL:
 - `den.SkipLocked()` — if another transaction holds the row, the query returns no rows. Mapped to `FOR UPDATE SKIP LOCKED`. The canonical queue-consumer primitive: N workers can each pop a different row without blocking each other.
 - `den.NoWait()` — if another transaction holds the row, fail immediately with `den.ErrLocked`. Mapped to `FOR UPDATE NOWAIT`. Use when the caller should choose between retry, abort, or an alternative path rather than wait.
 
+`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `TxLockByID` returns an error; passing both to `TxQuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
+
 On SQLite both options are no-ops (writers are serialized at the database level).
 
 ```go
@@ -131,6 +133,9 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 ```
 
 The `SkipLocked()` and `NoWait()` options work identically to `TxLockByID`. `NewTxQuery` is a minimal builder — `Where`, `Sort`, `Limit`, `Skip` on the chain side, `All` and `First` as terminals. Use `NewQuery` (non-transaction) for other reads or aggregations; locking only makes sense inside a transaction.
+
+!!! tip "Deterministic lock order"
+    On PostgreSQL, `ForUpdate().All()` without an explicit `Sort` emits `ORDER BY id ASC` automatically. The lock-acquisition order follows the SELECT's output order, and two concurrent callers with overlapping result sets would deadlock on PG if each walked rows in a different heap order. The default guarantees every caller locks the same way. Add your own `Sort(...)` call if you want a different order — but then it is your responsibility to keep that order consistent across callers.
 
 ## Commit and Rollback
 

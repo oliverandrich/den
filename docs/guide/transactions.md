@@ -56,9 +56,9 @@ A handful of APIs remain transaction-only because their semantics are tied to tr
 | API | Why transaction-only |
 |---|---|
 | `den.LockByID[T](ctx, tx, id, opts...)` | Row-level lock released on commit/rollback |
-| `den.RawGet(ctx, tx, coll, id)` / `den.RawPut(ctx, tx, coll, id, data)` | Raw-bytes escape hatch; rollback safety matters |
 | `den.AdvisoryLock(ctx, tx, key)` | Application-level lock released on commit/rollback |
 | `den.NewQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking (QuerySet refuses to run `ForUpdate` against a `*DB` scope) |
+| `tx.Transaction()` | Low-level escape hatch to the underlying backend Transaction. Only for infrastructure code like the migration log — application code should use `Insert` / `Update` / `Delete` / `FindByID` etc. |
 
 ## Row-Level Locking
 

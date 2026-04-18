@@ -265,7 +265,9 @@ func (r *Registry) loadApplied(ctx context.Context, db *den.DB) ([]string, error
 }
 
 func loadEntriesFromTx(ctx context.Context, tx *den.Tx) ([]migrationEntry, error) {
-	data, err := den.RawGet(ctx, tx, migrationsCollection, "log")
+	// The migrations collection is deliberately unregistered with Den, so we
+	// reach through the underlying Transaction to read raw bytes.
+	data, err := tx.Transaction().Get(ctx, migrationsCollection, "log")
 	if err != nil {
 		if errors.Is(err, den.ErrNotFound) {
 			return nil, nil
@@ -285,5 +287,5 @@ func saveEntriesToTx(ctx context.Context, tx *den.Tx, entries []migrationEntry) 
 	if err != nil {
 		return err
 	}
-	return den.RawPut(ctx, tx, migrationsCollection, "log", data)
+	return tx.Transaction().Put(ctx, migrationsCollection, "log", data)
 }

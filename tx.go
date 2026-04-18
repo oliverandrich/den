@@ -177,27 +177,24 @@ func LockByID[T any](ctx context.Context, tx *Tx, id string, opts ...LockOption)
 	return result, nil
 }
 
-// RawGet performs a raw key lookup within the transaction, returning the
-// stored bytes verbatim without decoding or registry validation. Intended
-// for infrastructure code that stores unregistered bookkeeping collections
-// (for example, the migration log). Prefer FindByID(ctx, tx, id) for
-// normal reads.
-func RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error) {
-	return tx.tx.Get(ctx, collection, id)
-}
-
-// RawPut writes raw bytes into the transaction under the given collection
-// and id, bypassing encoding and registry checks. Same audience as RawGet:
-// infrastructure code writing its own bookkeeping collections. Prefer
-// Insert / Update for normal writes.
-func RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error {
-	return tx.tx.Put(ctx, collection, id, data)
-}
-
 // AdvisoryLock acquires an application-defined lock on key that persists
 // until the transaction commits or rolls back. Concurrent transactions
 // attempting to lock the same key block until the holder ends. See the
 // Transaction interface for backend-specific behavior.
 func AdvisoryLock(ctx context.Context, tx *Tx, key int64) error {
 	return tx.tx.AdvisoryLock(ctx, key)
+}
+
+// Transaction returns the underlying backend Transaction so infrastructure
+// code can issue raw Get / Put / Delete calls on unregistered collections.
+// This is a low-level escape hatch — normal code should use Insert, Update,
+// Delete, FindByID, NewQuery, and friends, all of which honor the registry,
+// encoding, validation, and hook contracts. The only legitimate consumer
+// today is den/migrate (the migration-log collection is deliberately not
+// registered with Den).
+//
+// Mirrors DB.Backend() in spirit: both are low-level accessors you reach
+// for only when the high-level API does not cover the case.
+func (t *Tx) Transaction() Transaction {
+	return t.tx
 }

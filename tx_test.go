@@ -228,7 +228,9 @@ func TestRunInTransaction_PanicRecovery(t *testing.T) {
 	assert.InDelta(t, 10.0, found.Price, 0.001)
 }
 
-func TestTxRawGet_Direct(t *testing.T) {
+func TestTx_Transaction_RawRead(t *testing.T) {
+	// Transaction() is the low-level escape hatch used by infrastructure
+	// code like migrate. Verify a raw Get returns the stored JSON bytes.
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
@@ -236,7 +238,7 @@ func TestTxRawGet_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		data, err := den.RawGet(ctx, tx, "product", p.ID)
+		data, err := tx.Transaction().Get(ctx, "product", p.ID)
 		if err != nil {
 			return err
 		}
@@ -246,7 +248,10 @@ func TestTxRawGet_Direct(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestTxRawPut_Direct(t *testing.T) {
+func TestTx_Transaction_RawWrite(t *testing.T) {
+	// Writing raw bytes through tx.Transaction().Put bypasses encoding,
+	// registry, hooks, and validation — same semantics the migration log
+	// depends on.
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
@@ -254,7 +259,8 @@ func TestTxRawPut_Direct(t *testing.T) {
 	require.NoError(t, den.Insert(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.RawPut(ctx, tx, "product", p.ID, []byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
+		return tx.Transaction().Put(ctx, "product", p.ID,
+			[]byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
 	})
 	require.NoError(t, err)
 

@@ -1562,7 +1562,9 @@ den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 `Scope` is sealed (unexported methods): only `*DB` and `*Tx` satisfy it. Backend authors are unaffected.
 
-A small set of APIs remains transaction-only because their semantics require transaction lifetime: `LockByID`, `RawGet`, `RawPut`, `AdvisoryLock`, and `QuerySet.ForUpdate(...)`. The tx-only entry points take `*den.Tx` directly rather than `Scope`; `ForUpdate` is valid on any `QuerySet` but the terminal refuses to run if the scope is a `*DB` (returns `ErrLockRequiresTransaction`).
+A small set of APIs remains transaction-only because their semantics require transaction lifetime: `LockByID`, `AdvisoryLock`, and `QuerySet.ForUpdate(...)`. These take `*den.Tx` directly rather than `Scope`; `ForUpdate` is valid on any `QuerySet` but the terminal refuses to run if the scope is a `*DB` (returns `ErrLockRequiresTransaction`).
+
+For rare cases where infrastructure code (for example, the migration log) needs to bypass the registry, `tx.Transaction()` returns the underlying backend `Transaction` so callers can issue raw `Get` / `Put` / `Delete`. Application code should not touch this.
 
 ## Row-Level Locking
 
@@ -2524,9 +2526,8 @@ Standard CRUD (`Insert`, `Update`, `Delete`, `FindByID`, `FindByIDs`, `FindOneAn
 | `SkipLocked` | `SkipLocked() LockOption` | `LockByID` / `QuerySet.ForUpdate` modifier: skip rows locked by other transactions (PostgreSQL `FOR UPDATE SKIP LOCKED`). Queue-consumer primitive |
 | `NoWait` | `NoWait() LockOption` | `LockByID` / `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately on contention (PostgreSQL `FOR UPDATE NOWAIT`). Mutually exclusive with `SkipLocked` |
 | `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquire row-level locks on every matching row in a single statement. Requires `*Tx` scope — terminal methods return `ErrLockRequiresTransaction` otherwise |
-| `RawGet` | `RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error)` | Raw bytes escape hatch for infrastructure code (for example, a migration log). Prefer `FindByID` for normal document reads |
-| `RawPut` | `RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error` | Raw bytes escape hatch paired with `RawGet`. Prefer `Insert` / `Update` for normal document writes |
 | `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
+| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log). Application code should not use this |
 
 ## Metadata
 

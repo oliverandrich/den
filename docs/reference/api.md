@@ -180,9 +180,8 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 | `SkipLocked` | `SkipLocked() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
 | `NoWait` | `NoWait() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
 | `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquires a row-level lock on every matching row in one statement. Only valid when the QuerySet is bound to a `*Tx`; terminal methods return `ErrLockRequiresTransaction` if the scope is a `*DB` |
-| `RawGet` | `RawGet(ctx context.Context, tx *Tx, collection, id string) ([]byte, error)` | Get raw document bytes by collection and ID within a transaction. Intended for infrastructure code (for example, a migration log) writing its own bookkeeping collection; prefer `FindByID` for normal reads |
-| `RawPut` | `RawPut(ctx context.Context, tx *Tx, collection, id string, data []byte) error` | Write raw bytes into a transaction under the given collection and ID, bypassing encoding and registry checks. Same audience as `RawGet` |
 | `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
+| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Insert` / `Update` / `Delete` / `FindByID` / `NewQuery` |
 
 > **Note:** Standard CRUD operations (`Insert`, `Update`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
 

@@ -90,9 +90,16 @@ func encodeToMap(db *DB, doc any, m *map[string]any) error {
 	return nil
 }
 
-// Rollback restores the document to its state at load time.
-// Returns ErrNoSnapshot if no snapshot exists.
-func Rollback[T any](db *DB, doc *T) error {
+// Revert restores the document to its state at load time by decoding the
+// stored snapshot back over its fields. Returns ErrNoSnapshot if the
+// document was never loaded from the database or does not embed
+// document.TrackedBase.
+//
+// Named Revert rather than Rollback to avoid name collision with the
+// backend transaction's Rollback method — this operation is purely an
+// in-memory restore against the document snapshot and has nothing to do
+// with transactions.
+func Revert[T any](db *DB, doc *T) error {
 	t, ok := any(doc).(document.Trackable)
 	if !ok || t.Snapshot() == nil {
 		return ErrNoSnapshot

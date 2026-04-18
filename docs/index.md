@@ -14,7 +14,7 @@ An ODM for Go with two storage backends — SQLite and PostgreSQL. Same API, you
 - **Typed relations** — `Link[T]` and `[]Link[T]` with cascade write/delete and eager/lazy fetch
 - **Full-text search** — FTS5 (SQLite), tsvector (PostgreSQL), unified `Search()` API
 - **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
-- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Rollback`
+- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Revert`
 - **Soft delete** — embed `SoftBase`, automatic query filtering, `HardDelete` for permanent removal
 - **Optimistic concurrency** — revision-based conflict detection
 - **Transactions** — `RunInTransaction` with panic-safe rollback

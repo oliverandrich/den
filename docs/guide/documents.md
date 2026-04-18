@@ -7,7 +7,7 @@ Every Den document embeds one of four base types from the `document` package. Ch
 | Base Type | Change Tracking | Soft Delete | Use Case |
 |---|---|---|---|
 | `document.Base` | No | No | Simple documents without audit needs |
-| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Rollback` |
+| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Revert` |
 | `document.SoftBase` | No | Yes | Documents that should never be permanently deleted by default |
 | `document.TrackedSoftBase` | Yes | Yes | Full audit trail with recoverability |
 

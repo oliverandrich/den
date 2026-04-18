@@ -144,7 +144,7 @@ func TestUpdate_RefreshesSnapshot(t *testing.T) {
 	assert.False(t, changed, "should not be changed after Update")
 }
 
-func TestRollback(t *testing.T) {
+func TestRevert(t *testing.T) {
 	db := dentest.MustOpen(t, &TrackedProduct{})
 	ctx := context.Background()
 
@@ -157,22 +157,22 @@ func TestRollback(t *testing.T) {
 	found.Price = 99.0
 	found.Name = "Changed"
 
-	require.NoError(t, den.Rollback(db, found))
+	require.NoError(t, den.Revert(db, found))
 	assert.Equal(t, "Widget", found.Name)
 	assert.InDelta(t, 10.0, found.Price, 0.001)
 
-	// After rollback, should not be changed
+	// After revert, should not be changed
 	changed, err := den.IsChanged(db, found)
 	require.NoError(t, err)
 	assert.False(t, changed)
 }
 
-func TestRollback_NoSnapshot(t *testing.T) {
+func TestRevert_NoSnapshot(t *testing.T) {
 	db := dentest.MustOpen(t, &TrackedProduct{})
 
 	p := &TrackedProduct{Name: "New"}
 
-	err := den.Rollback(db, p)
+	err := den.Revert(db, p)
 	require.ErrorIs(t, err, den.ErrNoSnapshot)
 }
 

@@ -14,7 +14,7 @@
 - **Typed relations** — `Link[T]` and `[]Link[T]` with cascade write/delete and eager/lazy fetch
 - **Full-text search** — FTS5 (SQLite), tsvector (PostgreSQL), unified `Search()` API
 - **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
-- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Rollback`
+- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Revert`
 - **Soft delete** — embed `SoftBase`, automatic query filtering, `HardDelete` for permanent removal
 - **Optimistic concurrency** — revision-based conflict detection
 - **Transactions** — `RunInTransaction` with panic-safe rollback
@@ -310,7 +310,7 @@ Every Den document embeds one of four base types from the `document` package. Ch
 | Base Type | Change Tracking | Soft Delete | Use Case |
 |---|---|---|---|
 | `document.Base` | No | No | Simple documents without audit needs |
-| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Rollback` |
+| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Revert` |
 | `document.SoftBase` | No | Yes | Documents that should never be permanently deleted by default |
 | `document.TrackedSoftBase` | Yes | Yes | Full audit trail with recoverability |
 
@@ -1873,7 +1873,7 @@ type AuditLog struct {
 }
 ```
 
-This gives you `IsChanged`, `GetChanges`, and `Rollback` alongside soft delete behavior.
+This gives you `IsChanged`, `GetChanges`, and `Revert` alongside soft delete behavior.
 
 ## How It Works
 
@@ -1933,23 +1933,23 @@ changes, _ := den.GetChanges(db, p)
 
 Only modified fields appear in the map. If nothing changed, the map is empty.
 
-## Rolling Back Changes
+## Reverting Changes
 
-Use `den.Rollback` to restore a document to its last-saved state:
+Use `den.Revert` to restore a document to its last-saved state:
 
 ```go
 p.Price = 29.99
 p.Name = "New Name"
 
-den.Rollback(db, p)
+den.Revert(db, p)
 
 // p.Price and p.Name are back to their original values
 changed, _ = den.IsChanged(db, p) // false
 ```
 
-`Rollback` deserializes the stored snapshot back into the struct, undoing all local modifications.
+`Revert` deserializes the stored snapshot back into the struct, undoing all local modifications. The name is deliberately not `Rollback` to avoid confusion with the backend transaction's `Rollback` method — `Revert` is a pure in-memory restore that has nothing to do with transactions.
 
-`den.Rollback` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
+`den.Revert` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
 
 ## Combining with Soft Delete
 
@@ -1969,7 +1969,7 @@ When a document implements the `Trackable` interface (which `TrackedBase` and `T
 
 - **`IsChanged`** re-encodes the current struct state and compares bytes against the snapshot
 - **`GetChanges`** diffs the two JSON representations to produce a per-field change map
-- **`Rollback`** deserializes the stored snapshot back into the struct
+- **`Revert`** deserializes the stored snapshot back into the struct
 
 ---
 
@@ -2513,7 +2513,7 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 |---|---|---|
 | `IsChanged[T]` | `IsChanged[T](db *DB, doc *T) (bool, error)` | Check whether the document has been modified since last load/save |
 | `GetChanges[T]` | `GetChanges[T](db *DB, doc *T) (map[string]FieldChange, error)` | Get a map of changed fields with before/after values |
-| `Rollback` | `Rollback(db *DB, doc any) error` | Restore the document to its last-saved state. Returns `ErrNoSnapshot` if no snapshot exists |
+| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if no snapshot exists. Named `Revert` (not `Rollback`) to avoid collision with the backend transaction's Rollback method |
 
 ## Transactions
 

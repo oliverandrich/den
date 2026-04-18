@@ -82,7 +82,7 @@ type AuditLog struct {
 }
 ```
 
-This gives you `IsChanged`, `GetChanges`, and `Rollback` alongside soft delete behavior.
+This gives you `IsChanged`, `GetChanges`, and `Revert` alongside soft delete behavior.
 
 !!! tip
     Choose your base type based on the features you need. See the [Documents](documents.md) guide for the full base type matrix.

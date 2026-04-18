@@ -165,7 +165,7 @@ Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instea
 |---|---|---|
 | `IsChanged[T]` | `IsChanged[T](db *DB, doc *T) (bool, error)` | Check whether the document has been modified since last load/save |
 | `GetChanges[T]` | `GetChanges[T](db *DB, doc *T) (map[string]FieldChange, error)` | Get a map of changed fields with before/after values |
-| `Rollback` | `Rollback(db *DB, doc any) error` | Restore the document to its last-saved state. Returns `ErrNoSnapshot` if no snapshot exists |
+| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if the document was never loaded or does not embed `TrackedBase`. Named `Revert` (not `Rollback`) to avoid name collision with the backend transaction's `Rollback` method |
 
 ---
 

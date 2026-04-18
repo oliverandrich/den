@@ -45,24 +45,24 @@ changes, _ := den.GetChanges(db, p)
 
 Only modified fields appear in the map. If nothing changed, the map is empty.
 
-## Rolling Back Changes
+## Reverting Changes
 
-Use `den.Rollback` to restore a document to its last-saved state:
+Use `den.Revert` to restore a document to its last-saved state:
 
 ```go
 p.Price = 29.99
 p.Name = "New Name"
 
-den.Rollback(db, p)
+den.Revert(db, p)
 
 // p.Price and p.Name are back to their original values
 changed, _ = den.IsChanged(db, p) // false
 ```
 
-`Rollback` deserializes the stored snapshot back into the struct, undoing all local modifications.
+`Revert` deserializes the stored snapshot back into the struct, undoing all local modifications. The name is deliberately not `Rollback` to avoid confusion with the backend transaction's `Rollback` method — `Revert` is a pure in-memory restore that has nothing to do with transactions.
 
 !!! warning
-    `den.Rollback` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
+    `den.Revert` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
 
 ## Combining with Soft Delete
 
@@ -85,4 +85,4 @@ When a document implements the `Trackable` interface (which `TrackedBase` and `T
 
 - **`IsChanged`** re-encodes the current struct state and compares bytes against the snapshot
 - **`GetChanges`** diffs the two JSON representations to produce a per-field change map
-- **`Rollback`** deserializes the stored snapshot back into the struct
+- **`Revert`** deserializes the stored snapshot back into the struct

@@ -2,7 +2,6 @@ package den
 
 import (
 	"context"
-	"fmt"
 )
 
 // FTSProvider is an optional interface backends implement
@@ -32,27 +31,7 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 	}
 	defer func() { _ = iter.Close() }()
 
-	var results []*T
-	if qs.limitN > 0 {
-		results = make([]*T, 0, qs.limitN)
-	}
-	for iter.Next() {
-		doc := new(T)
-		if err := decodeIterRow(qs.db, iter.Bytes(), doc); err != nil {
-			return nil, fmt.Errorf("decode: %w", err)
-		}
-
-		if qs.fetchLinks {
-			if err := fetchAllLinksOnDoc(qs.ctx, qs.db, qs.db.backend, doc, qs.nestDepth); err != nil {
-				return nil, fmt.Errorf("fetch links: %w", err)
-			}
-		}
-		results = append(results, doc)
-	}
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return drainIter[T](qs.ctx, iter, qs.db, qs.db.backend, qs.fetchLinks, qs.nestDepth, qs.limitN)
 }
 
 // ensureFTSForCollection sets up FTS infrastructure during Register()

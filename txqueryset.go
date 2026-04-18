@@ -1,7 +1,6 @@
 package den
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/oliverandrich/den/where"
@@ -107,21 +106,7 @@ func (qs TxQuerySet[T]) All() ([]*T, error) {
 	}
 	defer func() { _ = it.Close() }()
 
-	var results []*T
-	if qs.limitN > 0 {
-		results = make([]*T, 0, qs.limitN)
-	}
-	for it.Next() {
-		doc := new(T)
-		if err := decodeIterRow(qs.tx.db, it.Bytes(), doc); err != nil {
-			return nil, fmt.Errorf("decode: %w", err)
-		}
-		results = append(results, doc)
-	}
-	if err := it.Err(); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return drainIter[T](qs.tx.ctx, it, qs.tx.db, qs.tx.tx, false, 0, qs.limitN)
 }
 
 // First returns the first matching document. Returns ErrNotFound if none match.

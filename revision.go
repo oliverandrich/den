@@ -24,7 +24,7 @@ func newRevision() string {
 }
 
 func setRevision(v reflect.Value, info *internal.StructInfo, rev string) {
-	revField := info.FieldByName("_rev")
+	revField := info.BaseRev
 	if revField == nil {
 		return
 	}
@@ -32,7 +32,7 @@ func setRevision(v reflect.Value, info *internal.StructInfo, rev string) {
 }
 
 func getRevision(v reflect.Value, info *internal.StructInfo) string {
-	revField := info.FieldByName("_rev")
+	revField := info.BaseRev
 	if revField == nil {
 		return ""
 	}

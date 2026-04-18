@@ -119,13 +119,13 @@ func fetchLinkByName(ctx context.Context, db *DB, rw ReadWriter, doc any, fieldN
 		fv := v.Field(lf.index)
 		if lf.slice {
 			for j := range fv.Len() {
-				if err := resolveSingleLink(ctx, db, rw, fv.Index(j)); err != nil {
+				if err := resolveSingleLink(ctx, db, rw, fv.Index(j), lf); err != nil {
 					return err
 				}
 			}
 			return nil
 		}
-		return resolveSingleLink(ctx, db, rw, fv)
+		return resolveSingleLink(ctx, db, rw, fv, lf)
 	}
 	return fmt.Errorf("den: link field %q not found", fieldName)
 }
@@ -135,27 +135,24 @@ func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, dep
 		return nil
 	}
 
-	return forEachLinkField(doc, func(elem reflect.Value) error {
-		return resolveSingleLink(ctx, db, rw, elem)
+	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+		return resolveSingleLink(ctx, db, rw, elem, lf)
 	})
 }
 
-func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal reflect.Value) error {
-	idField := linkVal.FieldByName("ID")
-	if !idField.IsValid() || idField.String() == "" {
+func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
+	idField := linkVal.FieldByIndex(lf.idIdx)
+	if idField.String() == "" {
 		return nil
 	}
 
-	loadedField := linkVal.FieldByName("Loaded")
-	if loadedField.IsValid() && loadedField.Bool() {
+	loadedField := linkVal.FieldByIndex(lf.loadedIdx)
+	if loadedField.Bool() {
 		return nil // already loaded
 	}
 
 	id := idField.String()
-	valueField := linkVal.FieldByName("Value")
-	if !valueField.IsValid() {
-		return nil
-	}
+	valueField := linkVal.FieldByIndex(lf.valueIdx)
 
 	// Determine the target type (the T in Link[T])
 	targetType := valueField.Type().Elem() // *T → T
@@ -187,10 +184,15 @@ func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal refle
 	return nil
 }
 
-// linkFieldInfo describes a single Link or []Link field in a struct.
+// linkFieldInfo describes a single Link or []Link field in a struct,
+// plus the pre-resolved index paths for the Link[T] sub-fields so hot
+// paths can use FieldByIndex instead of per-op FieldByName lookups.
 type linkFieldInfo struct {
-	index int  // field index in the struct
-	slice bool // true for []Link[T], false for Link[T]
+	index     int   // field index in the parent struct
+	slice     bool  // true for []Link[T], false for Link[T]
+	idIdx     []int // index path for Link[T].ID
+	valueIdx  []int // index path for Link[T].Value
+	loadedIdx []int // index path for Link[T].Loaded
 }
 
 var linkFieldCache sync.Map // reflect.Type → []linkFieldInfo
@@ -209,11 +211,28 @@ func getLinkFields(t reflect.Type) []linkFieldInfo {
 			continue
 		}
 		ft := f.Type
-		if ft.Kind() == reflect.Struct && detectLinkType(ft) {
-			fields = append(fields, linkFieldInfo{index: i, slice: false})
-		} else if ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct && detectLinkType(ft.Elem()) {
-			fields = append(fields, linkFieldInfo{index: i, slice: true})
+		var linkType reflect.Type
+		slice := false
+		switch {
+		case ft.Kind() == reflect.Struct && detectLinkType(ft):
+			linkType = ft
+		case ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct && detectLinkType(ft.Elem()):
+			linkType = ft.Elem()
+			slice = true
 		}
+		if linkType == nil {
+			continue
+		}
+		idF, _ := linkType.FieldByName("ID")
+		valF, _ := linkType.FieldByName("Value")
+		loadF, _ := linkType.FieldByName("Loaded")
+		fields = append(fields, linkFieldInfo{
+			index:     i,
+			slice:     slice,
+			idIdx:     idF.Index,
+			valueIdx:  valF.Index,
+			loadedIdx: loadF.Index,
+		})
 	}
 
 	linkFieldCache.Store(t, fields)
@@ -231,20 +250,22 @@ func detectLinkType(t reflect.Type) bool {
 }
 
 // forEachLinkField iterates over Link and []Link fields of a struct,
-// calling fn for each individual link element.
-func forEachLinkField(doc any, fn func(elem reflect.Value) error) error {
+// calling fn for each individual link element together with its pre-
+// resolved linkFieldInfo so callbacks can use FieldByIndex instead of
+// FieldByName.
+func forEachLinkField(doc any, fn func(elem reflect.Value, lf linkFieldInfo) error) error {
 	v := reflect.ValueOf(doc).Elem()
 
 	for _, lf := range getLinkFields(v.Type()) {
 		fv := v.Field(lf.index)
 		if lf.slice {
 			for j := range fv.Len() {
-				if err := fn(fv.Index(j)); err != nil {
+				if err := fn(fv.Index(j), lf); err != nil {
 					return err
 				}
 			}
 		} else {
-			if err := fn(fv); err != nil {
+			if err := fn(fv, lf); err != nil {
 				return err
 			}
 		}
@@ -262,21 +283,21 @@ func applyCRUDOpts(opts []CRUDOption) crudOpts {
 
 // cascadeWriteLinks saves all linked documents that have a Value set.
 func cascadeWriteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
-	return forEachLinkField(doc, func(elem reflect.Value) error {
-		return saveSingleLinkedValue(ctx, db, b, elem)
+	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+		return saveSingleLinkedValue(ctx, db, b, elem, lf)
 	})
 }
 
 // cascadeDeleteLinks deletes all linked documents.
 func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
-	return forEachLinkField(doc, func(elem reflect.Value) error {
-		return deleteSingleLinkedValue(ctx, db, b, elem)
+	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+		return deleteSingleLinkedValue(ctx, db, b, elem, lf)
 	})
 }
 
-func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value) error {
-	valueField := linkVal.FieldByName("Value")
-	if !valueField.IsValid() || valueField.IsNil() {
+func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
+	valueField := linkVal.FieldByIndex(lf.valueIdx)
+	if valueField.IsNil() {
 		return nil
 	}
 
@@ -332,7 +353,7 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 	}
 
 	id = getID(tv, col.structInfo)
-	linkVal.FieldByName("ID").SetString(id)
+	linkVal.FieldByIndex(lf.idIdx).SetString(id)
 
 	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
 		return err
@@ -345,16 +366,13 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 	return runAfterUpdateHooks(ctx, target)
 }
 
-func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value) error {
-	idField := linkVal.FieldByName("ID")
-	if !idField.IsValid() || idField.String() == "" {
+func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
+	idField := linkVal.FieldByIndex(lf.idIdx)
+	if idField.String() == "" {
 		return nil
 	}
 
-	valueField := linkVal.FieldByName("Value")
-	if !valueField.IsValid() {
-		return nil
-	}
+	valueField := linkVal.FieldByIndex(lf.valueIdx)
 
 	id := idField.String()
 	targetType := valueField.Type().Elem()

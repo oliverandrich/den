@@ -34,6 +34,17 @@ type StructInfo struct {
 	fieldIndex     map[string]int // jsonName → index into Fields
 	GoType         reflect.Type
 	HasDeletedAt   bool
+
+	// Pre-resolved pointers to the base fields embedded by document.Base /
+	// document.SoftBase / document.TrackedBase. Populated once by
+	// AnalyzeStruct so hot paths can skip per-op FieldByName lookups. Any
+	// of these may be nil if the struct does not embed the corresponding
+	// base field.
+	BaseID        *FieldInfo
+	BaseRev       *FieldInfo
+	BaseCreatedAt *FieldInfo
+	BaseUpdatedAt *FieldInfo
+	BaseDeletedAt *FieldInfo
 }
 
 // FieldByName returns the FieldInfo for the given JSON field name, or nil.
@@ -136,6 +147,14 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 	for i, f := range info.Fields {
 		info.fieldIndex[f.JSONName] = i
 	}
+
+	// Pre-resolve base-field pointers once. These references are stable
+	// because info.Fields is not mutated after this point.
+	info.BaseID = info.FieldByName("_id")
+	info.BaseRev = info.FieldByName("_rev")
+	info.BaseCreatedAt = info.FieldByName("_created_at")
+	info.BaseUpdatedAt = info.FieldByName("_updated_at")
+	info.BaseDeletedAt = info.FieldByName("_deleted_at")
 
 	return info, nil
 }

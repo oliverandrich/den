@@ -418,8 +418,7 @@ func (db *DB) getEncoder() Encoder {
 }
 
 func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, isInsert bool) {
-	idField := info.FieldByName("_id")
-	if idField != nil {
+	if idField := info.BaseID; idField != nil {
 		fv := v.FieldByIndex(idField.Index)
 		if fv.String() == "" {
 			fv.SetString(document.NewID())
@@ -429,8 +428,7 @@ func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, is
 	nowVal := reflect.ValueOf(now)
 
 	if isInsert {
-		createdField := info.FieldByName("_created_at")
-		if createdField != nil {
+		if createdField := info.BaseCreatedAt; createdField != nil {
 			fv := v.FieldByIndex(createdField.Index)
 			if fv.IsZero() {
 				fv.Set(nowVal)
@@ -438,14 +436,13 @@ func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, is
 		}
 	}
 
-	updatedField := info.FieldByName("_updated_at")
-	if updatedField != nil {
+	if updatedField := info.BaseUpdatedAt; updatedField != nil {
 		v.FieldByIndex(updatedField.Index).Set(nowVal)
 	}
 }
 
 func getID(v reflect.Value, info *internal.StructInfo) string {
-	idField := info.FieldByName("_id")
+	idField := info.BaseID
 	if idField == nil {
 		return ""
 	}

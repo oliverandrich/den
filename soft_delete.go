@@ -42,7 +42,7 @@ func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Val
 }
 
 func setSoftDeletedAt(v reflect.Value, info *internal.StructInfo, t *time.Time) {
-	field := info.FieldByName("_deleted_at")
+	field := info.BaseDeletedAt
 	if field == nil {
 		return
 	}

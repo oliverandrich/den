@@ -194,13 +194,17 @@ func scanGroupByRowsPG(ctx context.Context, db pgQuerier, sqlStr string, args []
 	defer rows.Close()
 
 	var result []den.GroupByRow
+	var key *string
+	vals := make([]*float64, numAggs)
+	scanDest := make([]any, 1+numAggs)
+	scanDest[0] = &key
+	for i := range numAggs {
+		scanDest[i+1] = &vals[i]
+	}
 	for rows.Next() {
-		var key *string
-		vals := make([]*float64, numAggs)
-		scanDest := make([]any, 1+numAggs)
-		scanDest[0] = &key
-		for i := range numAggs {
-			scanDest[i+1] = &vals[i]
+		key = nil
+		for i := range vals {
+			vals[i] = nil
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, err

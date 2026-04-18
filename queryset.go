@@ -180,7 +180,12 @@ func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
 	// connection to the open rows; issuing tx.Get while the iterator is
 	// live returns "conn busy". Materialize results first, close, then
 	// resolve links on the same tx (and therefore the same pooled conn).
-	results, err := drainAllWithCount[T](qs.ctx, tx, col.meta.Name, dataQ, qs.db)
+	iter, err := tx.Query(qs.ctx, col.meta.Name, dataQ)
+	if err != nil {
+		return nil, 0, err
+	}
+	results, err := drainIter[T](qs.ctx, iter, qs.db, tx, false, 0, qs.limitN)
+	_ = iter.Close()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -200,27 +205,27 @@ func (qs QuerySet[T]) AllWithCount() ([]*T, int64, error) {
 	return results, total, nil
 }
 
-// drainAllWithCount runs the data query on tx and materializes every row.
-// Closes the iterator before returning so subsequent tx operations don't
-// trip the pgx "conn busy" guard.
-func drainAllWithCount[T any](ctx context.Context, tx ReadWriter, collection string, q *Query, db *DB) ([]*T, error) {
-	iter, err := tx.Query(ctx, collection, q)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = iter.Close() }()
-
-	enc := db.getEncoder()
+// drainIter materializes all remaining rows from iter into a new []*T.
+// When fetchLinks is true every decoded document has its link fields
+// resolved through rw before being appended. The iterator is not closed
+// by this helper — callers own its lifetime so the fetchLinks path can
+// safely route through the same read transaction that owns the iterator.
+func drainIter[T any](ctx context.Context, iter Iterator, db *DB, rw ReadWriter, fetchLinks bool, nestDepth, capHint int) ([]*T, error) {
 	var results []*T
+	if capHint > 0 {
+		results = make([]*T, 0, capHint)
+	}
 	for iter.Next() {
-		item := new(T)
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
-		if err := enc.Decode(rawBytes, item); err != nil {
+		doc := new(T)
+		if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
 		}
-		captureSnapshot(rawBytes, item)
-		results = append(results, item)
+		if fetchLinks {
+			if err := fetchAllLinksOnDoc(ctx, db, rw, doc, nestDepth); err != nil {
+				return nil, fmt.Errorf("fetch links: %w", err)
+			}
+		}
+		results = append(results, doc)
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err

@@ -33,18 +33,14 @@ func (qs QuerySet[T]) Iter() iter.Seq2[*T, error] {
 		for it.Next() {
 			doc := new(T)
 			if err := decodeIterRow(qs.db, it.Bytes(), doc); err != nil {
-				if !yield(nil, fmt.Errorf("decode: %w", err)) {
-					return
-				}
-				continue
+				yield(nil, fmt.Errorf("decode: %w", err))
+				return
 			}
 
 			if qs.fetchLinks {
 				if err := fetchAllLinksOnDoc(qs.ctx, qs.db, qs.db.backend, doc, qs.nestDepth); err != nil {
-					if !yield(nil, fmt.Errorf("fetch links: %w", err)) {
-						return
-					}
-					continue
+					yield(nil, fmt.Errorf("fetch links: %w", err))
+					return
 				}
 			}
 			if !yield(doc, nil) {

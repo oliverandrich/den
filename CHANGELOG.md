@@ -20,10 +20,13 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **`den.NewTxQuery[T]` and `TxQuerySet[T]`** — transaction-scoped query builder with `ForUpdate(opts ...LockOption)` for multi-row locking. Minimal chainable API (`Where`, `Sort`, `Limit`, `Skip`, `ForUpdate`) plus `All`/`First` terminals. Reuses the `SkipLocked`/`NoWait` options from single-row locking. Only callable via `*den.Tx`, enforcing transaction scope at compile time. `Query` struct gains additive `ForUpdate` and `LockMode` fields
 - **`den.ErrDeadlock`** — new sentinel error returned when PostgreSQL reports `40P01 deadlock_detected`. Enables `errors.Is(err, den.ErrDeadlock)` instead of type-switching on pgx internals
 - **`den.ErrSerialization`** — new sentinel error returned when PostgreSQL reports `40001 serialization_failure`. Becomes relevant once callers opt into stricter isolation; the sentinel is available now so that upgrade path is straightforward
+- **`den.WithTypes(...any) Option`** — register document types at Open. Lets the entire setup read as a single expression: `den.OpenURL(dsn, den.WithTypes(&Note{}, &Tag{}))`. Registration errors abort Open and are surfaced as its error. Use `Register` directly when you need to supply a specific context
+- **`den.ErrFTSNotSupported`** — new sentinel error returned by `QuerySet.Search` when the backend does not implement `FTSProvider`. Callers can `errors.Is` against the sentinel instead of pattern-matching on the error string
 
 ### Changed
 
 - **Non-blocking PostgreSQL index creation** — `Register()` now emits `CREATE INDEX CONCURRENTLY` for both expression indexes and the auto-created GIN index. Concurrent writes are no longer blocked during index creation on large collections. If a previous concurrent run left an invalid index behind, `EnsureIndex` detects it via `pg_index.indisvalid` and recreates it automatically. SQLite behavior is unchanged
+- **`QuerySet.Iter()` terminates on the first error** — previously, if a decode or fetch-links failure happened mid-iteration the loop yielded the error and then continued to the next row. Most `iter.Seq2` producers in the ecosystem stop at the first error, so `Iter()` now matches that convention. Callers doing `for doc, err := range qs.Iter()` should handle the error and exit the loop — further rows will not be yielded after the first error
 
 ### Fixed
 
@@ -36,6 +39,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **Unsorted `NewTxQuery(...).ForUpdate().All()` could deadlock on PostgreSQL** — without an `ORDER BY` clause, two concurrent callers with overlapping result sets acquired row locks in different heap orders and triggered `40P01 deadlock_detected`. `buildSelectSQL` now appends a default `ORDER BY id ASC` when a lock is requested and no explicit sort is set, so every caller walks the lock order identically
 - **`mapPGError` now recognizes deadlock and serialization failures** — `40P01` maps to `den.ErrDeadlock` and `40001` maps to `den.ErrSerialization`. Callers previously saw raw pgx errors for these cases, defeating the purpose of sentinel errors
 - **`migrate.Down` / `migrate.DownOne` TOCTOU on the applied-migrations log** — symmetric to the `Up` fix: `loadApplied` was read outside any transaction, so two concurrent rollback starters both saw the same applied set and both ran `Backward` for the same version. `runBackward` now acquires the same advisory lock used for forward migrations and re-reads the log inside the transaction, so every version is rolled back exactly once across concurrent starters
+- **`Update` / `Delete` on a document without an ID returned a plain `fmt.Errorf`** — callers could not `errors.Is` the failure. Both paths now wrap the sentinel `ErrValidation`, matching the rest of the validation surface
+- **`DenSettings()` defined on a pointer receiver was silently ignored when the user passed a value to `Register`** — the direct type assertion against `DenSettable` only matched the exact receiver kind. `getSettings` now retries via a synthesized pointer so settings are picked up regardless of whether the user passed `T{}` or `&T{}`
 
 ## 0.7.0 — 2026-04-15
 

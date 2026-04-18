@@ -14,4 +14,5 @@ var (
 	ErrLocked            = errors.New("den: row is locked by another transaction")
 	ErrDeadlock          = errors.New("den: deadlock detected")
 	ErrSerialization     = errors.New("den: serialization failure")
+	ErrFTSNotSupported   = errors.New("den: backend does not support full-text search")
 )

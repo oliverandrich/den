@@ -117,6 +117,41 @@ func TestIter_WithFetchLinks(t *testing.T) {
 	assert.Equal(t, 2, count)
 }
 
+func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
+	db := dentest.MustOpen(t, &IterLinkedDoc{}, &IterRefItem{})
+	ctx := context.Background()
+
+	ref := &IterRefItem{Label: "ok"}
+	require.NoError(t, den.Insert(ctx, db, ref))
+
+	// Seed three rows with known IDs so iteration visits them in order.
+	// The middle row has a dangling link; the third must never be yielded.
+	good := &IterLinkedDoc{Name: "A", Ref: den.NewLink(ref)}
+	good.ID = "01-good"
+	bad := &IterLinkedDoc{Name: "B", Ref: den.Link[IterRefItem]{ID: "does-not-exist"}}
+	bad.ID = "02-bad"
+	last := &IterLinkedDoc{Name: "C", Ref: den.NewLink(ref)}
+	last.ID = "03-last"
+
+	require.NoError(t, den.Insert(ctx, db, good))
+	require.NoError(t, den.Insert(ctx, db, bad))
+	require.NoError(t, den.Insert(ctx, db, last))
+
+	var errs []error
+	var names []string
+	for d, err := range den.NewQuery[IterLinkedDoc](ctx, db).Sort("_id", den.Asc).WithFetchLinks().Iter() {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		names = append(names, d.Name)
+	}
+
+	require.Len(t, errs, 1, "exactly one error (the dangling link) — iterator must terminate, not continue")
+	require.ErrorIs(t, errs[0], den.ErrNotFound)
+	assert.Equal(t, []string{"A"}, names, "row after the error must not be yielded")
+}
+
 func TestIter_WithConditions(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()

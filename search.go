@@ -21,7 +21,7 @@ func (qs QuerySet[T]) Search(queryText string) ([]*T, error) {
 
 	fts, ok := qs.db.backend.(FTSProvider)
 	if !ok {
-		return nil, fmt.Errorf("den: backend does not support full-text search")
+		return nil, ErrFTSNotSupported
 	}
 
 	q := qs.buildBackendQuery(col)

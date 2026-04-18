@@ -425,3 +425,21 @@ func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
+
+func TestUpdate_MissingIDWrapsErrValidation(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	err := den.Update(ctx, db, &Product{Name: "NoID"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, den.ErrValidation)
+}
+
+func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	err := den.Delete(ctx, db, &Product{Name: "NoID"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, den.ErrValidation)
+}

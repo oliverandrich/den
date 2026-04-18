@@ -12,6 +12,10 @@ import (
 
 // QuerySet is a lazy, immutable query builder. Chain methods return copies;
 // the query is only executed when a terminal method (All, First, Count, etc.) is called.
+//
+// The zero value is not usable — always obtain a QuerySet via NewQuery.
+// Calling terminal methods on a zero-value QuerySet panics because the
+// backend and context are nil.
 type QuerySet[T any] struct {
 	ctx            context.Context
 	db             *DB

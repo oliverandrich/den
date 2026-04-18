@@ -28,6 +28,7 @@ type DB struct {
 	encoder          Encoder
 	encoderOnce      sync.Once
 	tagValidator     func(doc any) error
+	pendingTypes     []any // queued by WithTypes, registered at the end of Open
 	mu               sync.RWMutex
 }
 
@@ -56,7 +57,28 @@ func Open(backend Backend, opts ...Option) (*DB, error) {
 	for _, opt := range opts {
 		opt(db)
 	}
+	if len(db.pendingTypes) > 0 {
+		types := db.pendingTypes
+		db.pendingTypes = nil
+		if err := Register(context.Background(), db, types...); err != nil {
+			return nil, err
+		}
+	}
 	return db, nil
+}
+
+// WithTypes queues document types to be registered at the end of Open.
+// Equivalent to calling Register(context.Background(), db, types...) after
+// Open returns, but lets the whole setup read as a single expression:
+//
+//	db, err := den.OpenURL(dsn, den.WithTypes(&Note{}, &Tag{}))
+//
+// Any registration error aborts Open and is surfaced as its error. Use
+// Register directly when you need to supply a specific context.
+func WithTypes(types ...any) Option {
+	return func(db *DB) {
+		db.pendingTypes = append(db.pendingTypes, types...)
+	}
 }
 
 // SetTagValidator registers a function that validates documents using struct tags.

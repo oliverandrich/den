@@ -296,3 +296,48 @@ func TestBackendAccessor(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{})
 	assert.NotNil(t, db.Backend())
 }
+
+// PtrSettingsDoc defines DenSettings on a pointer receiver. When the user
+// passes a VALUE to Register (instead of a pointer), the straight type-
+// assertion against DenSettable fails because only *PtrSettingsDoc has the
+// method in its method set. getSettings must detect this case and retry
+// via a synthesized pointer so the settings are not silently ignored.
+type PtrSettingsDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *PtrSettingsDoc) DenSettings() den.Settings {
+	return den.Settings{CollectionName: "ptr_settings_custom"}
+}
+
+func TestRegister_ValueWithPointerReceiverSettings(t *testing.T) {
+	db := dentest.MustOpen(t)
+	ctx := context.Background()
+
+	require.NoError(t, den.Register(ctx, db, PtrSettingsDoc{}))
+
+	meta, err := den.Meta[PtrSettingsDoc](db)
+	require.NoError(t, err)
+	assert.Equal(t, "ptr_settings_custom", meta.Name)
+}
+
+func TestOpenURL_WithTypes(t *testing.T) {
+	dsn := "sqlite:///" + t.TempDir() + "/with_types.db"
+	db, err := den.OpenURL(dsn, den.WithTypes(&Product{}, &Note{}))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	cols := den.Collections(db)
+	assert.Contains(t, cols, "product")
+	assert.Contains(t, cols, "note")
+
+	require.NoError(t, den.Insert(context.Background(), db, &Product{Name: "W", Price: 1.0}))
+}
+
+func TestOpenURL_WithTypes_PropagatesRegistrationError(t *testing.T) {
+	dsn := "sqlite:///" + t.TempDir() + "/bad_types.db"
+	_, err := den.OpenURL(dsn, den.WithTypes(&DocWithSQLInjectionTag{}))
+	require.Error(t, err)
+	require.ErrorIs(t, err, den.ErrValidation)
+}

@@ -6,6 +6,10 @@ import (
 )
 
 // Tx wraps a backend Transaction for use in RunInTransaction.
+//
+// The zero value is not usable — construct a Tx only indirectly by passing
+// a closure to RunInTransaction. Calling transaction-scoped functions on a
+// zero-value Tx panics.
 type Tx struct {
 	db  *DB
 	tx  Transaction

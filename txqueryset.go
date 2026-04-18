@@ -11,6 +11,10 @@ import (
 // Chain methods return copies; the query is only executed when a terminal
 // method (All, First) is called. Use ForUpdate to acquire row-level locks
 // that persist for the lifetime of the transaction.
+//
+// The zero value is not usable — always obtain a TxQuerySet via NewTxQuery
+// inside a RunInTransaction closure. Calling terminal methods on a
+// zero-value TxQuerySet panics because the transaction reference is nil.
 type TxQuerySet[T any] struct {
 	tx         *Tx
 	conditions []where.Condition

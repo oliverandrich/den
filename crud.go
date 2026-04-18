@@ -145,7 +145,7 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 	id := getID(rv, col.structInfo)
 	if id == "" {
-		return fmt.Errorf("den: cannot update document without ID")
+		return fmt.Errorf("%w: cannot update document without ID", ErrValidation)
 	}
 
 	// Mutating hooks run first so they can populate defaults, compute
@@ -206,7 +206,7 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 	id := getID(rv, col.structInfo)
 	if id == "" {
-		return fmt.Errorf("den: cannot delete document without ID")
+		return fmt.Errorf("%w: cannot delete document without ID", ErrValidation)
 	}
 
 	if err := runBeforeDeleteHooks(ctx, document); err != nil {

@@ -26,35 +26,52 @@ func TestNewID_Sortable(t *testing.T) {
 	assert.Less(t, id1, id2, "ULIDs should be lexicographically sortable")
 }
 
-func TestTrackedBase_ZeroValue(t *testing.T) {
-	var tb TrackedBase
-	assert.Nil(t, tb.Snapshot())
+func TestTracked_ZeroValue(t *testing.T) {
+	var tr Tracked
+	assert.Nil(t, tr.Snapshot())
 }
 
-func TestTrackedBase_SetSnapshot(t *testing.T) {
-	var tb TrackedBase
+func TestTracked_SetSnapshot(t *testing.T) {
+	var tr Tracked
 	data := []byte(`{"name":"test"}`)
-	tb.SetSnapshot(data)
-	assert.Equal(t, data, tb.Snapshot())
+	tr.SetSnapshot(data)
+	assert.Equal(t, data, tr.Snapshot())
 }
 
-func TestTrackedSoftBase_ZeroValue(t *testing.T) {
-	var tsb TrackedSoftBase
-	assert.Nil(t, tsb.Snapshot())
+func TestSoftDelete_ZeroValue(t *testing.T) {
+	var s SoftDelete
+	assert.False(t, s.IsDeleted())
 }
 
-func TestTrackedSoftBase_SetSnapshot(t *testing.T) {
-	var tsb TrackedSoftBase
-	data := []byte(`{"name":"test"}`)
-	tsb.SetSnapshot(data)
-	assert.Equal(t, data, tsb.Snapshot())
+func TestSoftDelete_AfterSetting(t *testing.T) {
+	now := time.Now()
+	s := SoftDelete{DeletedAt: &now}
+	assert.True(t, s.IsDeleted())
 }
 
-func TestTrackedSoftBase_IsDeleted(t *testing.T) {
-	var tsb TrackedSoftBase
-	assert.False(t, tsb.IsDeleted(), "zero-value should not be deleted")
+// TestComposition confirms the three embeds work side-by-side on a single
+// struct — this is the whole point of splitting them out from the old
+// old TrackedSoftBase monolith was a 2² matrix; now it's free composition.
+func TestComposition_BaseSoftDeleteTracked(t *testing.T) {
+	type AuditLog struct {
+		Base
+		SoftDelete
+		Tracked
+		Action string
+	}
+
+	var a AuditLog
+	a.ID = "log-1"
+	a.Action = "create"
+
+	// All three embeds' methods promoted without collision.
+	assert.False(t, a.IsDeleted())
+	assert.Nil(t, a.Snapshot())
+
+	a.SetSnapshot([]byte(`{"action":"create"}`))
+	assert.NotNil(t, a.Snapshot())
 
 	now := time.Now()
-	tsb.DeletedAt = &now
-	assert.True(t, tsb.IsDeleted(), "should be deleted after setting DeletedAt")
+	a.DeletedAt = &now
+	assert.True(t, a.IsDeleted())
 }

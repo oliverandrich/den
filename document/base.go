@@ -6,8 +6,13 @@ import (
 	"github.com/oliverandrich/den/id"
 )
 
-// Base provides the standard fields for all Den documents.
-// Embed this in your document structs.
+// Base provides the standard fields every Den document carries: ID, creation
+// and update timestamps, and an optional revision token for optimistic
+// concurrency control. Embed this in your document structs.
+//
+// Combine with document.SoftDelete for soft-delete support and/or
+// document.Tracked for change tracking. The three embeds are orthogonal —
+// pick any subset.
 type Base struct {
 	ID        string    `json:"_id"`
 	CreatedAt time.Time `json:"_created_at"`
@@ -20,22 +25,11 @@ func NewID() string {
 	return id.New()
 }
 
-// Trackable is implemented by documents that support change tracking.
-// den detects this interface after decode and injects the raw JSON snapshot.
+// Trackable is implemented by documents that carry a byte-level snapshot of
+// their last-saved state. Embed document.Tracked to satisfy this interface;
+// den uses it to populate the snapshot after a load and to detect changes
+// (IsChanged, GetChanges, Revert).
 type Trackable interface {
 	SetSnapshot(data []byte)
 	Snapshot() []byte
 }
-
-// TrackedBase extends Base with change tracking support.
-// Embed this instead of Base for documents that need IsChanged/GetChanges/Rollback.
-type TrackedBase struct {
-	Base
-	snapshot []byte // raw JSON at load time; not serialized
-}
-
-// SetSnapshot stores the raw JSON bytes for change detection.
-func (b *TrackedBase) SetSnapshot(data []byte) { b.snapshot = data }
-
-// Snapshot returns the raw JSON bytes captured at load time.
-func (b *TrackedBase) Snapshot() []byte { return b.snapshot }

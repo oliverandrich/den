@@ -2,23 +2,23 @@
 
 ## Enabling Soft Delete
 
-Embed `document.SoftBase` instead of `document.Base` to opt into soft delete:
+Embed `document.SoftDelete` alongside `document.Base` to opt into soft delete:
 
 ```go
 import "github.com/oliverandrich/den/document"
 
 type Product struct {
-    document.SoftBase
+    document.Base
+    document.SoftDelete
     Name  string  `json:"name"  den:"index"`
     Price float64 `json:"price" den:"index"`
 }
 ```
 
-`SoftBase` extends `Base` with a `DeletedAt` timestamp:
+`SoftDelete` is a tiny composable mixin that adds a `DeletedAt` timestamp:
 
 ```go
-type SoftBase struct {
-    Base
+type SoftDelete struct {
     DeletedAt *time.Time `json:"_deleted_at,omitempty"`
 }
 ```
@@ -62,7 +62,7 @@ err := den.Delete(ctx, db, product, den.HardDelete())
 
 ## Checking Delete Status
 
-`SoftBase` provides an `IsDeleted()` helper:
+`SoftDelete` provides an `IsDeleted()` helper:
 
 ```go
 if product.IsDeleted() {
@@ -72,11 +72,13 @@ if product.IsDeleted() {
 
 ## Combining with Change Tracking
 
-For documents that need both soft delete and change tracking, embed `document.TrackedSoftBase`:
+`SoftDelete` and `Tracked` are independent embeds — compose them freely:
 
 ```go
 type AuditLog struct {
-    document.TrackedSoftBase
+    document.Base
+    document.SoftDelete
+    document.Tracked
     Action string `json:"action"`
     Detail string `json:"detail"`
 }
@@ -85,11 +87,11 @@ type AuditLog struct {
 This gives you `IsChanged`, `GetChanges`, and `Revert` alongside soft delete behavior.
 
 !!! tip
-    Choose your base type based on the features you need. See the [Documents](documents.md) guide for the full base type matrix.
+    See the [Documents](documents.md) guide for the full list of composable embeds and example compositions.
 
 ## How It Works
 
-When Den detects that a document type embeds `SoftBase` (via reflection at registration time), it:
+When Den detects that a document type has a `_deleted_at` JSON field (via reflection at registration time — regardless of whether it comes from the `SoftDelete` embed or a hand-rolled field), it:
 
 1. Rewrites `Delete()` to set `DeletedAt = time.Now()` and update the document instead of removing the row
 2. Injects an automatic `where.Field("_deleted_at").IsNil()` condition into all queries for that collection

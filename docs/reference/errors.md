@@ -16,7 +16,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
 | `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when the document's `Validate()` method or struct tag validation fails |
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
-| `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `TrackedBase` |
+| `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
 | `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
 | `ErrDeadlock` | PostgreSQL reported a deadlock between transactions | Any operation on PostgreSQL when the server cancels the query with SQLSTATE `40P01`. Callers can `errors.Is(err, den.ErrDeadlock)` and retry the transaction. SQLite never returns this |

@@ -456,7 +456,7 @@ func (qs QuerySet[T]) buildBackendQuery(col *collectionInfo) *Query {
 // allConditions returns all conditions including auto-injected soft-delete filter.
 func (qs QuerySet[T]) allConditions(col *collectionInfo) []where.Condition {
 	conditions := qs.conditions
-	if col.meta.HasSoftBase && !qs.includeDeleted {
+	if col.meta.HasSoftDelete && !qs.includeDeleted {
 		conditions = append(slices.Clone(conditions), where.Field("_deleted_at").IsNil())
 	}
 	return conditions

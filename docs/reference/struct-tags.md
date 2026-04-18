@@ -203,11 +203,12 @@ err := den.NewQuery[Product](db).Project(ctx, &views)
 
 ## Document Base Types
 
-The base type you embed determines which features are available:
+Composable embeds for feature opt-in:
 
-| Base Type | Features |
+| Embed | Purpose |
 |---|---|
-| `document.Base` | ID, CreatedAt, UpdatedAt, Rev |
-| `document.TrackedBase` | Base + change tracking (IsChanged, GetChanges, Rollback) |
-| `document.SoftBase` | Base + soft delete (DeletedAt, IsDeleted) |
-| `document.TrackedSoftBase` | Both change tracking and soft delete |
+| `document.Base` | Required. ID, CreatedAt, UpdatedAt, Rev |
+| `document.SoftDelete` | Opt-in. DeletedAt, IsDeleted |
+| `document.Tracked` | Opt-in. Snapshot machinery for IsChanged, GetChanges, Revert |
+
+Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; ... }`.

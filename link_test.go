@@ -506,7 +506,8 @@ func TestLink_UnmarshalJSON(t *testing.T) {
 
 // SoftDoor is a soft-deletable variant of Door for cascade tests.
 type SoftDoor struct {
-	document.SoftBase
+	document.Base
+	document.SoftDelete
 	Height int `json:"height"`
 	Width  int `json:"width"`
 }
@@ -533,7 +534,7 @@ func TestWithLinkRule_Delete_SoftDeleteLinked(t *testing.T) {
 	// Cascade delete should soft-delete the linked door, not hard-delete it
 	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
 
-	// House is hard-deleted (no SoftBase)
+	// House is hard-deleted (no SoftDelete embed)
 	_, err := den.FindByID[SoftHouse](ctx, db, house.ID)
 	require.ErrorIs(t, err, den.ErrNotFound)
 

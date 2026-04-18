@@ -2,14 +2,13 @@
 
 ## Base Types
 
-Every Den document embeds one of four base types from the `document` package. Choose based on the features you need:
+Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The two orthogonal features (soft delete and change tracking) are available as separate composable embeds; combine whichever you need.
 
-| Base Type | Change Tracking | Soft Delete | Use Case |
-|---|---|---|---|
-| `document.Base` | No | No | Simple documents without audit needs |
-| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Revert` |
-| `document.SoftBase` | No | Yes | Documents that should never be permanently deleted by default |
-| `document.TrackedSoftBase` | Yes | Yes | Full audit trail with recoverability |
+| Embed | Purpose |
+|---|---|
+| `document.Base` | Required. Provides `ID`, `CreatedAt`, `UpdatedAt`, `Rev` |
+| `document.SoftDelete` | Opt-in. Adds `DeletedAt *time.Time` and `IsDeleted()` so `Delete` soft-deletes instead of physically removing |
+| `document.Tracked` | Opt-in. Adds the byte-snapshot machinery so `IsChanged`, `GetChanges`, and `Revert` work |
 
 ```go
 package document
@@ -21,21 +20,44 @@ type Base struct {
     Rev       string    `json:"_rev,omitempty"` // populated when UseRevision is enabled
 }
 
-type TrackedBase struct {
-    Base
-    snapshot []byte // internal, not serialized
-}
-
-type SoftBase struct {
-    Base
+type SoftDelete struct {
     DeletedAt *time.Time `json:"_deleted_at,omitempty"`
 }
 
-type TrackedSoftBase struct {
-    SoftBase
-    snapshot []byte // internal, not serialized
+type Tracked struct {
+    snapshot []byte // not serialized
 }
 ```
+
+Typical compositions:
+
+```go
+type Product struct {
+    document.Base
+    Name string `json:"name"`
+}
+
+type Article struct {
+    document.Base
+    document.SoftDelete
+    Title string `json:"title"`
+}
+
+type User struct {
+    document.Base
+    document.Tracked
+    Email string `json:"email"`
+}
+
+type AuditLog struct {
+    document.Base
+    document.SoftDelete
+    document.Tracked
+    Action string `json:"action"`
+}
+```
+
+Den detects both features **structurally**: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface. Any type that carries the right fields / methods participates, even without these specific embeds.
 
 ## Struct Tag Syntax
 

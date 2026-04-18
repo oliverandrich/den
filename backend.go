@@ -149,10 +149,10 @@ type RecordedIndex struct {
 
 // CollectionMeta holds structural metadata for a registered collection.
 type CollectionMeta struct {
-	Name        string
-	Fields      []FieldMeta
-	Indexes     []IndexDefinition
-	HasSoftBase bool
+	Name          string
+	Fields        []FieldMeta
+	Indexes       []IndexDefinition
+	HasSoftDelete bool
 }
 
 // FieldMeta describes a single field within a collection.

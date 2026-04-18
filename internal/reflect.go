@@ -36,7 +36,7 @@ type StructInfo struct {
 	HasDeletedAt   bool
 
 	// Pre-resolved pointers to the base fields embedded by document.Base /
-	// document.SoftBase / document.TrackedBase. Populated once by
+	// document.SoftDelete / document.Tracked. Populated once by
 	// AnalyzeStruct so hot paths can skip per-op FieldByName lookups. Any
 	// of these may be nil if the struct does not embed the corresponding
 	// base field.

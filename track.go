@@ -93,7 +93,7 @@ func encodeToMap(db *DB, doc any, m *map[string]any) error {
 // Revert restores the document to its state at load time by decoding the
 // stored snapshot back over its fields. Returns ErrNoSnapshot if the
 // document was never loaded from the database or does not embed
-// document.TrackedBase.
+// document.Tracked.
 //
 // Named Revert rather than Rollback to avoid name collision with the
 // backend transaction's Rollback method — this operation is purely an

@@ -13,7 +13,8 @@ import (
 )
 
 type SoftProduct struct {
-	document.SoftBase
+	document.Base
+	document.SoftDelete
 	Name  string  `json:"name"`
 	Price float64 `json:"price"`
 }

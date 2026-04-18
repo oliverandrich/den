@@ -13,7 +13,8 @@ import (
 )
 
 type TrackedProduct struct {
-	document.TrackedBase
+	document.Base
+	document.Tracked
 	Name  string  `json:"name"`
 	Price float64 `json:"price"`
 }
@@ -193,12 +194,14 @@ func TestIsChanged_ViaIter(t *testing.T) {
 }
 
 type TrackedSoftProduct struct {
-	document.TrackedSoftBase
+	document.Base
+	document.SoftDelete
+	document.Tracked
 	Name  string  `json:"name"`
 	Price float64 `json:"price"`
 }
 
-func TestTrackedSoftBase_TrackingAndSoftDelete(t *testing.T) {
+func TestTrackedSoftDelete_Composition(t *testing.T) {
 	db := dentest.MustOpen(t, &TrackedSoftProduct{})
 	ctx := context.Background()
 

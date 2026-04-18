@@ -131,8 +131,8 @@ func Collections(db *DB) []string {
 
 func buildCollectionMeta(info *internal.StructInfo) CollectionMeta {
 	meta := CollectionMeta{
-		Name:        info.CollectionName,
-		HasSoftBase: info.HasDeletedAt,
+		Name:          info.CollectionName,
+		HasSoftDelete: info.HasDeletedAt,
 	}
 
 	for _, f := range info.Fields {

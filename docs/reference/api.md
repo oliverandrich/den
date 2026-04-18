@@ -49,7 +49,7 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 
 | Function | Signature | Description |
 |---|---|---|
-| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
+| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
 | `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
 
@@ -159,13 +159,13 @@ err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 
 ## Change Tracking
 
-Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instead of `document.Base`.
+Requires embedding `document.Tracked` alongside `document.Base`.
 
 | Function | Signature | Description |
 |---|---|---|
 | `IsChanged[T]` | `IsChanged[T](db *DB, doc *T) (bool, error)` | Check whether the document has been modified since last load/save |
 | `GetChanges[T]` | `GetChanges[T](db *DB, doc *T) (map[string]FieldChange, error)` | Get a map of changed fields with before/after values |
-| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if the document was never loaded or does not embed `TrackedBase`. Named `Revert` (not `Rollback`) to avoid name collision with the backend transaction's `Rollback` method |
+| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if the document was never loaded or does not embed `Tracked`. Named `Revert` (not `Rollback`) to avoid name collision with the backend transaction's `Rollback` method |
 
 ---
 

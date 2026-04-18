@@ -14,8 +14,8 @@
 - **Typed relations** — `Link[T]` and `[]Link[T]` with cascade write/delete and eager/lazy fetch
 - **Full-text search** — FTS5 (SQLite), tsvector (PostgreSQL), unified `Search()` API
 - **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
-- **Change tracking** — opt-in `TrackedBase` with `IsChanged`, `GetChanges`, `Revert`
-- **Soft delete** — embed `SoftBase`, automatic query filtering, `HardDelete` for permanent removal
+- **Change tracking** — opt-in `Tracked` with `IsChanged`, `GetChanges`, `Revert`
+- **Soft delete** — embed `SoftDelete`, automatic query filtering, `HardDelete` for permanent removal
 - **Optimistic concurrency** — revision-based conflict detection
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically
@@ -305,14 +305,13 @@ These differences are transparent to your application code. The `where` package 
 
 ## Base Types
 
-Every Den document embeds one of four base types from the `document` package. Choose based on the features you need:
+Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The two orthogonal features (soft delete and change tracking) are available as separate composable embeds; combine whichever you need.
 
-| Base Type | Change Tracking | Soft Delete | Use Case |
-|---|---|---|---|
-| `document.Base` | No | No | Simple documents without audit needs |
-| `document.TrackedBase` | Yes | No | Documents where you need `IsChanged`, `GetChanges`, `Revert` |
-| `document.SoftBase` | No | Yes | Documents that should never be permanently deleted by default |
-| `document.TrackedSoftBase` | Yes | Yes | Full audit trail with recoverability |
+| Embed | Purpose |
+|---|---|
+| `document.Base` | Required. Provides `ID`, `CreatedAt`, `UpdatedAt`, `Rev` |
+| `document.SoftDelete` | Opt-in. Adds `DeletedAt *time.Time` and `IsDeleted()` so `Delete` soft-deletes instead of physically removing |
+| `document.Tracked` | Opt-in. Adds the byte-snapshot machinery so `IsChanged`, `GetChanges`, and `Revert` work |
 
 ```go
 package document
@@ -324,21 +323,44 @@ type Base struct {
     Rev       string    `json:"_rev,omitempty"` // populated when UseRevision is enabled
 }
 
-type TrackedBase struct {
-    Base
-    snapshot []byte // internal, not serialized
-}
-
-type SoftBase struct {
-    Base
+type SoftDelete struct {
     DeletedAt *time.Time `json:"_deleted_at,omitempty"`
 }
 
-type TrackedSoftBase struct {
-    SoftBase
-    snapshot []byte // internal, not serialized
+type Tracked struct {
+    snapshot []byte // not serialized
 }
 ```
+
+Typical compositions:
+
+```go
+type Product struct {
+    document.Base
+    Name string `json:"name"`
+}
+
+type Article struct {
+    document.Base
+    document.SoftDelete
+    Title string `json:"title"`
+}
+
+type User struct {
+    document.Base
+    document.Tracked
+    Email string `json:"email"`
+}
+
+type AuditLog struct {
+    document.Base
+    document.SoftDelete
+    document.Tracked
+    Action string `json:"action"`
+}
+```
+
+Den detects both features structurally: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface. Any type carrying the right fields / methods participates, even without these specific embeds.
 
 ## Struct Tag Syntax
 
@@ -668,7 +690,7 @@ Delete a specific document:
 err := den.Delete(ctx, db, &product)
 ```
 
-If the document embeds `document.SoftBase`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
+If the document embeds `document.SoftDelete`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
 
 ```go
 // Soft-delete (sets DeletedAt, document remains in storage)
@@ -960,7 +982,7 @@ Recursion runs on `.All` / `.AllWithCount` / `.Search`; streaming `.Iter` only r
 
 ### IncludeDeleted
 
-Include soft-deleted documents in results (only relevant for types embedding `document.SoftBase`):
+Include soft-deleted documents in results (only relevant for types embedding `document.SoftDelete`):
 
 ```go
 all, err := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
@@ -1796,23 +1818,23 @@ Avoid performing long-running or external operations (HTTP calls, file I/O) insi
 
 ## Enabling Soft Delete
 
-Embed `document.SoftBase` instead of `document.Base` to opt into soft delete:
+Embed `document.SoftDelete` alongside `document.Base` to opt into soft delete:
 
 ```go
 import "github.com/oliverandrich/den/document"
 
 type Product struct {
-    document.SoftBase
+    document.Base
+    document.SoftDelete
     Name  string  `json:"name"  den:"index"`
     Price float64 `json:"price" den:"index"`
 }
 ```
 
-`SoftBase` extends `Base` with a `DeletedAt` timestamp:
+`SoftDelete` is a tiny composable mixin that adds a `DeletedAt` timestamp:
 
 ```go
-type SoftBase struct {
-    Base
+type SoftDelete struct {
     DeletedAt *time.Time `json:"_deleted_at,omitempty"`
 }
 ```
@@ -1853,7 +1875,7 @@ err := den.Delete(ctx, db, product, den.HardDelete())
 
 ## Checking Delete Status
 
-`SoftBase` provides an `IsDeleted()` helper:
+`SoftDelete` provides an `IsDeleted()` helper:
 
 ```go
 if product.IsDeleted() {
@@ -1863,11 +1885,13 @@ if product.IsDeleted() {
 
 ## Combining with Change Tracking
 
-For documents that need both soft delete and change tracking, embed `document.TrackedSoftBase`:
+`SoftDelete` and `Tracked` are independent embeds — compose them freely:
 
 ```go
 type AuditLog struct {
-    document.TrackedSoftBase
+    document.Base
+    document.SoftDelete
+    document.Tracked
     Action string `json:"action"`
     Detail string `json:"detail"`
 }
@@ -1877,7 +1901,7 @@ This gives you `IsChanged`, `GetChanges`, and `Revert` alongside soft delete beh
 
 ## How It Works
 
-When Den detects that a document type embeds `SoftBase` (via reflection at registration time), it:
+When Den detects a `_deleted_at` JSON field on a registered type (via reflection — regardless of whether it comes from the `SoftDelete` embed or a hand-rolled field), it:
 
 1. Rewrites `Delete()` to set `DeletedAt = time.Now()` and update the document instead of removing the row
 2. Injects an automatic `where.Field("_deleted_at").IsNil()` condition into all queries for that collection
@@ -1890,13 +1914,14 @@ When Den detects that a document type embeds `SoftBase` (via reflection at regis
 
 ## Enabling Change Tracking
 
-Embed `document.TrackedBase` instead of `document.Base`:
+Embed `document.Tracked` alongside `document.Base`:
 
 ```go
 import "github.com/oliverandrich/den/document"
 
 type Product struct {
-    document.TrackedBase
+    document.Base
+    document.Tracked
     Name  string  `json:"name"  den:"index"`
     Price float64 `json:"price" den:"index"`
 }
@@ -1953,11 +1978,13 @@ changed, _ = den.IsChanged(db, p) // false
 
 ## Combining with Soft Delete
 
-For documents that need both change tracking and soft delete, embed `document.TrackedSoftBase`:
+`Tracked` and `SoftDelete` are independent composable embeds:
 
 ```go
 type AuditLog struct {
-    document.TrackedSoftBase
+    document.Base
+    document.SoftDelete
+    document.Tracked
     Action string `json:"action"`
     Detail string `json:"detail"`
 }
@@ -1965,7 +1992,7 @@ type AuditLog struct {
 
 ## How It Works
 
-When a document implements the `Trackable` interface (which `TrackedBase` and `TrackedSoftBase` satisfy), Den stores a snapshot of the serialized JSON after every database operation:
+When a document implements the `Trackable` interface (which `document.Tracked` satisfies), Den stores a snapshot of the serialized JSON after every database operation:
 
 - **`IsChanged`** re-encodes the current struct state and compares bytes against the snapshot
 - **`GetChanges`** diffs the two JSON representations to produce a per-field change map
@@ -2427,7 +2454,7 @@ Module: `github.com/oliverandrich/den`
 
 | Function | Signature | Description |
 |---|---|---|
-| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftBase` |
+| `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
 | `HardDelete` | `HardDelete() CRUDOption` | `Delete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, scope, doc, den.HardDelete())` |
 
@@ -2507,7 +2534,7 @@ Every terminal takes `ctx context.Context` as its first argument so the same `Qu
 
 ## Change Tracking
 
-Requires embedding `document.TrackedBase` (or `document.TrackedSoftBase`) instead of `document.Base`.
+Requires embedding `document.Tracked` alongside `document.Base`.
 
 | Function | Signature | Description |
 |---|---|---|
@@ -2699,7 +2726,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
 | `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when `Validate()` or struct tag validation fails |
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
-| `ErrNoSnapshot` | No stored snapshot for rollback | `Rollback` when the document was never loaded from the database or does not embed `TrackedBase` |
+| `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails |
 | `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only) |
 | `ErrDeadlock` | PostgreSQL reported a deadlock (SQLSTATE 40P01) | Any operation when the server cancels the query with a deadlock. Callers retry the transaction |
@@ -2822,12 +2849,13 @@ Used with `Project()`:
 
 ## Document Base Types
 
-| Base Type | Features |
+| Embed | Purpose |
 |---|---|
-| `document.Base` | ID, CreatedAt, UpdatedAt, Rev |
-| `document.TrackedBase` | Base + change tracking (IsChanged, GetChanges, Rollback) |
-| `document.SoftBase` | Base + soft delete (DeletedAt, IsDeleted) |
-| `document.TrackedSoftBase` | Both change tracking and soft delete |
+| `document.Base` | Required. ID, CreatedAt, UpdatedAt, Rev |
+| `document.SoftDelete` | Opt-in. DeletedAt + IsDeleted() — lets `Delete` soft-delete |
+| `document.Tracked` | Opt-in. Snapshot machinery for IsChanged, GetChanges, Revert |
+
+Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; ... }`.
 
 ---
 

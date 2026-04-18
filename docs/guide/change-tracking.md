@@ -2,13 +2,14 @@
 
 ## Enabling Change Tracking
 
-Embed `document.TrackedBase` instead of `document.Base`:
+Embed `document.Tracked` alongside `document.Base`:
 
 ```go
 import "github.com/oliverandrich/den/document"
 
 type Product struct {
-    document.TrackedBase
+    document.Base
+    document.Tracked
     Name  string  `json:"name"  den:"index"`
     Price float64 `json:"price" den:"index"`
 }
@@ -66,22 +67,24 @@ changed, _ = den.IsChanged(db, p) // false
 
 ## Combining with Soft Delete
 
-For documents that need both change tracking and soft delete, embed `document.TrackedSoftBase`:
+`Tracked` and `SoftDelete` are independent composable embeds:
 
 ```go
 type AuditLog struct {
-    document.TrackedSoftBase
+    document.Base
+    document.SoftDelete
+    document.Tracked
     Action string `json:"action"`
     Detail string `json:"detail"`
 }
 ```
 
 !!! tip
-    Choose your base type based on the features you need. See the [Documents](documents.md) guide for the full base type matrix.
+    See the [Documents](documents.md) guide for the full list of composable embeds and example compositions.
 
 ## How It Works
 
-When a document implements the `Trackable` interface (which `TrackedBase` and `TrackedSoftBase` satisfy), Den stores a snapshot of the serialized JSON after every database operation:
+When a document implements the `Trackable` interface (which `document.Tracked` satisfies), Den stores a snapshot of the serialized JSON after every database operation:
 
 - **`IsChanged`** re-encodes the current struct state and compares bytes against the snapshot
 - **`GetChanges`** diffs the two JSON representations to produce a per-field change map

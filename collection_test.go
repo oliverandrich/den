@@ -31,7 +31,7 @@ func TestMeta(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "note", meta.Name)
-	assert.False(t, meta.HasSoftBase)
+	assert.False(t, meta.HasSoftDelete)
 
 	// Should have fields from Base + Note
 	assert.GreaterOrEqual(t, len(meta.Fields), 5) // _id, _created_at, _updated_at, title, body

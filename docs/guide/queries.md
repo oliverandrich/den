@@ -247,7 +247,7 @@ Recursion runs on `.All` / `.AllWithCount` / `.Search`; streaming `.Iter` only r
 
 ### IncludeDeleted
 
-Include soft-deleted documents in results (only relevant for types embedding `document.SoftBase`):
+Include soft-deleted documents in results (only relevant for types embedding `document.SoftDelete`):
 
 ```go
 all, err := den.NewQuery[Product](db).IncludeDeleted().All(ctx)

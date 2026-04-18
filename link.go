@@ -408,7 +408,7 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 		return err
 	}
 
-	if col.meta.HasSoftBase {
+	if col.meta.HasSoftDelete {
 		now := time.Now()
 		setSoftDeletedAt(docPtr.Elem(), col.structInfo, &now)
 

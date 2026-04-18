@@ -106,7 +106,7 @@ func (qs TxQuerySet[T]) All() ([]*T, error) {
 	}
 	defer func() { _ = it.Close() }()
 
-	return drainIter[T](qs.tx.ctx, it, qs.tx.db, qs.tx.tx, false, 0, qs.limitN)
+	return drainIter[T](qs.tx.db, it, qs.limitN)
 }
 
 // First returns the first matching document. Returns ErrNotFound if none match.

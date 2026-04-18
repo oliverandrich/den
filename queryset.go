@@ -99,7 +99,18 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 // --- Terminal methods (execute the query) ---
 
 // All executes the query and returns all matching documents.
+//
+// With WithFetchLinks enabled, All drains the result set first and then
+// resolves every link field in batched IN-queries (one per target type per
+// nesting level) instead of the per-row Get that streaming .Iter() does.
+// For N parents sharing a small set of linked targets this collapses
+// N round-trips into one — at the cost of buffering the full result set,
+// which is already implicit in .All()'s contract. Callers who need true
+// streaming with link resolution should keep using .Iter().
 func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
+	if qs.fetchLinks {
+		return qs.allBatched(ctx)
+	}
 	// Pre-allocate when limit is known to avoid repeated slice growth.
 	var results []*T
 	if qs.limitN > 0 {
@@ -110,6 +121,34 @@ func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
 			return nil, err
 		}
 		results = append(results, doc)
+	}
+	return results, nil
+}
+
+// allBatched is the .All() implementation used when fetchLinks is enabled.
+// It drains the iterator fully before running the batched link resolver
+// so pgx's cursor has released the connection by the time the resolver
+// issues its IN-query through the same ReadWriter.
+func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
+	col, err := collectionFor[T](qs.db)
+	if err != nil {
+		return nil, err
+	}
+
+	q := qs.buildBackendQuery(col)
+
+	iter, err := qs.db.backend.Query(ctx, col.meta.Name, q)
+	if err != nil {
+		return nil, err
+	}
+	results, err := drainIter[T](qs.db, iter, qs.limitN)
+	_ = iter.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := batchResolveLinks(ctx, qs.db, qs.db.backend, results, qs.nestDepth); err != nil {
+		return nil, err
 	}
 	return results, nil
 }
@@ -185,17 +224,15 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	results, err := drainIter[T](ctx, iter, qs.db, tx, false, 0, qs.limitN)
+	results, err := drainIter[T](qs.db, iter, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, 0, err
 	}
 
 	if qs.fetchLinks {
-		for _, item := range results {
-			if err := fetchAllLinksOnDoc(ctx, qs.db, tx, item, qs.nestDepth); err != nil {
-				return nil, 0, err
-			}
+		if err := batchResolveLinks(ctx, qs.db, tx, results, qs.nestDepth); err != nil {
+			return nil, 0, err
 		}
 	}
 
@@ -206,12 +243,11 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 	return results, total, nil
 }
 
-// drainIter materializes all remaining rows from iter into a new []*T.
-// When fetchLinks is true every decoded document has its link fields
-// resolved through rw before being appended. The iterator is not closed
-// by this helper — callers own its lifetime so the fetchLinks path can
-// safely route through the same read transaction that owns the iterator.
-func drainIter[T any](ctx context.Context, iter Iterator, db *DB, rw ReadWriter, fetchLinks bool, nestDepth, capHint int) ([]*T, error) {
+// drainIter materializes all remaining rows from iter into a new []*T. The
+// iterator is not closed by this helper — callers own its lifetime so a
+// post-drain batch link resolver can safely route through the same read
+// transaction that owns the iterator without hitting pgx's "conn busy".
+func drainIter[T any](db *DB, iter Iterator, capHint int) ([]*T, error) {
 	var results []*T
 	if capHint > 0 {
 		results = make([]*T, 0, capHint)
@@ -220,11 +256,6 @@ func drainIter[T any](ctx context.Context, iter Iterator, db *DB, rw ReadWriter,
 		doc := new(T)
 		if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
-		}
-		if fetchLinks {
-			if err := fetchAllLinksOnDoc(ctx, db, rw, doc, nestDepth); err != nil {
-				return nil, fmt.Errorf("fetch links: %w", err)
-			}
 		}
 		results = append(results, doc)
 	}

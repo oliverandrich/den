@@ -29,9 +29,18 @@ func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = iter.Close() }()
+	results, err := drainIter[T](qs.db, iter, qs.limitN)
+	_ = iter.Close()
+	if err != nil {
+		return nil, err
+	}
 
-	return drainIter[T](ctx, iter, qs.db, qs.db.backend, qs.fetchLinks, qs.nestDepth, qs.limitN)
+	if qs.fetchLinks {
+		if err := batchResolveLinks(ctx, qs.db, qs.db.backend, results, qs.nestDepth); err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
 }
 
 // ensureFTSForCollection sets up FTS infrastructure during Register()

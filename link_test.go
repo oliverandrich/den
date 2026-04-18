@@ -188,6 +188,151 @@ func TestWithFetchLinks_Eager(t *testing.T) {
 	assert.Equal(t, 200, results[0].Door.Value.Height)
 }
 
+func TestWithFetchLinks_BatchDedup(t *testing.T) {
+	// Three parents, two distinct targets: door1 on Cabins A and C, door2 on B.
+	// With batched resolution we expect parents referencing the same target
+	// to share the decoded *Door pointer — a direct observable signal that
+	// the query ran in batched mode rather than per-row.
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door1 := &Door{Height: 200, Width: 80}
+	door2 := &Door{Height: 210, Width: 85}
+	require.NoError(t, den.Insert(ctx, db, door1))
+	require.NoError(t, den.Insert(ctx, db, door2))
+
+	cabinA := &House{Name: "BatchA", Door: den.NewLink(door1)}
+	cabinB := &House{Name: "BatchB", Door: den.NewLink(door2)}
+	cabinC := &House{Name: "BatchC", Door: den.NewLink(door1)}
+	require.NoError(t, den.InsertMany(ctx, db, []*House{cabinA, cabinB, cabinC}))
+
+	results, err := den.NewQuery[House](db).
+		Where(where.Field("name").In("BatchA", "BatchB", "BatchC")).
+		Sort("name", den.Asc).
+		WithFetchLinks().
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	for _, r := range results {
+		require.True(t, r.Door.IsLoaded(), "every link must be loaded")
+		require.NotNil(t, r.Door.Value)
+	}
+	// A and C share door1 — dedup means they reference the same *Door pointer.
+	assert.Same(t, results[0].Door.Value, results[2].Door.Value,
+		"parents sharing a link ID must share the decoded pointer")
+	// B points at door2, distinct from door1.
+	assert.NotSame(t, results[0].Door.Value, results[1].Door.Value)
+	assert.Equal(t, 210, results[1].Door.Value.Height)
+}
+
+func TestWithFetchLinks_SliceField(t *testing.T) {
+	// Slice-of-Link fields must also be batch-resolved, with two rows sharing
+	// the same window fetched from a single IN-query.
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	w1 := &Window{X: 1, Y: 1}
+	w2 := &Window{X: 2, Y: 2}
+	require.NoError(t, den.Insert(ctx, db, w1))
+	require.NoError(t, den.Insert(ctx, db, w2))
+
+	house1 := &House{
+		Name:    "SliceA",
+		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+	}
+	house2 := &House{
+		Name:    "SliceB",
+		Windows: []den.Link[Window]{den.NewLink(w1)}, // shares w1 with house1
+	}
+	require.NoError(t, den.InsertMany(ctx, db, []*House{house1, house2}))
+
+	results, err := den.NewQuery[House](db).
+		Where(where.Field("name").In("SliceA", "SliceB")).
+		Sort("name", den.Asc).
+		WithFetchLinks().
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.Len(t, results[0].Windows, 2)
+	require.Len(t, results[1].Windows, 1)
+	for _, w := range results[0].Windows {
+		assert.True(t, w.IsLoaded())
+	}
+	assert.True(t, results[1].Windows[0].IsLoaded())
+	// The w1 instance is shared between house1[0] and house2[0].
+	assert.Same(t, results[0].Windows[0].Value, results[1].Windows[0].Value)
+}
+
+// A and B are a two-hop chain so we can verify WithNestingDepth actually
+// resolves links on the target documents too (not just the direct parent).
+type NestLeaf struct {
+	document.Base
+	Label string `json:"label"`
+}
+
+type NestMid struct {
+	document.Base
+	Tag  string             `json:"tag"`
+	Leaf den.Link[NestLeaf] `json:"leaf"`
+}
+
+type NestRoot struct {
+	document.Base
+	Name string            `json:"name"`
+	Mid  den.Link[NestMid] `json:"mid"`
+}
+
+func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
+	// The batched path must preserve the per-row implementation's strictness:
+	// if a parent references a link id that does not exist in the target
+	// collection, .All() returns ErrNotFound. Otherwise callers migrating
+	// from the old implementation would silently see Loaded=false.
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	good := &House{Name: "Good", Door: den.NewLink(door)}
+	bad := &House{Name: "Dangling", Door: den.Link[Door]{ID: "does-not-exist"}}
+	require.NoError(t, den.InsertMany(ctx, db, []*House{good, bad}))
+
+	_, err := den.NewQuery[House](db).
+		Where(where.Field("name").In("Good", "Dangling")).
+		WithFetchLinks().
+		All(ctx)
+	require.ErrorIs(t, err, den.ErrNotFound)
+}
+
+func TestWithFetchLinks_NestedDepthTwo(t *testing.T) {
+	db := dentest.MustOpen(t, &NestLeaf{}, &NestMid{}, &NestRoot{})
+	ctx := context.Background()
+
+	leaf := &NestLeaf{Label: "bottom"}
+	require.NoError(t, den.Insert(ctx, db, leaf))
+
+	mid := &NestMid{Tag: "middle", Leaf: den.NewLink(leaf)}
+	require.NoError(t, den.Insert(ctx, db, mid))
+
+	root := &NestRoot{Name: "top", Mid: den.NewLink(mid)}
+	require.NoError(t, den.Insert(ctx, db, root))
+
+	results, err := den.NewQuery[NestRoot](db).
+		Where(where.Field("name").Eq("top")).
+		WithFetchLinks().
+		WithNestingDepth(2).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	require.True(t, results[0].Mid.IsLoaded(), "level 1 (NestMid) must be loaded")
+	require.NotNil(t, results[0].Mid.Value)
+	// Level 2: the loaded NestMid has a Leaf link that must also be resolved.
+	require.True(t, results[0].Mid.Value.Leaf.IsLoaded(), "level 2 (NestLeaf) must be loaded")
+	require.NotNil(t, results[0].Mid.Value.Leaf.Value)
+	assert.Equal(t, "bottom", results[0].Mid.Value.Leaf.Value.Label)
+}
+
 func TestWithLinkRule_Write(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()

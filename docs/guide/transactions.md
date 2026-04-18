@@ -98,7 +98,7 @@ Two options change how `LockByID` reacts to contention on PostgreSQL:
 - `den.SkipLocked()` — if another transaction holds the row, the query returns no rows. Mapped to `FOR UPDATE SKIP LOCKED`. The canonical queue-consumer primitive: N workers can each pop a different row without blocking each other.
 - `den.NoWait()` — if another transaction holds the row, fail immediately with `den.ErrLocked`. Mapped to `FOR UPDATE NOWAIT`. Use when the caller should choose between retry, abort, or an alternative path rather than wait.
 
-`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `LockByID` returns an error; passing both to `TxQuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
+`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `LockByID` returns an error; passing both to `QuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
 
 On SQLite both options are no-ops (writers are serialized at the database level).
 

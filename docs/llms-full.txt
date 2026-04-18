@@ -46,7 +46,7 @@ type Product struct {
 func main() {
     ctx := context.Background()
 
-    db, err := den.OpenURL("sqlite:///products.db")
+    db, err := den.OpenURL(ctx, "sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -110,7 +110,7 @@ import (
 
 Import both when your application needs to support either backend at runtime.
 
-Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(dsn)`, Den matches the scheme to the registered backend and opens the connection.
+Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(ctx, dsn)`, Den matches the scheme to the registered backend and opens the connection.
 
 ## Verify Installation
 
@@ -172,7 +172,7 @@ func main() {
     ctx := context.Background()
 
     // Open a SQLite database
-    db, err := den.OpenURL("sqlite:///products.db")
+    db, err := den.OpenURL(ctx, "sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -218,7 +218,7 @@ Change the import and the DSN — the rest of your code stays identical.
 ```go
 import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
 
-db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
 Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
@@ -263,10 +263,10 @@ Since both backends share the same API, you can prototype with SQLite and move t
 
 ```go
 // File-based database
-db, err := den.OpenURL("sqlite:///path/to/data.db")
+db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
 
 // Relative path
-db, err := den.OpenURL("sqlite:///./local.db")
+db, err := den.OpenURL(ctx, "sqlite:///./local.db")
 ```
 
 The path after `sqlite:///` is passed directly to the SQLite driver. Use an absolute path for production and a relative path for development.
@@ -275,13 +275,13 @@ The path after `sqlite:///` is passed directly to the SQLite driver. Use an abso
 
 ```go
 // Standard connection string
-db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 
 // With SSL mode
-db, err := den.OpenURL("postgres://user:pass@localhost/mydb?sslmode=disable")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb?sslmode=disable")
 
 // Unix socket
-db, err := den.OpenURL("postgres:///mydb?host=/var/run/postgresql")
+db, err := den.OpenURL(ctx, "postgres:///mydb?host=/var/run/postgresql")
 ```
 
 The DSN follows the libpq connection string format supported by pgx.
@@ -1256,7 +1256,7 @@ type House struct {
 }
 
 func main() {
-    db, _ := den.OpenURL("sqlite:///data.db")
+    db, _ := den.OpenURL(ctx, "sqlite:///data.db")
     defer db.Close()
 
     ctx := context.Background()
@@ -2088,7 +2088,7 @@ For structural validation rules, Den integrates with go-playground/validator via
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 Then add `validate` tags to your struct fields:
@@ -2163,7 +2163,7 @@ Migrations do not run automatically. Call `r.Up()` after opening the database an
 func main() {
     ctx := context.Background()
 
-    db, err := den.OpenURL("sqlite:///data.db")
+    db, err := den.OpenURL(ctx, "sqlite:///data.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -2773,7 +2773,7 @@ Pointer fields with `unique` create a nullable unique constraint. Multiple docum
 
 ## The `validate` Tag
 
-When `validate.WithValidation()` is passed as an option to `den.OpenURL()`, Den validates documents using `go-playground/validator` struct tags before insert and update.
+When `validate.WithValidation()` is passed as an option to `den.OpenURL`, Den validates documents using `go-playground/validator` struct tags before insert and update.
 
 ## Aggregation Struct Tags
 
@@ -2826,16 +2826,16 @@ import (
 )
 
 // SQLite: file-backed
-db, err := den.OpenURL("sqlite:///path/to/data.db")
+db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
 
 // SQLite: in-memory
-db, err := den.OpenURL("sqlite://:memory:")
+db, err := den.OpenURL(ctx, "sqlite://:memory:")
 
 // PostgreSQL
-db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 
 // PostgreSQL (alias scheme)
-db, err := den.OpenURL("postgresql://user:pass@localhost/mydb")
+db, err := den.OpenURL(ctx, "postgresql://user:pass@localhost/mydb")
 ```
 
 ### Options
@@ -2843,7 +2843,7 @@ db, err := den.OpenURL("postgresql://user:pass@localhost/mydb")
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 | Option | Package | Description |

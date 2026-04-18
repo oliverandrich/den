@@ -37,10 +37,10 @@ Den supports two storage backends behind a unified API. Both store documents as 
 
     ```go
     // File-based database
-    db, err := den.OpenURL("sqlite:///path/to/data.db")
+    db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
 
     // Relative path
-    db, err := den.OpenURL("sqlite:///./local.db")
+    db, err := den.OpenURL(ctx, "sqlite:///./local.db")
     ```
 
     The path after `sqlite:///` is passed directly to the SQLite driver. Use an absolute path for production and a relative path for development.
@@ -49,13 +49,13 @@ Den supports two storage backends behind a unified API. Both store documents as 
 
     ```go
     // Standard connection string
-    db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 
     // With SSL mode
-    db, err := den.OpenURL("postgres://user:pass@localhost/mydb?sslmode=disable")
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb?sslmode=disable")
 
     // Unix socket
-    db, err := den.OpenURL("postgres:///mydb?host=/var/run/postgresql")
+    db, err := den.OpenURL(ctx, "postgres:///mydb?host=/var/run/postgresql")
     ```
 
     The DSN follows the [libpq connection string](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING) format supported by pgx.
@@ -68,11 +68,14 @@ Import the backend package for its side-effect registration, then call `den.Open
 
     ```go
     import (
+        "context"
+
         "github.com/oliverandrich/den"
         _ "github.com/oliverandrich/den/backend/sqlite"
     )
 
-    db, err := den.OpenURL("sqlite:///data.db")
+    ctx := context.Background()
+    db, err := den.OpenURL(ctx, "sqlite:///data.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -83,11 +86,14 @@ Import the backend package for its side-effect registration, then call `den.Open
 
     ```go
     import (
+        "context"
+
         "github.com/oliverandrich/den"
         _ "github.com/oliverandrich/den/backend/postgres"
     )
 
-    db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
+    ctx := context.Background()
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
     if err != nil {
         log.Fatal(err)
     }

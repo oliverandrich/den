@@ -34,7 +34,7 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 	// link fetch).
 	url := base + sep + "pool_max_conns=2"
 
-	db, err := den.OpenURL(url)
+	db, err := den.OpenURL(context.Background(), url)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx := context.Background()

@@ -46,9 +46,13 @@ type Encoder interface {
 	Decode(data []byte, v any) error
 }
 
-// Open creates a new DB using the given backend directly.
+// Open creates a new DB using the given backend directly. The context
+// governs any registration work triggered by WithTypes (collection table
+// creation, index provisioning); callers with long-running startup work
+// can pass a timeout or cancellable context to abort it cleanly.
+//
 // Use OpenURL for URL-based opening with automatic backend selection.
-func Open(backend Backend, opts ...Option) (*DB, error) {
+func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
 	db := &DB{
 		backend:          backend,
 		collections:      make(map[string]*collectionInfo),
@@ -60,7 +64,7 @@ func Open(backend Backend, opts ...Option) (*DB, error) {
 	if len(db.pendingTypes) > 0 {
 		types := db.pendingTypes
 		db.pendingTypes = nil
-		if err := Register(context.Background(), db, types...); err != nil {
+		if err := Register(ctx, db, types...); err != nil {
 			return nil, err
 		}
 	}

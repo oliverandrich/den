@@ -37,14 +37,15 @@ func MustOpenPostgres(t testing.TB, connString string, types ...any) *den.DB {
 func MustOpenWith(t testing.TB, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
+	ctx := context.Background()
 	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
-	db, err := den.OpenURL(dsn, opts...)
+	db, err := den.OpenURL(ctx, dsn, opts...)
 	if err != nil {
 		t.Fatalf("dentest: open sqlite: %v", err)
 	}
 
 	if len(types) > 0 {
-		if err := den.Register(context.Background(), db, types...); err != nil {
+		if err := den.Register(ctx, db, types...); err != nil {
 			_ = db.Close()
 			t.Fatalf("dentest: register types: %v", err)
 		}
@@ -59,22 +60,23 @@ func MustOpenWith(t testing.TB, types []any, opts []den.Option) *den.DB {
 func MustOpenPostgresWith(t testing.TB, connString string, types []any, opts []den.Option) *den.DB {
 	t.Helper()
 
-	db, err := den.OpenURL(connString, opts...)
+	ctx := context.Background()
+	db, err := den.OpenURL(ctx, connString, opts...)
 	if err != nil {
 		t.Fatalf("dentest: open postgres: %v", err)
 	}
 
 	if len(types) > 0 {
-		if err := den.Register(context.Background(), db, types...); err != nil {
+		if err := den.Register(ctx, db, types...); err != nil {
 			_ = db.Close()
 			t.Fatalf("dentest: register types: %v", err)
 		}
 	}
 
 	t.Cleanup(func() {
-		ctx := context.Background()
+		cleanupCtx := context.Background()
 		for _, name := range den.Collections(db) {
-			_ = db.Backend().DropCollection(ctx, name)
+			_ = db.Backend().DropCollection(cleanupCtx, name)
 		}
 		_ = db.Close()
 	})

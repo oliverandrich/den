@@ -16,7 +16,7 @@ Migrations do not run automatically. You are responsible for calling `r.Up()` at
 func main() {
     ctx := context.Background()
 
-    db, err := den.OpenURL("sqlite:///data.db")
+    db, err := den.OpenURL(ctx, "sqlite:///data.db")
     if err != nil {
         log.Fatal(err)
     }

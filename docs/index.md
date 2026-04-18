@@ -46,7 +46,7 @@ type Product struct {
 func main() {
     ctx := context.Background()
 
-    db, err := den.OpenURL("sqlite:///products.db")
+    db, err := den.OpenURL(ctx, "sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }

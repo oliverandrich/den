@@ -25,13 +25,13 @@ var (
 )
 
 func init() {
-	den.RegisterBackend("sqlite", func(dsn string) (den.Backend, error) {
+	den.RegisterBackend("sqlite", func(ctx context.Context, dsn string) (den.Backend, error) {
 		path := dsn
 		// Strip sqlite:// prefix if present
 		if after, ok := strings.CutPrefix(dsn, "sqlite://"); ok {
 			path = strings.TrimPrefix(after, "/")
 		}
-		return Open(path)
+		return Open(ctx, path)
 	})
 
 	sqlite.MustRegisterScalarFunction("regexp", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
@@ -84,16 +84,18 @@ type backend struct {
 	stmts sync.Map // collection name → *stmtSet
 }
 
-// Open opens a SQLite database at the given path.
+// Open opens a SQLite database at the given path. The context governs the
+// initial metadata-table creation so callers with a startup deadline can
+// cancel cleanly.
 // The path may include query parameters to override default PRAGMAs,
 // e.g. "/data.db?_pragma=cache_size(5000)".
-func Open(path string) (den.Backend, error) {
+func Open(ctx context.Context, path string) (den.Backend, error) {
 	dsn := buildDSN(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
 	}
-	if err := ensureMetadataTable(context.Background(), db); err != nil {
+	if err := ensureMetadataTable(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
 	}

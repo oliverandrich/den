@@ -48,7 +48,7 @@ func main() {
     ctx := context.Background()
 
     // Open a SQLite database
-    db, err := den.OpenURL("sqlite:///products.db")
+    db, err := den.OpenURL(ctx, "sqlite:///products.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -94,7 +94,7 @@ Change the import and the DSN — the rest of your code stays identical.
 ```go
 import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
 
-db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
 !!! tip "Same API, different engine"

@@ -112,12 +112,12 @@ Composite unique indexes include a `WHERE ... IS NOT NULL` clause for all partic
 
 ## The `validate` Tag
 
-When `validate.WithValidation()` is passed as an option to `den.OpenURL()` or `den.Open()`, Den validates documents using `go-playground/validator` struct tags before insert and update operations.
+When `validate.WithValidation()` is passed as an option to `den.OpenURL` or `den.Open`, Den validates documents using `go-playground/validator` struct tags before insert and update operations.
 
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 ```go

@@ -8,26 +8,30 @@ How to open a Den database, configure backends, and customize document behavior.
 
 ### OpenURL (recommended)
 
-`OpenURL` accepts a URL-style DSN. Backend packages must be imported for side-effect registration.
+`OpenURL` takes a `context.Context` as its first argument and a URL-style DSN as the second. Backend packages must be imported for side-effect registration.
 
 ```go
 import (
+    "context"
+
     "github.com/oliverandrich/den"
     _ "github.com/oliverandrich/den/backend/sqlite"
     _ "github.com/oliverandrich/den/backend/postgres"
 )
 
+ctx := context.Background()
+
 // SQLite: file-backed
-db, err := den.OpenURL("sqlite:///path/to/data.db")
+db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
 
 // SQLite: in-memory
-db, err := den.OpenURL("sqlite://:memory:")
+db, err := den.OpenURL(ctx, "sqlite://:memory:")
 
 // PostgreSQL
-db, err := den.OpenURL("postgres://user:pass@localhost:5432/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 
 // PostgreSQL (alias scheme)
-db, err := den.OpenURL("postgresql://user:pass@localhost/mydb")
+db, err := den.OpenURL(ctx, "postgresql://user:pass@localhost/mydb")
 ```
 
 > **Important:** Backend packages register themselves via `init()`. You must import the backend package even if you don't reference it directly -- use the blank identifier `_`.
@@ -39,7 +43,7 @@ db, err := den.OpenURL("postgresql://user:pass@localhost/mydb")
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 | Option | Package | Description |

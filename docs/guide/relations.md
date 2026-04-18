@@ -250,7 +250,7 @@ type House struct {
 }
 
 func main() {
-    db, _ := den.OpenURL("sqlite:///data.db")
+    db, _ := den.OpenURL(ctx, "sqlite:///data.db")
     defer db.Close()
 
     ctx := context.Background()

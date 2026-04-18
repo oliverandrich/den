@@ -15,8 +15,8 @@ import (
 )
 
 func init() {
-	den.RegisterBackend("postgres", func(dsn string) (den.Backend, error) { return Open(dsn) })
-	den.RegisterBackend("postgresql", func(dsn string) (den.Backend, error) { return Open(dsn) })
+	den.RegisterBackend("postgres", func(ctx context.Context, dsn string) (den.Backend, error) { return Open(ctx, dsn) })
+	den.RegisterBackend("postgresql", func(ctx context.Context, dsn string) (den.Backend, error) { return Open(ctx, dsn) })
 }
 
 type sqlSet struct {
@@ -31,9 +31,11 @@ type backend struct {
 }
 
 // Open connects to a PostgreSQL database using the given connection string.
-// It verifies that the server version meets the minimum requirement.
-func Open(connString string) (den.Backend, error) {
-	ctx := context.Background()
+// It verifies that the server version meets the minimum requirement. The
+// context governs the connection setup (pool dialing, version check,
+// metadata-table creation) so callers with a startup deadline can cancel
+// cleanly.
+func Open(ctx context.Context, connString string) (den.Backend, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("postgres open: %w", err)

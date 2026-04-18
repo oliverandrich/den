@@ -23,7 +23,7 @@ func connString(t *testing.T) string {
 
 func openTestDB(t *testing.T) den.Backend {
 	t.Helper()
-	b, err := Open(connString(t))
+	b, err := Open(context.Background(), connString(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { b.Close() })
 	return b
@@ -31,14 +31,14 @@ func openTestDB(t *testing.T) den.Backend {
 
 func TestOpen(t *testing.T) {
 	url := connString(t)
-	b, err := Open(url)
+	b, err := Open(context.Background(), url)
 	require.NoError(t, err)
 	assert.NotNil(t, b)
 	b.Close()
 }
 
 func TestOpen_InvalidURL(t *testing.T) {
-	_, err := Open("postgres://invalid:5432/nope?connect_timeout=1")
+	_, err := Open(context.Background(), "postgres://invalid:5432/nope?connect_timeout=1")
 	// pgxpool.New may not fail immediately for bad hosts, but we still exercise the path.
 	// If it does succeed, just close it.
 	if err == nil {

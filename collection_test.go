@@ -323,8 +323,9 @@ func TestRegister_ValueWithPointerReceiverSettings(t *testing.T) {
 }
 
 func TestOpenURL_WithTypes(t *testing.T) {
+	ctx := context.Background()
 	dsn := "sqlite:///" + t.TempDir() + "/with_types.db"
-	db, err := den.OpenURL(dsn, den.WithTypes(&Product{}, &Note{}))
+	db, err := den.OpenURL(ctx, dsn, den.WithTypes(&Product{}, &Note{}))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -332,12 +333,26 @@ func TestOpenURL_WithTypes(t *testing.T) {
 	assert.Contains(t, cols, "product")
 	assert.Contains(t, cols, "note")
 
-	require.NoError(t, den.Insert(context.Background(), db, &Product{Name: "W", Price: 1.0}))
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "W", Price: 1.0}))
 }
 
 func TestOpenURL_WithTypes_PropagatesRegistrationError(t *testing.T) {
 	dsn := "sqlite:///" + t.TempDir() + "/bad_types.db"
-	_, err := den.OpenURL(dsn, den.WithTypes(&DocWithSQLInjectionTag{}))
+	_, err := den.OpenURL(context.Background(), dsn, den.WithTypes(&DocWithSQLInjectionTag{}))
 	require.Error(t, err)
 	require.ErrorIs(t, err, den.ErrValidation)
+}
+
+// TestOpenURL_ContextCanceledDuringRegistration regresses that OpenURL
+// honors the passed context when WithTypes triggers collection/index
+// provisioning — a canceled context should abort the setup cleanly
+// instead of silently running to completion on context.Background().
+func TestOpenURL_ContextCanceledDuringRegistration(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // canceled before any work starts
+
+	dsn := "sqlite:///" + t.TempDir() + "/canceled.db"
+	_, err := den.OpenURL(ctx, dsn, den.WithTypes(&Product{}))
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 }

@@ -42,7 +42,7 @@ Den requires at least one backend. Backends register themselves via side-effect 
     Import both when your application needs to support either backend at runtime.
 
 !!! note "How side-effect imports work"
-    Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(dsn)`, Den matches the scheme to the registered backend and opens the connection.
+    Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(ctx, dsn)`, Den matches the scheme to the registered backend and opens the connection.
 
 !!! warning "PostgreSQL requires a running instance"
     Unlike SQLite, the PostgreSQL backend connects to an external database server. Make sure PostgreSQL is running and accessible before opening a connection.

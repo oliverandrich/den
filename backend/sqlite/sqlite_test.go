@@ -56,7 +56,7 @@ func TestBuildDSN_PlainPath(t *testing.T) {
 func openTestDB(t *testing.T) den.Backend {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	b, err := Open(dbPath)
+	b, err := Open(context.Background(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { b.Close() })
 	return b

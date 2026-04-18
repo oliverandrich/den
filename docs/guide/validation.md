@@ -33,7 +33,7 @@ For structural validation rules, Den integrates with [go-playground/validator](h
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 Then add `validate` tags to your struct fields:
@@ -109,7 +109,7 @@ func (u *User) Validate() error {
 ```
 
 ```go
-db, _ := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, _ := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 den.Register(ctx, db, &User{})
 
 user := &User{Username: "ab", Email: "invalid"}

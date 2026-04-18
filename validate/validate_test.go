@@ -58,7 +58,7 @@ func (d *DefaultingTagDoc) BeforeInsert(_ context.Context) error {
 func mustOpenSQLite(t *testing.T, opts ...den.Option) *den.DB {
 	t.Helper()
 	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
-	db, err := den.OpenURL(dsn, opts...)
+	db, err := den.OpenURL(context.Background(), dsn, opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db

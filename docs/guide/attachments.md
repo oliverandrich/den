@@ -342,7 +342,7 @@ Optional method:
 
 - **`URLPrefix() string`** — implement only when `URL` returns a path
   relative to the current HTTP server (i.e. the application is expected
-  to serve the bytes itself). HTTP-layer packages (`burrow/contrib/uploads`)
+  to serve the bytes itself). HTTP-layer packages (`burrow/uploader`)
   type-assert on a local `interface { URLPrefix() string }` to decide
   whether to mount a serving handler and at what route. Backends that
   return absolute URLs (S3, GCS, a CDN) should omit the method — its

@@ -232,6 +232,7 @@ Located in the `storage` sub-package (`github.com/oliverandrich/den/storage`).
 |---|---|---|
 | `NewFilesystemStorage` | `NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error)` | Reference `Storage` implementation that stores bytes on the local filesystem. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
 | `fs.Close` | `(fs *FilesystemStorage) Close() error` | Release the underlying file-descriptor held for the storage root |
+| `fs.URLPrefix` | `(fs *FilesystemStorage) URLPrefix() string` | Returns the HTTP path prefix the storage serves its files under. HTTP-layer packages type-assert on a local `interface{ URLPrefix() string }` to decide whether to register a serving handler; remote backends (S3/GCS) deliberately do not implement this |
 | `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Store` on a zero-byte reader |
 
 ### Attachment Document Embed

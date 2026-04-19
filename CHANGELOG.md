@@ -2,6 +2,12 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.9.1 — 2026-04-19
+
+### Added
+
+- **`(*FilesystemStorage).URLPrefix() string`** — returns the HTTP path prefix the storage serves its files under. HTTP-layer packages (`burrow/contrib/uploads`) type-assert on a `URLPrefix() string` interface to mount their serving handler on the same route the `URL` method produces. Remote-URL backends (S3, GCS) intentionally do not implement this — the absent method is the signal to skip local serving.
+
 ## 0.9.0 — 2026-04-19
 
 ### Added

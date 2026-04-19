@@ -254,6 +254,22 @@ Security-relevant behavior:
 - **Delete is idempotent** — a missing path returns success, simplifying
   cleanup orchestration against the document lifecycle.
 
+### URL-prefix accessor
+
+`FilesystemStorage` exposes its HTTP prefix via `URLPrefix() string`:
+
+```go
+fs, _ := storage.NewFilesystemStorage("./uploads", "/media")
+fs.URLPrefix() // "/media"
+```
+
+HTTP-layer packages (Burrow's `contrib/uploads`, custom handlers) use
+this to mount a serving handler on the same route that `URL` produces,
+without having the prefix configured twice. Remote backends (S3, GCS)
+intentionally do NOT implement this method — the absent `URLPrefix()`
+is the signal that the Storage is responsible for serving and the HTTP
+package should skip local routing.
+
 ## Writing a Custom Storage Backend
 
 Implement `den.Storage`:
@@ -277,6 +293,16 @@ Requirements implementations MUST honour:
 - **Fill in SHA256** — the returned Attachment's `SHA256` should be the
   full hex-encoded SHA-256 of the stored bytes. Several Den features rely
   on the hash for diff detection.
+
+Optional method:
+
+- **`URLPrefix() string`** — implement only when `URL` returns a path
+  relative to the current HTTP server (i.e. the application is expected
+  to serve the bytes itself). HTTP-layer packages (`burrow/contrib/uploads`)
+  type-assert on a local `interface { URLPrefix() string }` to decide
+  whether to mount a serving handler and at what route. Backends that
+  return absolute URLs (S3, GCS, a CDN) should omit the method — its
+  absence signals "I serve myself, do not register a local handler".
 
 ## Uniqueness Trade-off
 

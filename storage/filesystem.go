@@ -65,6 +65,19 @@ func (s *FilesystemStorage) Close() error {
 	return s.root.Close()
 }
 
+// URLPrefix returns the HTTP path prefix under which this storage's
+// files are served (without a trailing slash). HTTP-layer packages
+// (for example Burrow's contrib/uploads) use this to mount a serving
+// handler on the same route the URL method produces.
+//
+// Remote Storage backends that return absolute URLs (S3, GCS, …) do
+// NOT implement this method — HTTP-layer packages can type-assert on
+// a "URLPrefix() string" interface to decide whether to register a
+// local serving handler at all.
+func (s *FilesystemStorage) URLPrefix() string {
+	return s.urlPrefix
+}
+
 // Store implements den.Storage.
 func (s *FilesystemStorage) Store(_ context.Context, r io.Reader, ext, mime string) (document.Attachment, error) {
 	tmp, err := os.CreateTemp(s.rootPath, "upload-*")

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -657,4 +658,31 @@ func TestExists(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.False(t, exists)
+}
+
+func TestOpen_AutoCreatesParentDir(t *testing.T) {
+	// The sqlite driver only creates the file, not the directory. Open
+	// must MkdirAll a missing parent so a fresh default DSN like
+	// "sqlite:///data/app.db" works without manual setup.
+	tmp := t.TempDir()
+	nested := filepath.Join(tmp, "does", "not", "exist", "yet", "app.db")
+
+	b, err := Open(t.Context(), nested)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.(interface{ Close() error }).Close() }) //nolint:errcheck,forcetypeassert
+
+	info, err := os.Stat(filepath.Dir(nested))
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+}
+
+func TestEnsureParentDir_SkipsSpecialForms(t *testing.T) {
+	// :memory: has no filesystem footprint.
+	require.NoError(t, ensureParentDir(":memory:"))
+	// file: URI form carries its own VFS semantics — we leave it alone.
+	require.NoError(t, ensureParentDir("file:./whatever.db"))
+	// Empty input is a no-op, not an error.
+	require.NoError(t, ensureParentDir(""))
+	// Query parameters are stripped before the parent-dir check.
+	require.NoError(t, ensureParentDir(":memory:?_pragma=cache_size(100)"))
 }

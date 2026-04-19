@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -89,7 +91,13 @@ type backend struct {
 // cancel cleanly.
 // The path may include query parameters to override default PRAGMAs,
 // e.g. "/data.db?_pragma=cache_size(5000)".
+//
+// Parent directories of file-backed paths are auto-created. The special
+// ":memory:" form and the "file:" URI form are opened as-is.
 func Open(ctx context.Context, path string) (den.Backend, error) {
+	if err := ensureParentDir(path); err != nil {
+		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
+	}
 	dsn := buildDSN(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -100,6 +108,27 @@ func Open(ctx context.Context, path string) (den.Backend, error) {
 		return nil, fmt.Errorf("sqlite open %q: %w", path, err)
 	}
 	return &backend{db: db}, nil
+}
+
+// ensureParentDir creates the parent directory of a file-backed SQLite
+// path so callers can point at a fresh location like "./data/app.db"
+// without having to pre-create the directory themselves. In-memory
+// databases and the "file:" URI form are no-ops: the former has no
+// filesystem footprint, the latter carries its own VFS/host semantics
+// that are not safe to second-guess.
+func ensureParentDir(path string) error {
+	// Strip query parameters — they are PRAGMA overrides, not part of the path.
+	if i := strings.Index(path, "?"); i >= 0 {
+		path = path[:i]
+	}
+	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return nil
+	}
+	parent := filepath.Dir(path)
+	if parent == "." || parent == "/" || parent == "" {
+		return nil
+	}
+	return os.MkdirAll(parent, 0o750)
 }
 
 // defaultPragmas are applied unless the user overrides them in the DSN.

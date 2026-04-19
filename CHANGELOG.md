@@ -2,6 +2,12 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.10.1 — 2026-04-19
+
+### Changed
+
+- **SQLite backend auto-creates missing parent directories** — `Open(ctx, "./data/app.db")` now `MkdirAll`s `./data` before handing the path to the driver, matching the filesystem-storage backend which has always created its root directory on construction. Fresh-checkout defaults like `sqlite:///data/app.db` now work without a manual `mkdir` step. The `:memory:` form and the `file:` URI form are left alone — those carry their own semantics (no filesystem footprint / VFS and host semantics respectively).
+
 ## 0.10.0 — 2026-04-19
 
 ### Breaking Changes

@@ -2,6 +2,35 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.10.0 — 2026-04-19
+
+### Breaking Changes
+
+- **`storage.FilesystemStorage` moved to `storage/file`** — the filesystem backend now lives in its own sub-package, analogous to `backend/sqlite` and `backend/postgres`. This makes room for additional backends (`storage/s3`, `storage/gcs`, …) and keeps the root `storage` package trim (interface + registry only). Import-path changes:
+    - `storage.FilesystemStorage` → `file.Storage`
+    - `storage.NewFilesystemStorage(root, urlPrefix)` → `file.New(root, urlPrefix)`
+    - Import `github.com/oliverandrich/den/storage/file` instead of (or in addition to) `github.com/oliverandrich/den/storage`.
+
+### Added
+
+- **`storage.OpenURL(dsn, urlPrefix)` + scheme registry** — a DSN-based factory that dispatches to the backend registered for the scheme. Backends register themselves via `storage.Register("scheme", opener)` from an `init()`, matching the pattern Den already uses for database backends. The filesystem backend side-effect-registers `file://`:
+
+    ```go
+    import (
+        "github.com/oliverandrich/den/storage"
+        _ "github.com/oliverandrich/den/storage/file" // registers file://
+    )
+
+    fs, err := storage.OpenURL("file:///uploads", "/media")
+    ```
+
+    The `file://` DSN follows the same SQLAlchemy/JDBC-style convention as `sqlite://` for consistency: **three slashes for a relative path, four slashes for an absolute path** (the leading slash of the path is stripped on parse, which lets standard URL libraries treat the path component uniformly with the authority empty). Examples:
+
+    - `file:///data/media` → relative `data/media`
+    - `file:////var/media` → absolute `/var/media`
+
+    Direct construction via `file.New(...)` still works and takes the filesystem path literally. The registry enables config-driven setups (such as Burrow's `--storage-dsn` flag) to pick the backend at runtime without code changes when future backends land.
+
 ## 0.9.1 — 2026-04-19
 
 ### Added

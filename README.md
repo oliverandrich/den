@@ -134,7 +134,9 @@ den/
 ├── hooks.go                        Lifecycle hook interfaces
 ├── revision.go                     Optimistic concurrency
 ├── tx.go                           Transactions
-├── storage.go, storage/            Storage interface, FilesystemStorage
+├── storage.go                      Storage interface
+├── storage/                        Storage backend registry + OpenURL
+├── storage/file/                   Local filesystem backend (file:// scheme)
 ├── document/                       Base + composable SoftDelete, Tracked, Attachment embeds
 ├── where/                          Query condition builders
 ├── backend/

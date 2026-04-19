@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-package storage
+package file
 
 import (
 	"context"
@@ -11,19 +11,20 @@ import (
 	"testing"
 
 	"github.com/oliverandrich/den/document"
+	"github.com/oliverandrich/den/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestStorage(t *testing.T) *FilesystemStorage {
+func newTestStorage(t *testing.T) *Storage {
 	t.Helper()
-	s, err := NewFilesystemStorage(t.TempDir(), "/media")
+	s, err := New(t.TempDir(), "/media")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
-func TestFilesystemStorage_Store_WritesContentAddressedPath(t *testing.T) {
+func TestStorage_Store_WritesContentAddressedPath(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()
 
@@ -40,7 +41,7 @@ func TestFilesystemStorage_Store_WritesContentAddressedPath(t *testing.T) {
 	)
 }
 
-func TestFilesystemStorage_Store_Dedupes(t *testing.T) {
+func TestStorage_Store_Dedupes(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()
 
@@ -54,13 +55,13 @@ func TestFilesystemStorage_Store_Dedupes(t *testing.T) {
 	assert.Equal(t, first.SHA256, second.SHA256)
 }
 
-func TestFilesystemStorage_Store_RejectsEmpty(t *testing.T) {
+func TestStorage_Store_RejectsEmpty(t *testing.T) {
 	s := newTestStorage(t)
 	_, err := s.Store(context.Background(), strings.NewReader(""), ".txt", "text/plain")
-	require.ErrorIs(t, err, ErrEmptyContent)
+	require.ErrorIs(t, err, storage.ErrEmptyContent)
 }
 
-func TestFilesystemStorage_Open_ReadsWhatStoreWrote(t *testing.T) {
+func TestStorage_Open_ReadsWhatStoreWrote(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()
 
@@ -77,13 +78,13 @@ func TestFilesystemStorage_Open_ReadsWhatStoreWrote(t *testing.T) {
 	assert.Equal(t, want, string(got))
 }
 
-func TestFilesystemStorage_Open_PathTraversalRejected(t *testing.T) {
+func TestStorage_Open_PathTraversalRejected(t *testing.T) {
 	s := newTestStorage(t)
 	_, err := s.Open(context.Background(), document.Attachment{StoragePath: "../escape.txt"})
 	require.Error(t, err, "os.Root refuses paths that escape the root")
 }
 
-func TestFilesystemStorage_Delete(t *testing.T) {
+func TestStorage_Delete(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()
 
@@ -96,12 +97,12 @@ func TestFilesystemStorage_Delete(t *testing.T) {
 	require.Error(t, err, "file must be gone after Delete")
 }
 
-func TestFilesystemStorage_Delete_IdempotentOnMissing(t *testing.T) {
+func TestStorage_Delete_IdempotentOnMissing(t *testing.T) {
 	s := newTestStorage(t)
 	assert.NoError(t, s.Delete(context.Background(), document.Attachment{StoragePath: "never/existed.txt"}))
 }
 
-func TestFilesystemStorage_URL(t *testing.T) {
+func TestStorage_URL(t *testing.T) {
 	s := newTestStorage(t)
 
 	assert.Equal(t, "/media/2026/04/abc.jpg",
@@ -111,23 +112,62 @@ func TestFilesystemStorage_URL(t *testing.T) {
 		"leading slash tolerated")
 }
 
-func TestFilesystemStorage_URL_TrimsPrefixSlash(t *testing.T) {
-	s, err := NewFilesystemStorage(t.TempDir(), "/media/")
+func TestStorage_URL_TrimsPrefixSlash(t *testing.T) {
+	s, err := New(t.TempDir(), "/media/")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
 	assert.Equal(t, "/media/a.jpg", s.URL(document.Attachment{StoragePath: "a.jpg"}))
 }
 
-func TestNewFilesystemStorage_CreatesRoot(t *testing.T) {
+func TestNew_CreatesRoot(t *testing.T) {
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "does", "not", "exist", "yet")
 
-	s, err := NewFilesystemStorage(root, "/media")
+	s, err := New(root, "/media")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
 	info, err := os.Stat(root)
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())
+}
+
+func TestInit_RegistersFileScheme(t *testing.T) {
+	// Side-effect import registers "file://" — OpenURL should dispatch here.
+	// t.TempDir() is absolute, so we need the 4-slash (SQLAlchemy-style)
+	// form: "file:///" + "/abs/path" → "file:////abs/path" → "/abs/path".
+	tmp := t.TempDir()
+	s, err := storage.OpenURL("file:///"+tmp, "/media")
+	require.NoError(t, err)
+	require.NotNil(t, s)
+
+	sv, ok := s.(interface{ URLPrefix() string })
+	require.True(t, ok)
+	assert.Equal(t, "/media", sv.URLPrefix())
+
+	if c, ok := s.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
+}
+
+func TestInit_RelativePath(t *testing.T) {
+	// 3-slash form: "file:///relative" → location "/relative" → strip → "relative".
+	t.Chdir(t.TempDir())
+	s, err := storage.OpenURL("file:///uploads", "/media")
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	if c, ok := s.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
+}
+
+func TestInit_RejectsEmptyPath(t *testing.T) {
+	_, err := storage.OpenURL("file://", "/media")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a path")
+
+	_, err = storage.OpenURL("file:///", "/media")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a path")
 }

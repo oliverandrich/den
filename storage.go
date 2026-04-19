@@ -44,7 +44,7 @@ type Storage interface {
 // document types that embed or contain document.Attachment use the same
 // backend. Install at Open:
 //
-//	fs, err := storage.NewFilesystemStorage("./uploads", "/media")
+//	fs, err := file.New("./uploads", "/media")
 //	// handle err
 //	db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
 //

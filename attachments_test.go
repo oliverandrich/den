@@ -9,7 +9,7 @@ import (
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
-	"github.com/oliverandrich/den/storage"
+	"github.com/oliverandrich/den/storage/file"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +34,7 @@ type productDoc struct {
 func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
-	fs, err := storage.NewFilesystemStorage(tmp, "/media")
+	fs, err := file.New(tmp, "/media")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 
@@ -57,12 +57,12 @@ func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 
 	// Bytes are gone.
 	_, err = fs.Open(ctx, att)
-	require.Error(t, err, "FilesystemStorage.Open must fail after cascade delete")
+	require.Error(t, err, "file.Storage.Open must fail after cascade delete")
 }
 
 func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	ctx := context.Background()
-	fs, err := storage.NewFilesystemStorage(t.TempDir(), "/media")
+	fs, err := file.New(t.TempDir(), "/media")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 

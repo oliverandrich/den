@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: MIT
 
-// Package storage holds Den's reference Storage implementations.
-package storage
+// Package file provides a local-filesystem Storage backend for Den.
+//
+// Importing this package for its side effect registers the "file://"
+// scheme with [storage.OpenURL]:
+//
+//	import _ "github.com/oliverandrich/den/storage/file"
+//
+//	s, err := storage.OpenURL("file://./data/media", "/media/")
+//
+// For direct construction without the registry, call [New].
+package file
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,16 +23,31 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/document"
+	"github.com/oliverandrich/den/storage"
 )
 
-// ErrEmptyContent is returned by Store when the reader yields zero bytes.
-var ErrEmptyContent = errors.New("storage: refusing to store empty content")
+func init() {
+	storage.Register("file", func(location, urlPrefix string) (den.Storage, error) {
+		// SQLAlchemy/JDBC-style convention matching the sqlite backend:
+		// "file:///relative/path" → "relative/path"
+		// "file:////absolute/path" → "/absolute/path"
+		// A standard URL parser places everything in the path component
+		// (authority stays empty in both forms); stripping one leading
+		// slash yields the user-intended filesystem path.
+		path := strings.TrimPrefix(location, "/")
+		if path == "" {
+			return nil, fmt.Errorf("storage/file: file:// requires a path")
+		}
+		return New(path, urlPrefix)
+	})
+}
 
-// FilesystemStorage keeps attachment bytes on the local filesystem rooted
-// at a configurable directory. Paths are year/month-bucketed with a
-// filename derived from the first 16 hex digits of the content's SHA-256
-// plus the caller-supplied extension.
+// Storage keeps attachment bytes on the local filesystem rooted at a
+// configurable directory. Paths are year/month-bucketed with a filename
+// derived from the first 16 hex digits of the content's SHA-256 plus the
+// caller-supplied extension.
 //
 // Example produced path: "2026/04/abc123def4567890.jpg".
 //
@@ -36,16 +59,16 @@ var ErrEmptyContent = errors.New("storage: refusing to store empty content")
 //
 // Path traversal in Open/Delete is prevented by os.Root (Go 1.24+), which
 // refuses any path that escapes the configured root directory.
-type FilesystemStorage struct {
+type Storage struct {
 	root      *os.Root
 	rootPath  string
 	urlPrefix string
 }
 
-// NewFilesystemStorage creates the root directory if missing and returns a
-// Storage bound to it. urlPrefix is the HTTP path prefix under which files
-// are served (for example "/media"); a trailing slash is trimmed.
-func NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error) {
+// New creates the root directory if missing and returns a Storage bound
+// to it. urlPrefix is the HTTP path prefix under which files are served
+// (for example "/media"); a trailing slash is trimmed.
+func New(rootPath, urlPrefix string) (*Storage, error) {
 	if err := os.MkdirAll(rootPath, 0o750); err != nil {
 		return nil, fmt.Errorf("creating storage root %q: %w", rootPath, err)
 	}
@@ -53,7 +76,7 @@ func NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error
 	if err != nil {
 		return nil, fmt.Errorf("opening storage root %q: %w", rootPath, err)
 	}
-	return &FilesystemStorage{
+	return &Storage{
 		root:      root,
 		rootPath:  rootPath,
 		urlPrefix: strings.TrimRight(urlPrefix, "/"),
@@ -61,25 +84,25 @@ func NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error
 }
 
 // Close releases the underlying file descriptor for the storage root.
-func (s *FilesystemStorage) Close() error {
+func (s *Storage) Close() error {
 	return s.root.Close()
 }
 
 // URLPrefix returns the HTTP path prefix under which this storage's
-// files are served (without a trailing slash). HTTP-layer packages
-// (for example Burrow's contrib/uploads) use this to mount a serving
-// handler on the same route the URL method produces.
+// files are served (without a trailing slash). HTTP-layer packages use
+// this to mount a serving handler on the same route the URL method
+// produces.
 //
-// Remote Storage backends that return absolute URLs (S3, GCS, …) do
-// NOT implement this method — HTTP-layer packages can type-assert on
-// a "URLPrefix() string" interface to decide whether to register a
-// local serving handler at all.
-func (s *FilesystemStorage) URLPrefix() string {
+// Remote Storage backends that return absolute URLs (S3, GCS, …) do NOT
+// implement this method — HTTP-layer packages can type-assert on a
+// "URLPrefix() string" interface to decide whether to register a local
+// serving handler at all.
+func (s *Storage) URLPrefix() string {
 	return s.urlPrefix
 }
 
 // Store implements den.Storage.
-func (s *FilesystemStorage) Store(_ context.Context, r io.Reader, ext, mime string) (document.Attachment, error) {
+func (s *Storage) Store(_ context.Context, r io.Reader, ext, mime string) (document.Attachment, error) {
 	tmp, err := os.CreateTemp(s.rootPath, "upload-*")
 	if err != nil {
 		return document.Attachment{}, fmt.Errorf("creating temp file: %w", err)
@@ -97,7 +120,7 @@ func (s *FilesystemStorage) Store(_ context.Context, r io.Reader, ext, mime stri
 		return document.Attachment{}, fmt.Errorf("writing to temp file: %w", copyErr)
 	}
 	if size == 0 {
-		return document.Attachment{}, ErrEmptyContent
+		return document.Attachment{}, storage.ErrEmptyContent
 	}
 
 	hashHex := hex.EncodeToString(hasher.Sum(nil))
@@ -136,7 +159,7 @@ func (s *FilesystemStorage) Store(_ context.Context, r io.Reader, ext, mime stri
 }
 
 // Open implements den.Storage.
-func (s *FilesystemStorage) Open(_ context.Context, a document.Attachment) (io.ReadCloser, error) {
+func (s *Storage) Open(_ context.Context, a document.Attachment) (io.ReadCloser, error) {
 	f, err := s.root.Open(filepath.FromSlash(a.StoragePath))
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", a.StoragePath, err)
@@ -145,7 +168,7 @@ func (s *FilesystemStorage) Open(_ context.Context, a document.Attachment) (io.R
 }
 
 // Delete implements den.Storage. Missing paths are treated as success.
-func (s *FilesystemStorage) Delete(_ context.Context, a document.Attachment) error {
+func (s *Storage) Delete(_ context.Context, a document.Attachment) error {
 	err := s.root.Remove(filepath.FromSlash(a.StoragePath))
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("deleting %s: %w", a.StoragePath, err)
@@ -154,6 +177,6 @@ func (s *FilesystemStorage) Delete(_ context.Context, a document.Attachment) err
 }
 
 // URL implements den.Storage.
-func (s *FilesystemStorage) URL(a document.Attachment) string {
+func (s *Storage) URL(a document.Attachment) string {
 	return s.urlPrefix + "/" + strings.TrimLeft(a.StoragePath, "/")
 }

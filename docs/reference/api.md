@@ -224,16 +224,31 @@ Implementations must be content-addressed enough that two calls with
 identical bytes resolve to the same `StoragePath`. Delete must be
 idempotent on missing paths.
 
-### FilesystemStorage
+### Storage Registry
 
-Located in the `storage` sub-package (`github.com/oliverandrich/den/storage`).
+Located in `github.com/oliverandrich/den/storage`. The root package
+holds the interface + a scheme-based opener registry; concrete
+backends live in sub-packages that self-register on import.
 
 | Function | Signature | Description |
 |---|---|---|
-| `NewFilesystemStorage` | `NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error)` | Reference `Storage` implementation that stores bytes on the local filesystem. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
-| `fs.Close` | `(fs *FilesystemStorage) Close() error` | Release the underlying file-descriptor held for the storage root |
-| `fs.URLPrefix` | `(fs *FilesystemStorage) URLPrefix() string` | Returns the HTTP path prefix the storage serves its files under. HTTP-layer packages type-assert on a local `interface{ URLPrefix() string }` to decide whether to register a serving handler; remote backends (S3/GCS) deliberately do not implement this |
-| `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Store` on a zero-byte reader |
+| `OpenURL` | `OpenURL(dsn, urlPrefix string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
+| `Register` | `Register(scheme string, opener OpenerFunc)` | Registers an opener for a scheme. Typically called from a backend sub-package's `init()`. Panics on duplicate registration |
+| `OpenerFunc` | `type OpenerFunc func(location, urlPrefix string) (den.Storage, error)` | Factory signature for backend openers |
+| `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Storage.Store` on a zero-byte reader |
+
+### Filesystem Backend (`storage/file`)
+
+Located in `github.com/oliverandrich/den/storage/file`. Reference
+backend that stores bytes on the local filesystem. Importing the
+package for its side effect registers the `file://` scheme with
+`storage.OpenURL`.
+
+| Function | Signature | Description |
+|---|---|---|
+| `New` | `New(rootPath, urlPrefix string) (*Storage, error)` | Constructs a filesystem-backed `den.Storage`. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
+| `fs.Close` | `(fs *Storage) Close() error` | Release the underlying file descriptor held for the storage root |
+| `fs.URLPrefix` | `(fs *Storage) URLPrefix() string` | Returns the HTTP path prefix the storage serves its files under. HTTP-layer packages type-assert on a local `interface{ URLPrefix() string }` to decide whether to register a serving handler; remote backends (S3/GCS) deliberately do not implement this |
 
 ### Attachment Document Embed
 

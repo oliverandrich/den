@@ -50,7 +50,7 @@ to be edited by application code afterwards — `StoragePath`, `Size`, and
 
 !!! note "StoragePath is an object key, not a URL"
     `StoragePath` is the path **relative to the storage backend's root** —
-    for `FilesystemStorage` that is the root directory, for S3 that is the
+    for the `storage/file` backend that is the root directory, for S3 that is the
     object key inside the bucket. Hosts, bucket names, query strings, and
     pre-signed URL parameters do NOT belong here; they come out of
     `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS
@@ -88,21 +88,59 @@ finds attachments in either position via reflection.
 
 ## Installing a Storage Backend
 
-Storage is configured once, at `Open`, via `den.WithStorage`:
+Storage is configured once, at `Open`, via `den.WithStorage`. Concrete
+backends live in sub-packages of `den/storage` and register themselves
+on import. Two construction styles work:
+
+**Direct constructor** — import the backend package and call its
+`New`:
 
 ```go
 import (
     "github.com/oliverandrich/den"
-    "github.com/oliverandrich/den/storage"
+    "github.com/oliverandrich/den/storage/file"
 )
 
-fs, err := storage.NewFilesystemStorage("./uploads", "/media")
+fs, err := file.New("./uploads", "/media")
 if err != nil {
     return err
 }
 
 db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
 ```
+
+**DSN-based dispatch** — useful for configuration-driven setups where
+the backend is chosen at runtime (for example Burrow's `--storage-dsn`
+flag). Import the backend for its side effect so it registers its
+scheme:
+
+```go
+import (
+    "github.com/oliverandrich/den"
+    "github.com/oliverandrich/den/storage"
+    _ "github.com/oliverandrich/den/storage/file" // registers "file://"
+)
+
+fs, err := storage.OpenURL("file:///uploads", "/media")
+if err != nil {
+    return err
+}
+
+db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
+```
+
+The `file://` DSN uses the same SQLAlchemy/JDBC-style convention as
+`sqlite://`:
+
+| DSN | Path handed to the filesystem |
+|---|---|
+| `file:///data/media` | `data/media` *(relative, 3 slashes)* |
+| `file:////var/media` | `/var/media` *(absolute, 4 slashes)* |
+
+One leading slash is stripped on parse so that standard URL libraries
+(Go `net/url`, Python `urllib.parse`) can tokenise the DSN with the
+authority component staying empty. Direct construction via `file.New(...)`
+takes the filesystem path literally — no stripping.
 
 One Storage serves every document type in the database. If you need
 per-type routing (public CDN for post covers, private bucket for invoices),
@@ -175,11 +213,11 @@ io.Copy(w, f)
 ## Serving URLs
 
 `Storage.URL` returns the URL path at which the file is served. For
-`FilesystemStorage` that is the URL prefix passed at construction plus the
-storage path:
+the filesystem backend that is the URL prefix passed at construction
+plus the storage path:
 
 ```go
-fs := storage.NewFilesystemStorage("./uploads", "/media")
+fs, _ := file.New("./uploads", "/media")
 // Attachment.StoragePath = "2026/04/abc123def4567890.jpg"
 fs.URL(att) // -> "/media/2026/04/abc123def4567890.jpg"
 ```
@@ -187,10 +225,10 @@ fs.URL(att) // -> "/media/2026/04/abc123def4567890.jpg"
 Remote storage backends may return absolute URLs (`https://cdn.example.com/...`)
 or pre-signed URLs. Applications should treat the return value as opaque.
 
-Serving the files is up to the application. For `FilesystemStorage` a
-`http.FileServer` rooted at the same directory is the typical pairing —
-see [burrow/contrib/uploads](https://github.com/oliverandrich/burrow) for
-a ready-made serving app.
+Serving the files is up to the application. The
+[burrow/uploader](https://github.com/oliverandrich/burrow/tree/main/uploader)
+package provides a ready-made HTTP serving handler and multipart ingress
+helpers built on the `Storage` interface.
 
 ## Hard-Delete Cascade
 
@@ -228,15 +266,21 @@ func (g *Gallery) BeforeDelete(ctx context.Context) error {
 Soft-delete does NOT trigger the cascade — the bytes stay until you
 hard-delete. That matches the intent of soft delete (reversible removal).
 
-## The FilesystemStorage Reference Implementation
+## The File Reference Implementation
 
-`den/storage.FilesystemStorage` is the default. It stores bytes on the
-local disk under a configurable root directory, addressed by the content
-hash:
+`den/storage/file` is the reference backend. It stores bytes on the
+local disk under a configurable root directory, addressed by the
+content hash:
 
 ```go
-fs, err := storage.NewFilesystemStorage("./uploads", "/media")
+import "github.com/oliverandrich/den/storage/file"
+
+fs, err := file.New("./uploads", "/media")
 ```
+
+Importing the package for its side effect also registers the `file://`
+scheme with [`storage.OpenURL`](#installing-a-storage-backend), so
+configuration-driven setups can use either form interchangeably.
 
 The generated path is
 `YYYY/MM/<first-16-of-sha256>.<ext>` — grouped by month, content-addressed,
@@ -256,16 +300,16 @@ Security-relevant behavior:
 
 ### URL-prefix accessor
 
-`FilesystemStorage` exposes its HTTP prefix via `URLPrefix() string`:
+The filesystem backend exposes its HTTP prefix via `URLPrefix() string`:
 
 ```go
-fs, _ := storage.NewFilesystemStorage("./uploads", "/media")
+fs, _ := file.New("./uploads", "/media")
 fs.URLPrefix() // "/media"
 ```
 
-HTTP-layer packages (Burrow's `contrib/uploads`, custom handlers) use
-this to mount a serving handler on the same route that `URL` produces,
-without having the prefix configured twice. Remote backends (S3, GCS)
+HTTP-layer packages (`burrow/uploader`, custom handlers) use this to
+mount a serving handler on the same route that `URL` produces, without
+having the prefix configured twice. Remote backends (S3, GCS)
 intentionally do NOT implement this method — the absent `URLPrefix()`
 is the signal that the Storage is responsible for serving and the HTTP
 package should skip local routing.

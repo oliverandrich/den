@@ -28,6 +28,7 @@ type DB struct {
 	encoder          Encoder
 	encoderOnce      sync.Once
 	tagValidator     func(doc any) error
+	storage          Storage
 	pendingTypes     []any // queued by WithTypes, registered at the end of Open
 	mu               sync.RWMutex
 }

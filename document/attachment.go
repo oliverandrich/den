@@ -30,7 +30,7 @@ package document
 // When a document that embeds or contains an Attachment is hard-deleted,
 // Den asks the configured Storage to remove the referenced bytes.
 type Attachment struct {
-	StoragePath string `json:"storage_path"     validate:"required,max=500"`
+	StoragePath string `json:"storage_path"     validate:"required,max=1024"`
 	Mime        string `json:"mime"             validate:"required,max=100"`
 	Size        int64  `json:"size"             validate:"required,min=1"`
 	SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`

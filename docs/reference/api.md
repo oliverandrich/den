@@ -196,6 +196,68 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 
 ---
 
+## Attachments & Storage
+
+Types and functions for embedding file references in documents and
+swapping the byte-storage backend. See the [Attachments & Storage
+guide](../guide/attachments.md) for the full walkthrough.
+
+### Option and Accessor
+
+| Function | Signature | Description |
+|---|---|---|
+| `WithStorage` | `WithStorage(s Storage) Option` | `Open`/`OpenURL` option that installs a Storage on the DB. Required for the hard-delete attachment cascade to actually drop bytes |
+| `db.Storage` | `(db *DB) Storage() Storage` | Accessor for the configured Storage, or `nil` if none was installed |
+
+### Storage Interface
+
+```go
+type Storage interface {
+    Store(ctx context.Context, r io.Reader, ext, mime string) (document.Attachment, error)
+    Open(ctx context.Context, a document.Attachment) (io.ReadCloser, error)
+    Delete(ctx context.Context, a document.Attachment) error
+    URL(a document.Attachment) string
+}
+```
+
+Implementations must be content-addressed enough that two calls with
+identical bytes resolve to the same `StoragePath`. Delete must be
+idempotent on missing paths.
+
+### FilesystemStorage
+
+Located in the `storage` sub-package (`github.com/oliverandrich/den/storage`).
+
+| Function | Signature | Description |
+|---|---|---|
+| `NewFilesystemStorage` | `NewFilesystemStorage(rootPath, urlPrefix string) (*FilesystemStorage, error)` | Reference `Storage` implementation that stores bytes on the local filesystem. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
+| `fs.Close` | `(fs *FilesystemStorage) Close() error` | Release the underlying file-descriptor held for the storage root |
+| `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Store` on a zero-byte reader |
+
+### Attachment Document Embed
+
+Located in the `document` sub-package (`github.com/oliverandrich/den/document`).
+
+```go
+type Attachment struct {
+    StoragePath string `json:"storage_path"     validate:"required,max=1024"`
+    Mime        string `json:"mime"             validate:"required,max=100"`
+    Size        int64  `json:"size"             validate:"required,min=1"`
+    SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`
+}
+```
+
+| Method | Signature | Description |
+|---|---|---|
+| `IsZero` | `(a Attachment) IsZero() bool` | Reports whether the attachment is empty (no `StoragePath` and no `Size`) |
+
+Embed alongside `document.Base` for IS-a-file documents, or declare as
+named fields for HAS-files documents. `den.Delete(..., den.HardDelete())`
+walks the document via reflection and asks the configured Storage to
+delete every non-zero Attachment it finds.
+
+---
+
 ## Index Lifecycle
 
 | Function | Signature | Description |

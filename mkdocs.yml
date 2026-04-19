@@ -70,6 +70,7 @@ nav:
       - Features:
           - Aggregations: guide/aggregations.md
           - Full-Text Search: guide/full-text-search.md
+          - Attachments & Storage: guide/attachments.md
           - Transactions: guide/transactions.md
           - Lifecycle Hooks: guide/hooks.md
       - Data Integrity:

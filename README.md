@@ -32,8 +32,9 @@ Den provides a MongoDB/Beanie-style document model using native Go structs. Stor
 - **Native aggregation** — `Avg`, `Sum`, `Min`, `Max` pushed down to SQL; `GroupBy` and `Project` for analytics
 - **Full-text search** — FTS5 for SQLite, tsvector for PostgreSQL, same `Search()` API
 - **Lifecycle hooks** — BeforeInsert, AfterUpdate, Validate, and more — interfaces on your struct, no registration
-- **Change tracking** — opt-in via `TrackedBase`: `IsChanged`, `GetChanges`, `Rollback` with byte-level snapshots
-- **Soft delete** — embed `SoftBase` instead of `Base`, automatic query filtering, `HardDelete` for permanent removal
+- **Change tracking** — opt-in via `Tracked`: `IsChanged`, `GetChanges`, `Revert` with byte-level snapshots
+- **Soft delete** — embed `SoftDelete` alongside `Base`, automatic query filtering, `HardDelete` for permanent removal
+- **Attachments & storage** — embed `Attachment`, install a `den.Storage` backend once, let the hard-delete cascade clean bytes automatically
 - **Optimistic concurrency** — revision-based conflict detection with `ErrRevisionConflict`
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically in a transaction
@@ -133,7 +134,8 @@ den/
 ├── hooks.go                        Lifecycle hook interfaces
 ├── revision.go                     Optimistic concurrency
 ├── tx.go                           Transactions
-├── document/                       Base, TrackedBase, SoftBase, TrackedSoftBase
+├── storage.go, storage/            Storage interface, FilesystemStorage
+├── document/                       Base + composable SoftDelete, Tracked, Attachment embeds
 ├── where/                          Query condition builders
 ├── backend/
 │   ├── sqlite/                     SQLite backend (pure Go, no CGO)
@@ -161,14 +163,18 @@ type ReadWriter interface {
 
 ### Document Types
 
-All documents embed one of the base types from the `document` package:
+Every document embeds `document.Base` — the required anchor that provides
+`ID`, `CreatedAt`, `UpdatedAt`, `Rev`. Opt-in features are available as
+separate composable embeds:
 
-| Base Type | Use Case |
+| Embed | Purpose |
 |---|---|
-| `document.Base` | Standard documents |
-| `document.TrackedBase` | Documents with change tracking |
-| `document.SoftBase` | Documents with soft delete |
-| `document.TrackedSoftBase` | Both change tracking and soft delete |
+| `document.Base` | Required. Provides `ID`, `CreatedAt`, `UpdatedAt`, `Rev` |
+| `document.SoftDelete` | Adds `DeletedAt` and `IsDeleted()` for non-destructive deletion |
+| `document.Tracked` | Adds byte-snapshot machinery for `IsChanged`, `GetChanges`, `Revert` |
+| `document.Attachment` | Adds `StoragePath`, `Mime`, `Size`, `SHA256` — file reference paired with a `den.Storage` backend |
+
+Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; document.Attachment; ... }`.
 
 ### Query Operators
 

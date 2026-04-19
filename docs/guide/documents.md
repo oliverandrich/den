@@ -2,13 +2,14 @@
 
 ## Base Types
 
-Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The two orthogonal features (soft delete and change tracking) are available as separate composable embeds; combine whichever you need.
+Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The orthogonal features (soft delete, change tracking, file attachment) are available as separate composable embeds; combine whichever you need.
 
 | Embed | Purpose |
 |---|---|
 | `document.Base` | Required. Provides `ID`, `CreatedAt`, `UpdatedAt`, `Rev` |
 | `document.SoftDelete` | Opt-in. Adds `DeletedAt *time.Time` and `IsDeleted()` so `Delete` soft-deletes instead of physically removing |
 | `document.Tracked` | Opt-in. Adds the byte-snapshot machinery so `IsChanged`, `GetChanges`, and `Revert` work |
+| `document.Attachment` | Opt-in. Adds `StoragePath`, `Mime`, `Size`, `SHA256` so the document references a file stored via `den.Storage`. See [Attachments & Storage](attachments.md) |
 
 ```go
 package document
@@ -26,6 +27,13 @@ type SoftDelete struct {
 
 type Tracked struct {
     snapshot []byte // not serialized
+}
+
+type Attachment struct {
+    StoragePath string `json:"storage_path"     validate:"required,max=1024"`
+    Mime        string `json:"mime"             validate:"required,max=100"`
+    Size        int64  `json:"size"             validate:"required,min=1"`
+    SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`
 }
 ```
 
@@ -55,9 +63,16 @@ type AuditLog struct {
     document.Tracked
     Action string `json:"action"`
 }
+
+type Media struct {
+    document.Base
+    document.SoftDelete
+    document.Attachment
+    OriginalName string `json:"original_name"`
+}
 ```
 
-Den detects both features **structurally**: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface. Any type that carries the right fields / methods participates, even without these specific embeds.
+Den detects features **structurally**: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface, attachments by reflection over `document.Attachment` fields during hard-delete. Any type that carries the right fields / methods participates, even without these specific embeds.
 
 ## Struct Tag Syntax
 

@@ -16,6 +16,7 @@ An ODM for Go with two storage backends — SQLite and PostgreSQL. Same API, you
 - **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
 - **Change tracking** — opt-in `Tracked` with `IsChanged`, `GetChanges`, `Revert`
 - **Soft delete** — embed `SoftDelete`, automatic query filtering, `HardDelete` for permanent removal
+- **Attachments & storage** — embed `Attachment`, install a `den.Storage` backend, hard-delete cascades to byte cleanup
 - **Optimistic concurrency** — revision-based conflict detection
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically
@@ -70,4 +71,5 @@ func main() {
 - [**Installation**](getting-started/installation.md) — Get Den into your project
 - [**Quick Start**](getting-started/quickstart.md) — Build your first app
 - [**Documents**](guide/documents.md) — Struct embedding, tags, and base types
+- [**Attachments & Storage**](guide/attachments.md) — File uploads with content-addressed storage
 - [**API Reference**](reference/api.md) — Complete API overview

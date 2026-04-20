@@ -77,19 +77,28 @@ func (qs QuerySet[T]) Limit(n int) QuerySet[T] {
 	return qs
 }
 
-// Skip sets the number of results to skip.
+// Skip sets the number of results to skip (offset pagination).
+//
+// Cannot be combined with After or Before (cursor pagination) — terminal
+// methods return ErrIncompatiblePagination when both styles are set.
 func (qs QuerySet[T]) Skip(n int) QuerySet[T] {
 	qs.skipN = n
 	return qs
 }
 
 // After sets the cursor for forward pagination.
+//
+// Cannot be combined with Skip (offset pagination) — terminal methods return
+// ErrIncompatiblePagination when both styles are set.
 func (qs QuerySet[T]) After(id string) QuerySet[T] {
 	qs.afterID = id
 	return qs
 }
 
 // Before sets the cursor for backward pagination.
+//
+// Cannot be combined with Skip (offset pagination) — terminal methods return
+// ErrIncompatiblePagination when both styles are set.
 func (qs QuerySet[T]) Before(id string) QuerySet[T] {
 	qs.beforeID = id
 	return qs
@@ -143,8 +152,8 @@ func (qs QuerySet[T]) ForUpdate(opts ...LockOption) QuerySet[T] {
 // --- Terminal methods (execute the query) ---
 
 // preflight checks deferred errors set by chain methods and enforces the
-// ForUpdate-requires-*Tx constraint. Every terminal method that touches the
-// lock state calls this first so the error surfaces consistently.
+// ForUpdate-requires-*Tx and cursor-vs-offset-pagination constraints. Every
+// terminal method calls this first so the errors surface consistently.
 func (qs QuerySet[T]) preflight() error {
 	if qs.err != nil {
 		return qs.err
@@ -153,6 +162,9 @@ func (qs QuerySet[T]) preflight() error {
 		if _, ok := qs.scope.(*Tx); !ok {
 			return ErrLockRequiresTransaction
 		}
+	}
+	if (qs.afterID != "" || qs.beforeID != "") && qs.skipN > 0 {
+		return ErrIncompatiblePagination
 	}
 	return nil
 }

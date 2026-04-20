@@ -92,6 +92,9 @@ func (qs QuerySet[T]) Max(ctx context.Context, field string) (float64, error) {
 }
 
 func (qs QuerySet[T]) aggregate(ctx context.Context, op AggregateOp, field string) (float64, error) {
+	if err := qs.preflight(); err != nil {
+		return 0, err
+	}
 	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return 0, err
@@ -110,6 +113,9 @@ func (qs QuerySet[T]) aggregate(ctx context.Context, op AggregateOp, field strin
 // Project executes the query and decodes results into the projection type.
 // Target must be a pointer to a slice of structs with json/den tags.
 func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
+	if err := qs.preflight(); err != nil {
+		return err
+	}
 	col, err := collectionFor[T](qs.scope.db())
 	if err != nil {
 		return err
@@ -183,6 +189,9 @@ func (qs QuerySet[T]) GroupBy(field string) GroupByBuilder[T] {
 // Into executes the group-by aggregation and maps results into the target slice.
 // The query is pushed down to the database as a SQL GROUP BY statement.
 func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
+	if err := gb.qs.preflight(); err != nil {
+		return err
+	}
 	col, err := collectionFor[T](gb.qs.scope.db())
 	if err != nil {
 		return err

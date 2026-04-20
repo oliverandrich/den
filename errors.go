@@ -33,6 +33,10 @@ var (
 	// ErrIncompatibleOptions is returned when two mutually-exclusive
 	// CRUDOptions are passed together.
 	ErrIncompatibleOptions = errors.New("den: incompatible options combined")
+	// ErrIncompatiblePagination is returned by terminal QuerySet methods when
+	// the caller mixed cursor pagination (After/Before) with offset pagination
+	// (Skip). The two styles have no defined interaction — pick one.
+	ErrIncompatiblePagination = errors.New("den: cursor pagination (After/Before) cannot be combined with offset pagination (Skip)")
 )
 
 // InsertFailure pairs a failed document's position in the input slice with

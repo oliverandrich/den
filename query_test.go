@@ -205,6 +205,69 @@ func TestFind_CursorPagination(t *testing.T) {
 	assert.Len(t, results, 1)
 }
 
+// TestQuerySet_AfterPlusSkip_ReturnsError pins that cursor pagination
+// (After/Before) and offset pagination (Skip) are mutually exclusive — the
+// combination has undefined semantics and preflight rejects it.
+func TestQuerySet_AfterPlusSkip_ReturnsError(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).All(ctx)
+	require.ErrorIs(t, err, den.ErrIncompatiblePagination)
+}
+
+func TestQuerySet_BeforePlusSkip_ReturnsError(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db).Before("x").Skip(5).All(ctx)
+	require.ErrorIs(t, err, den.ErrIncompatiblePagination)
+}
+
+func TestQuerySet_AfterPlusSkip_SurfacesInIter(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	var gotErr error
+	for _, err := range den.NewQuery[QueryProduct](db).After("x").Skip(5).Iter(ctx) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+	}
+	require.ErrorIs(t, gotErr, den.ErrIncompatiblePagination,
+		"Iter must surface the incompatible-pagination error via its yield path")
+}
+
+func TestQuerySet_AfterPlusSkip_SurfacesInCount(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).Count(ctx)
+	require.ErrorIs(t, err, den.ErrIncompatiblePagination,
+		"Count runs through preflight even though it ignores pagination")
+}
+
+func TestQuerySet_AfterPlusSkip_SurfacesInAggregate(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).Sum(ctx, "price")
+	require.ErrorIs(t, err, den.ErrIncompatiblePagination,
+		"aggregate terminals (Avg/Sum/Min/Max) run through preflight")
+}
+
+// TestQuerySet_SkipZeroWithAfter_OK pins that Skip(0) alongside After is
+// accepted — preflight checks `skipN > 0`, so an explicit zero offset does
+// not trip the cursor/offset-mix guard.
+func TestQuerySet_SkipZeroWithAfter_OK(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(0).All(ctx)
+	require.NoError(t, err, "Skip(0) + After must not trip the incompatibility check")
+}
+
 func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	seedQueryProducts(t, db)

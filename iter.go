@@ -24,6 +24,10 @@ import (
 // cancellation.
 func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 	return func(yield func(*T, error) bool) {
+		if err := qs.preflight(); err != nil {
+			yield(nil, err)
+			return
+		}
 		col, err := collectionFor[T](qs.scope.db())
 		if err != nil {
 			yield(nil, err)

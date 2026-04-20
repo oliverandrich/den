@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 var (
@@ -41,37 +42,71 @@ type InsertFailure struct {
 	Err   error
 }
 
+// insertManyErrorRenderCap bounds how many per-failure detail entries
+// Error() renders. Keeps the message usable in logs even when thousands of
+// failures accumulated. Remaining failures are reported as "and N more".
+const insertManyErrorRenderCap = 10
+
 // InsertManyError aggregates per-document failures from InsertMany when the
 // ContinueOnError option is set. Failures are listed in input order.
 //
-// errors.Is matches any sentinel wrapped by any failure; errors.As on a
-// per-failure error returns the wrapped concrete type.
+// Failures may be shorter than TotalFailures when the caller caps the
+// recorded list via MaxRecordedFailures; Truncated signals that case so
+// callers can distinguish "exhaustive list" from "first-N sample". Error()
+// and errors.Is/As both respect the cap: only the recorded Failures are
+// walked.
+//
+// errors.Is matches any sentinel wrapped by any recorded failure; errors.As
+// on a per-failure error returns the wrapped concrete type.
 type InsertManyError struct {
-	Failures []InsertFailure
+	Failures      []InsertFailure
+	Truncated     bool
+	TotalFailures int
+
+	unwrapOnce sync.Once
+	unwrapped  []error
 }
 
 func (e *InsertManyError) Error() string {
-	switch len(e.Failures) {
+	switch e.TotalFailures {
 	case 0:
 		return "den: insert many: no failures"
 	case 1:
 		return fmt.Sprintf("den: insert many: 1 failure (index %d: %v)",
 			e.Failures[0].Index, e.Failures[0].Err)
 	}
-	parts := make([]string, len(e.Failures))
-	for i, f := range e.Failures {
+
+	rendered := e.Failures
+	if len(rendered) > insertManyErrorRenderCap {
+		rendered = rendered[:insertManyErrorRenderCap]
+	}
+	parts := make([]string, len(rendered))
+	for i, f := range rendered {
 		parts[i] = fmt.Sprintf("index %d: %v", f.Index, f.Err)
 	}
-	return fmt.Sprintf("den: insert many: %d failures (%s)",
-		len(e.Failures), strings.Join(parts, "; "))
+
+	details := strings.Join(parts, "; ")
+	remaining := e.TotalFailures - len(rendered)
+	if remaining > 0 {
+		return fmt.Sprintf("den: insert many: %d failures (%s; and %d more)",
+			e.TotalFailures, details, remaining)
+	}
+	return fmt.Sprintf("den: insert many: %d failures (%s)", e.TotalFailures, details)
 }
 
 // Unwrap returns the wrapped errors so errors.Is and errors.As traverse
-// every failure.
+// every recorded failure. The returned slice is built once and cached —
+// repeat calls return the same backing array.
+//
+// When Truncated is true, only the recorded Failures are unwrapped; elided
+// failures are not reachable via the errors tree. This is intentional — a
+// sampled error should not silently appear exhaustive.
 func (e *InsertManyError) Unwrap() []error {
-	out := make([]error, len(e.Failures))
-	for i, f := range e.Failures {
-		out[i] = f.Err
-	}
-	return out
+	e.unwrapOnce.Do(func() {
+		e.unwrapped = make([]error, len(e.Failures))
+		for i, f := range e.Failures {
+			e.unwrapped[i] = f.Err
+		}
+	})
+	return e.unwrapped
 }

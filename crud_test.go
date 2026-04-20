@@ -604,6 +604,94 @@ func TestInsertMany_ContinueOnError_HonorsContextCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestInsertMany_MaxRecordedFailures_CapsAt(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := make([]*Validated, 20)
+	for i := range docs {
+		docs[i] = &Validated{Name: ""} // all invalid
+	}
+
+	err := den.InsertMany(ctx, db, docs,
+		den.ContinueOnError(),
+		den.MaxRecordedFailures(5),
+	)
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 5, "failures slice is capped")
+	assert.True(t, multi.Truncated, "Truncated reports the cap was hit")
+	assert.Equal(t, 20, multi.TotalFailures, "TotalFailures reports the uncapped count")
+}
+
+func TestInsertMany_MaxRecordedFailures_UnderLimit_NotTruncated(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: ""}, {Name: ""}, {Name: ""}}
+	err := den.InsertMany(ctx, db, docs,
+		den.ContinueOnError(),
+		den.MaxRecordedFailures(10),
+	)
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 3)
+	assert.False(t, multi.Truncated)
+	assert.Equal(t, 3, multi.TotalFailures)
+}
+
+func TestInsertMany_MaxRecordedFailures_Zero_Unlimited(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	// The default cap is 100 — confirm MaxRecordedFailures(0) disables it by
+	// producing a batch larger than the default.
+	docs := make([]*Validated, 150)
+	for i := range docs {
+		docs[i] = &Validated{Name: ""}
+	}
+
+	err := den.InsertMany(ctx, db, docs,
+		den.ContinueOnError(),
+		den.MaxRecordedFailures(0),
+	)
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 150, "0 cap means unlimited")
+	assert.False(t, multi.Truncated)
+	assert.Equal(t, 150, multi.TotalFailures)
+}
+
+func TestInsertMany_DefaultRecordedFailuresCap(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	// With no MaxRecordedFailures option, the default cap of 100 kicks in.
+	docs := make([]*Validated, 150)
+	for i := range docs {
+		docs[i] = &Validated{Name: ""}
+	}
+
+	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 100)
+	assert.True(t, multi.Truncated)
+	assert.Equal(t, 150, multi.TotalFailures)
+}
+
+func TestInsertMany_RejectsMaxRecordedFailuresWithoutContinueOnError(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	err := den.InsertMany(ctx, db,
+		[]*Validated{{Name: "A"}},
+		den.MaxRecordedFailures(10),
+	)
+	require.ErrorIs(t, err, den.ErrIncompatibleOptions,
+		"MaxRecordedFailures is only meaningful with ContinueOnError")
+}
+
 func TestDeleteMany(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()

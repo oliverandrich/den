@@ -472,6 +472,32 @@ func ContinueOnError() CRUDOption {
 	}
 }
 
+// defaultMaxRecordedFailures bounds the Failures list that InsertMany
+// collects under ContinueOnError when the caller does not override it. Keeps
+// pathological batches (millions of failures) from pinning megabytes of
+// memory in a single error value. Callers that want the full list must opt
+// in explicitly via MaxRecordedFailures(0).
+const defaultMaxRecordedFailures = 100
+
+// MaxRecordedFailures caps how many per-document failures InsertMany records
+// in the returned *InsertManyError when ContinueOnError is in effect. The
+// error's TotalFailures field always reports the uncapped count, and
+// Truncated flags that the list was sampled.
+//
+// Passing 0 disables the cap (records every failure). The default when the
+// option is not passed is a modest cap (currently 100) so that runaway
+// batches do not quietly allocate unbounded memory.
+//
+// Returns ErrIncompatibleOptions when combined without ContinueOnError —
+// without ContinueOnError InsertMany is fail-fast and never constructs an
+// *InsertManyError, so the cap would be a silent no-op.
+func MaxRecordedFailures(n int) CRUDOption {
+	return func(o *crudOpts) {
+		o.maxRecordedFailures = n
+		o.maxRecordedFailuresSet = true
+	}
+}
+
 // InsertMany inserts multiple documents in a single transaction.
 //
 // When scope is a *DB, a new transaction is opened for the batch; when
@@ -488,11 +514,15 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 		return fmt.Errorf("%w: PreValidate and ContinueOnError", ErrIncompatibleOptions)
 	}
 
+	if o.maxRecordedFailuresSet && !o.continueOnError {
+		return fmt.Errorf("%w: MaxRecordedFailures requires ContinueOnError", ErrIncompatibleOptions)
+	}
+
 	if o.continueOnError {
 		if _, ok := s.(*Tx); ok {
 			return fmt.Errorf("%w: ContinueOnError requires *DB", ErrIncompatibleScope)
 		}
-		return insertManyContinueOnError(ctx, s.db(), documents, opts)
+		return insertManyContinueOnError(ctx, s.db(), documents, opts, o)
 	}
 
 	if o.preValidate && o.linkRule != LinkWrite {
@@ -560,8 +590,21 @@ type preparedInsert[T any] struct {
 	col  *collectionInfo
 }
 
-func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption) error {
-	var failures []InsertFailure
+func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption, o crudOpts) error {
+	limit := defaultMaxRecordedFailures
+	if o.maxRecordedFailuresSet {
+		limit = o.maxRecordedFailures
+	}
+
+	// Pre-allocate the failures slice to the best-case bound so the append
+	// loop does not grow the backing array for typical partial-failure batches.
+	initialCap := len(docs)
+	if limit != 0 && limit < initialCap {
+		initialCap = limit
+	}
+	failures := make([]InsertFailure, 0, initialCap)
+
+	var total int
 	for i, doc := range docs {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -570,13 +613,20 @@ func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, op
 			return Insert(ctx, tx, doc, opts...)
 		})
 		if err != nil {
-			failures = append(failures, InsertFailure{Index: i, Err: err})
+			total++
+			if limit == 0 || len(failures) < limit {
+				failures = append(failures, InsertFailure{Index: i, Err: err})
+			}
 		}
 	}
-	if len(failures) == 0 {
+	if total == 0 {
 		return nil
 	}
-	return &InsertManyError{Failures: failures}
+	return &InsertManyError{
+		Failures:      failures,
+		Truncated:     limit != 0 && total > limit,
+		TotalFailures: total,
+	}
 }
 
 // DeleteMany deletes all documents matching the given conditions.

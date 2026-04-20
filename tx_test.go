@@ -348,44 +348,10 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 	p := &Product{Name: "Contended", Price: 1.0}
 	require.NoError(t, den.Insert(ctx, db, p))
 
-	var tx1Committed atomic.Bool
-	var tx2LockedBefore atomic.Bool
-	tx1Released := make(chan struct{})
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		// Wait for tx1 to definitely hold the lock before attempting tx2.
-		<-tx1Released
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.LockByID[Product](ctx, tx, p.ID)
-			if err != nil {
-				return err
-			}
-			// tx1 must have committed before tx2's lock succeeds.
-			if !tx1Committed.Load() {
-				tx2LockedBefore.Store(true)
-			}
-			return nil
-		})
-		assert.NoError(t, err)
-	})
-
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *den.Tx) error {
 		_, err := den.LockByID[Product](ctx, tx, p.ID)
-		if err != nil {
-			return err
-		}
-		// Signal tx2 to start trying; give it time to block on the lock.
-		close(tx1Released)
-		time.Sleep(150 * time.Millisecond)
-		tx1Committed.Store(true)
-		return nil
+		return err
 	})
-	require.NoError(t, err)
-
-	wg.Wait()
-	assert.False(t, tx2LockedBefore.Load(),
-		"tx2 must not acquire the lock before tx1 commits")
 }
 
 // runContendedTx spawns a goroutine that holds a row lock until release is
@@ -520,6 +486,173 @@ func TestTxLockByID_ConflictingOptions_Rejected(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestLockByID_NGoroutines_ExactlyOneHolder(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "NWay"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	const N = 5
+	var currentHolders atomic.Int32
+
+	var wg sync.WaitGroup
+	for range N {
+		wg.Go(func() {
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				if _, err := den.LockByID[Product](ctx, tx, p.ID); err != nil {
+					return err
+				}
+				if holders := currentHolders.Add(1); holders > 1 {
+					t.Errorf("lock violation: %d concurrent holders", holders)
+				}
+				defer currentHolders.Add(-1)
+				// Hold briefly so later goroutines queue on the lock.
+				time.Sleep(20 * time.Millisecond)
+				return nil
+			})
+			assert.NoError(t, err)
+		})
+	}
+	wg.Wait()
+}
+
+// Test-only advisory-lock keys. Plain distinct values — no hidden encoding.
+const (
+	advisoryKeySerialize int64 = 101
+	advisoryKeyParallelA int64 = 102
+	advisoryKeyParallelB int64 = 103
+	advisoryKeyRollback  int64 = 104
+)
+
+// assertSerializesUnderContention runs acquire in two concurrent transactions
+// on db and verifies the second cannot proceed past acquire until the first
+// commits. Both calls must target the same lockable object so they contend.
+func assertSerializesUnderContention(t *testing.T, db *den.DB, acquire func(ctx context.Context, tx *den.Tx) error) {
+	t.Helper()
+	ctx := context.Background()
+
+	var tx1Committed atomic.Bool
+	var tx2AcquiredBeforeTx1Committed atomic.Bool
+	tx1Released := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		<-tx1Released
+		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			if err := acquire(ctx, tx); err != nil {
+				return err
+			}
+			if !tx1Committed.Load() {
+				tx2AcquiredBeforeTx1Committed.Store(true)
+			}
+			return nil
+		})
+		assert.NoError(t, err)
+	})
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		if err := acquire(ctx, tx); err != nil {
+			return err
+		}
+		close(tx1Released)
+		time.Sleep(150 * time.Millisecond)
+		tx1Committed.Store(true)
+		return nil
+	})
+	require.NoError(t, err)
+
+	wg.Wait()
+	assert.False(t, tx2AcquiredBeforeTx1Committed.Load(),
+		"tx2 must block until tx1 commits")
+}
+
+func TestAdvisoryLock_SameKeySerializes(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *den.Tx) error {
+		return den.AdvisoryLock(ctx, tx, advisoryKeySerialize)
+	})
+}
+
+func TestAdvisoryLock_DifferentKeysParallel(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	const hold = 200 * time.Millisecond
+
+	run := func(wg *sync.WaitGroup, key int64) {
+		wg.Go(func() {
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				if err := den.AdvisoryLock(ctx, tx, key); err != nil {
+					return err
+				}
+				time.Sleep(hold)
+				return nil
+			})
+			assert.NoError(t, err)
+		})
+	}
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	run(&wg, advisoryKeyParallelA)
+	run(&wg, advisoryKeyParallelB)
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Serialized: ≈2*hold. Parallel: ≈hold. Allow 100ms scheduler slack.
+	assert.Less(t, elapsed, 2*hold-100*time.Millisecond,
+		"different keys must not serialize; took %v for 2×%v holds", elapsed, hold)
+}
+
+func TestAdvisoryLock_ReleasedOnRollback(t *testing.T) {
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
+	ctx := context.Background()
+
+	sentinel := errors.New("force rollback")
+
+	tx1Released := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		<-tx1Released
+		start := time.Now()
+		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+			return den.AdvisoryLock(ctx, tx, advisoryKeyRollback)
+		})
+		elapsed := time.Since(start)
+		// Guard the timing check so it only runs when the tx itself succeeded;
+		// require.* would only fail the goroutine, not the test.
+		if assert.NoError(t, err) {
+			assert.Less(t, elapsed, 500*time.Millisecond,
+				"tx2 must acquire the lock shortly after tx1's rollback, took %v", elapsed)
+		}
+	})
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		if err := den.AdvisoryLock(ctx, tx, advisoryKeyRollback); err != nil {
+			return err
+		}
+		close(tx1Released)
+		// Give tx2 time to block on the lock before rolling back.
+		time.Sleep(50 * time.Millisecond)
+		return sentinel
+	})
+	require.ErrorIs(t, err, sentinel)
+
+	wg.Wait()
+}
+
+func TestAdvisoryLock_SQLiteNoop(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.AdvisoryLock(ctx, tx, 42)
+	})
+	require.NoError(t, err,
+		"SQLite AdvisoryLock is a no-op — IMMEDIATE transactions already serialize writers")
 }
 
 // TestScope_CRUDWorksWithBothDBAndTx proves that every unified CRUD entry

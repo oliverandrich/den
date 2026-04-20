@@ -113,6 +113,32 @@ count, err := den.NewQuery[Product](db,
 !!! tip
     Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
 
+### Fail-fast and field validation
+
+`QuerySet.Update` is **fail-fast**. Any per-row error — a `BeforeUpdate` hook returning an error, validation failure, revision conflict, or backend write error — aborts the loop, rolls the transaction back, and returns `(0, err)`. There is no partial commit: either every matching document is updated, or none is.
+
+When the query set is bound to an outer transaction (`*Tx`), a failure also rolls back that caller transaction — the error surfaces to the `RunInTransaction` closure.
+
+Field names in `SetFields` (the names as they appear in the `json` struct tag) are validated against the registered struct **before** the write transaction opens. An unknown field returns immediately without touching storage. Callers that want to surface field-name mistakes at application start, rather than at the first `.Update()` call, can iterate `Meta[T].Fields`:
+
+```go
+meta, err := den.Meta[Product](db)
+if err != nil {
+    return err
+}
+known := make(map[string]struct{}, len(meta.Fields))
+for _, f := range meta.Fields {
+    known[f.Name] = struct{}{} // f.Name is the JSON name — matches SetFields keys
+}
+for name := range myFields {
+    if _, ok := known[name]; !ok {
+        return fmt.Errorf("unknown field %q on Product", name)
+    }
+}
+```
+
+Den does not ship a typed `SetFields` builder: a chained generic alternative would not give meaningfully more safety than the runtime check, and compile-time field access would require code generation, which is outside the current scope.
+
 ## FindOneAndUpdate
 
 Atomic find-and-modify in a single transaction. Finds the document matching the conditions, applies the field updates, and returns the modified document.

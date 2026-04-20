@@ -503,6 +503,103 @@ func TestQuerySet_Update_Postgres_NoDeadlock(t *testing.T) {
 	assert.Equal(t, int64(25), done)
 }
 
+func TestQuerySet_Update_HookFailureRollsBack(t *testing.T) {
+	db := dentest.MustOpen(t, &FailBeforeUpdateDoc{})
+	ctx := context.Background()
+
+	docs := []*FailBeforeUpdateDoc{
+		{Name: "A"},
+		{Name: "B"},
+		{Name: "C"},
+	}
+	for _, d := range docs {
+		require.NoError(t, den.Insert(ctx, db, d))
+	}
+
+	count, err := den.NewQuery[FailBeforeUpdateDoc](db).
+		Update(ctx, den.SetFields{"name": "X"})
+	require.Error(t, err)
+	assert.Equal(t, int64(0), count, "fail-fast: tx rolled back, count is zero")
+
+	all, err := den.NewQuery[FailBeforeUpdateDoc](db).Sort("name", den.Asc).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+	assert.Equal(t, []string{"A", "B", "C"}, []string{all[0].Name, all[1].Name, all[2].Name},
+		"no document was modified")
+}
+
+func TestQuerySet_Update_OnTxScope_FailureRollsBackCallerTx(t *testing.T) {
+	db := dentest.MustOpen(t, &FailBeforeUpdateDoc{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &FailBeforeUpdateDoc{Name: "Seed"}))
+
+	// A failing bulk Update inside an outer tx must roll back the whole tx,
+	// including any prior writes done in that same tx.
+	txErr := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		if err := den.Insert(ctx, tx, &FailBeforeUpdateDoc{Name: "TxOnly"}); err != nil {
+			return err
+		}
+		_, err := den.NewQuery[FailBeforeUpdateDoc](tx).
+			Update(ctx, den.SetFields{"name": "X"})
+		return err
+	})
+	require.Error(t, txErr)
+
+	count, err := den.NewQuery[FailBeforeUpdateDoc](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count, "only the pre-tx seed survives; TxOnly is rolled back")
+}
+
+// updateHookCounter records BeforeUpdate / AfterUpdate fires across the freshly
+// decoded instances inside QuerySet.Update's loop. Tests touching it must NOT
+// use t.Parallel — there is no synchronization.
+var updateHookCounter struct {
+	beforeUpdate int
+	afterUpdate  int
+}
+
+type counterUpdateDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (d *counterUpdateDoc) BeforeUpdate(_ context.Context) error {
+	updateHookCounter.beforeUpdate++
+	return nil
+}
+
+func (d *counterUpdateDoc) AfterUpdate(_ context.Context) error {
+	updateHookCounter.afterUpdate++
+	return nil
+}
+
+func TestQuerySet_Update_HooksFirePerRow(t *testing.T) {
+	db := dentest.MustOpen(t, &counterUpdateDoc{})
+	ctx := context.Background()
+	updateHookCounter = struct {
+		beforeUpdate int
+		afterUpdate  int
+	}{}
+	t.Cleanup(func() {
+		updateHookCounter = struct {
+			beforeUpdate int
+			afterUpdate  int
+		}{}
+	})
+
+	for _, name := range []string{"A", "B", "C"} {
+		require.NoError(t, den.Insert(ctx, db, &counterUpdateDoc{Name: name}))
+	}
+
+	count, err := den.NewQuery[counterUpdateDoc](db).
+		Update(ctx, den.SetFields{"name": "X"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+	assert.Equal(t, 3, updateHookCounter.beforeUpdate, "BeforeUpdate fires per row")
+	assert.Equal(t, 3, updateHookCounter.afterUpdate, "AfterUpdate fires per row")
+}
+
 func TestQuerySet_Update_NilValue(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	seedQueryProducts(t, db)

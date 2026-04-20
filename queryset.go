@@ -354,12 +354,24 @@ func drainIter[T any](db *DB, iter Iterator, capHint int) ([]*T, error) {
 	return results, nil
 }
 
-// Update applies field updates to all matching documents. Returns the number
-// of updated documents.
+// Update applies field updates to every matching document. Returns the
+// number of updated documents.
 //
 // When bound to a *DB, the scan + writes run in a new transaction so the
 // batch is atomic. When bound to a *Tx, they run inline in the caller's
-// transaction.
+// transaction — a per-row failure rolls back the caller's transaction too.
+//
+// Update is fail-fast: any per-row error (BeforeUpdate hook, validation,
+// revision conflict, backend write) stops the loop, rolls back the
+// transaction, and returns (0, err). There is no partial commit; no
+// AfterUpdate / AfterSave hooks fire for rows that would have come after
+// the failure.
+//
+// Field names in fields (as they appear in the `json` struct tag) are
+// validated against the registered struct before the write transaction
+// opens — an unknown name returns immediately without opening the tx.
+// Callers that want to validate field names at application start can
+// iterate Meta[T].Fields.
 func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, error) {
 	if err := qs.preflight(); err != nil {
 		return 0, err

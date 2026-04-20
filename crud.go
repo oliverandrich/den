@@ -281,7 +281,14 @@ func Refresh[T any](ctx context.Context, s Scope, document *T) error {
 	return nil
 }
 
-// SetFields is a map of field names to new values for partial updates.
+// SetFields is a map of field names (as they appear in the `json` struct
+// tag) to new values for partial updates used by FindOneAndUpdate,
+// FindOneAndUpsert, and QuerySet.Update.
+//
+// Names are validated against the registered struct before the write
+// transaction opens; an unknown name aborts the call without touching
+// storage. Callers that want to validate names at application start can
+// iterate Meta[T].Fields and compare against a known set.
 type SetFields map[string]any
 
 // FindOneAndUpdate atomically finds the single matching document, applies

@@ -102,7 +102,7 @@ Every terminal takes `ctx context.Context` as its first argument, so the same `Q
 | `Exists` | `Exists(ctx context.Context) (bool, error)` | Check whether at least one matching document exists |
 | `AllWithCount` | `AllWithCount(ctx context.Context) ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
 | `Iter` | `Iter(ctx context.Context) iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range`. Terminates on the first error |
-| `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update all matching documents, return count of updated |
+| `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update every matching document and return the count. Fail-fast: any per-row error rolls back the transaction and returns `(0, err)`. Field names are validated before the tx opens |
 | `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
 ---
@@ -328,7 +328,7 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 | `Tx` | Transaction handle; wraps a backend transaction. Satisfies `Scope` |
 | `Scope` | Sealed interface satisfied by `*DB` and `*Tx`. Parameter type for all CRUD entry points so the same function works inside and outside a transaction |
 | `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
-| `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate` and bulk `Update` |
+| `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate`, `FindOneAndUpsert`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
 | `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |
 | `QuerySet[T]` | Chainable, lazy query builder |
 | `SortDirection` | Sort direction: `den.Asc` or `den.Desc` |

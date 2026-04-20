@@ -311,6 +311,69 @@ func TestParity_GroupBySQL(t *testing.T) {
 	}
 }
 
+func TestParity_GroupBy_NullAggregateValue(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			// Seed three rows in one category; none carry a "discount" field
+			// (ParityProduct does not define one), so json_extract / jsonb_path_text
+			// return NULL for every row and the SUM/AVG/MIN/MAX aggregates evaluate
+			// to SQL NULL. The scanner contract maps that to exactly 0.0.
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "A", Price: 10, Category: "X"},
+				{Name: "B", Price: 20, Category: "X"},
+				{Name: "C", Price: 30, Category: "X"},
+			}))
+
+			// Aggregate over a deliberately missing field on ParityProduct.
+			type StatsOverMissingField struct {
+				Category    string  `den:"group_key"`
+				Count       int64   `den:"count"`
+				SumDiscount float64 `den:"sum:discount"`
+				AvgDiscount float64 `den:"avg:discount"`
+				MinDiscount float64 `den:"min:discount"`
+				MaxDiscount float64 `den:"max:discount"`
+			}
+
+			var stats []StatsOverMissingField
+			err := den.NewQuery[ParityProduct](db).GroupBy("category").Into(ctx, &stats)
+			require.NoError(t, err)
+			require.Len(t, stats, 1)
+			assert.Equal(t, "X", stats[0].Category)
+			assert.Equal(t, int64(3), stats[0].Count)
+			// Delta of 0 means exact equality — pins the NULL→0.0 contract
+			// without testifylint's float-compare false positive.
+			assert.InDelta(t, 0.0, stats[0].SumDiscount, 0, "SUM over NULLs → exactly 0.0")
+			assert.InDelta(t, 0.0, stats[0].AvgDiscount, 0)
+			assert.InDelta(t, 0.0, stats[0].MinDiscount, 0)
+			assert.InDelta(t, 0.0, stats[0].MaxDiscount, 0)
+		})
+	}
+}
+
+func TestParity_GroupBy_ZeroMatches(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "A", Price: 10, Category: "X"},
+				{Name: "B", Price: 20, Category: "X"},
+			}))
+
+			type CountOnlyCatStats struct {
+				Category string `den:"group_key"`
+				Count    int64  `den:"count"`
+			}
+
+			var stats []CountOnlyCatStats
+			err := den.NewQuery[ParityProduct](db, where.Field("category").Eq("Z")).
+				GroupBy("category").Into(ctx, &stats)
+			require.NoError(t, err)
+			assert.Empty(t, stats, "no matching rows → empty result, no synthetic zero group")
+		})
+	}
+}
+
 type ParitySoftProduct struct {
 	document.Base
 	document.SoftDelete

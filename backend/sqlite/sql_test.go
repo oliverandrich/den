@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -308,4 +309,88 @@ func TestBuildAggregateSQL_UnsupportedOp(t *testing.T) {
 	_, _, err := buildAggregateSQL("products", den.AggregateOp("INVALID"), "price", q)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported aggregate op")
+}
+
+// --- buildGroupBySQL tests ---
+
+func TestBuildGroupBySQL_Count(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	sql, args, err := buildGroupBySQL("products", "category",
+		[]den.GroupByAgg{{Op: den.OpCount}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, `SELECT json_extract(data, '$.category'), COUNT(*) FROM "products"`)
+	assert.Contains(t, sql, `GROUP BY json_extract(data, '$.category')`)
+	assert.Empty(t, args)
+}
+
+func TestBuildGroupBySQL_NumericAgg(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	sql, _, err := buildGroupBySQL("products", "category",
+		[]den.GroupByAgg{{Op: den.OpSum, Field: "price"}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, `SUM(CAST(json_extract(data, '$.price') AS REAL))`)
+}
+
+func TestBuildGroupBySQL_MultipleAggs(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	sql, _, err := buildGroupBySQL("products", "category", []den.GroupByAgg{
+		{Op: den.OpCount},
+		{Op: den.OpSum, Field: "price"},
+		{Op: den.OpAvg, Field: "price"},
+		{Op: den.OpMin, Field: "price"},
+		{Op: den.OpMax, Field: "price"},
+	}, q)
+	require.NoError(t, err)
+	positions := []int{
+		strings.Index(sql, "COUNT(*)"),
+		strings.Index(sql, "SUM("),
+		strings.Index(sql, "AVG("),
+		strings.Index(sql, "MIN("),
+		strings.Index(sql, "MAX("),
+	}
+	for i, p := range positions {
+		require.NotEqual(t, -1, p, "aggregate %d not found in SQL", i)
+	}
+	assert.IsIncreasing(t, positions)
+}
+
+func TestBuildGroupBySQL_WithWhere(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("active").Eq(true)},
+	}
+	sql, args, err := buildGroupBySQL("products", "category",
+		[]den.GroupByAgg{{Op: den.OpCount}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "WHERE")
+	assert.Contains(t, sql, "GROUP BY")
+	assert.Less(t, strings.Index(sql, "WHERE"), strings.Index(sql, "GROUP BY"))
+	assert.Equal(t, []any{true}, args)
+}
+
+func TestBuildGroupBySQL_NestedField(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	sql, _, err := buildGroupBySQL("products", "address.country",
+		[]den.GroupByAgg{{Op: den.OpCount}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, `json_extract(data, '$.address.country')`)
+}
+
+func TestBuildGroupBySQL_UnsupportedOp(t *testing.T) {
+	q := &den.Query{Collection: "products"}
+	_, _, err := buildGroupBySQL("products", "category",
+		[]den.GroupByAgg{{Op: den.AggregateOp("INVALID"), Field: "price"}}, q)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op in group-by")
+}
+
+func TestBuildGroupBySQL_EmptyAggs(t *testing.T) {
+	// Empty aggs slice is valid: produces distinct group keys only.
+	q := &den.Query{Collection: "products"}
+	sql, _, err := buildGroupBySQL("products", "category", nil, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, `SELECT json_extract(data, '$.category') FROM "products"`)
+	assert.Contains(t, sql, `GROUP BY json_extract(data, '$.category')`)
+	assert.NotContains(t, sql, "COUNT")
+	assert.NotContains(t, sql, "SUM")
 }

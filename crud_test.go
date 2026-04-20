@@ -734,80 +734,42 @@ func TestFindOneAndUpsert_IncludeSoftDeletedUpdates(t *testing.T) {
 	assert.True(t, doc.IsDeleted(), "DeletedAt is preserved; caller clears it via SetFields if desired")
 }
 
-// hookCalls is a package-level recorder so loaded-from-DB instances still
-// observe the same trace as the ones constructed in test code. Tests that
-// touch it must NOT use t.Parallel — there is no synchronization.
-var hookCalls []string
-
-// hookProduct records lifecycle hook invocations to pin the upsert hook order.
-type hookProduct struct {
-	document.Base
-	Name string `json:"name"`
-}
-
-func (h *hookProduct) BeforeInsert(_ context.Context) error {
-	hookCalls = append(hookCalls, "BeforeInsert")
-	return nil
-}
-func (h *hookProduct) AfterInsert(_ context.Context) error {
-	hookCalls = append(hookCalls, "AfterInsert")
-	return nil
-}
-func (h *hookProduct) BeforeUpdate(_ context.Context) error {
-	hookCalls = append(hookCalls, "BeforeUpdate")
-	return nil
-}
-func (h *hookProduct) AfterUpdate(_ context.Context) error {
-	hookCalls = append(hookCalls, "AfterUpdate")
-	return nil
-}
-func (h *hookProduct) BeforeSave(_ context.Context) error {
-	hookCalls = append(hookCalls, "BeforeSave")
-	return nil
-}
-func (h *hookProduct) AfterSave(_ context.Context) error {
-	hookCalls = append(hookCalls, "AfterSave")
-	return nil
-}
-
 func TestFindOneAndUpsert_HookOrder_InsertPath(t *testing.T) {
-	db := dentest.MustOpen(t, &hookProduct{})
+	db := dentest.MustOpen(t, &orderingDoc{})
 	ctx := context.Background()
-	hookCalls = nil
-	t.Cleanup(func() { hookCalls = nil })
+	resetHookOrderCalls(t)
 
-	_, inserted, err := den.FindOneAndUpsert[hookProduct](ctx, db,
-		&hookProduct{Name: "Widget"},
+	_, inserted, err := den.FindOneAndUpsert[orderingDoc](ctx, db,
+		&orderingDoc{Name: "Widget"},
 		den.SetFields{},
 		[]where.Condition{where.Field("name").Eq("Widget")},
 	)
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.Equal(t,
-		[]string{"BeforeInsert", "BeforeSave", "AfterInsert", "AfterSave"},
-		hookCalls,
+		[]string{"BeforeInsert", "BeforeSave", "Validate", "AfterInsert", "AfterSave"},
+		hookOrderCalls,
 		"only Insert hooks fire on miss path",
 	)
 }
 
 func TestFindOneAndUpsert_HookOrder_UpdatePath(t *testing.T) {
-	db := dentest.MustOpen(t, &hookProduct{})
+	db := dentest.MustOpen(t, &orderingDoc{})
 	ctx := context.Background()
-	t.Cleanup(func() { hookCalls = nil })
 
-	require.NoError(t, den.Insert(ctx, db, &hookProduct{Name: "Widget"}))
-	hookCalls = nil // discard insert hooks from seed
+	require.NoError(t, den.Insert(ctx, db, &orderingDoc{Name: "Widget"}))
+	resetHookOrderCalls(t) // discard insert hooks from seed
 
-	_, inserted, err := den.FindOneAndUpsert[hookProduct](ctx, db,
-		&hookProduct{Name: "Widget"},
+	_, inserted, err := den.FindOneAndUpsert[orderingDoc](ctx, db,
+		&orderingDoc{Name: "Widget"},
 		den.SetFields{},
 		[]where.Condition{where.Field("name").Eq("Widget")},
 	)
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t,
-		[]string{"BeforeUpdate", "BeforeSave", "AfterUpdate", "AfterSave"},
-		hookCalls,
+		[]string{"BeforeUpdate", "BeforeSave", "Validate", "AfterUpdate", "AfterSave"},
+		hookOrderCalls,
 		"only Update hooks fire on hit path",
 	)
 }

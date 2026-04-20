@@ -2,9 +2,11 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -669,7 +671,7 @@ func TestOpen_AutoCreatesParentDir(t *testing.T) {
 
 	b, err := Open(t.Context(), nested)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = b.(interface{ Close() error }).Close() }) //nolint:errcheck,forcetypeassert
+	t.Cleanup(func() { _ = b.Close() })
 
 	info, err := os.Stat(filepath.Dir(nested))
 	require.NoError(t, err)
@@ -685,4 +687,46 @@ func TestEnsureParentDir_SkipsSpecialForms(t *testing.T) {
 	require.NoError(t, ensureParentDir(""))
 	// Query parameters are stripped before the parent-dir check.
 	require.NoError(t, ensureParentDir(":memory:?_pragma=cache_size(100)"))
+}
+
+func TestOpen_AutoCreatesParentDir_Concurrent(t *testing.T) {
+	// N goroutines open distinct SQLite files under the same missing parent
+	// directory. ensureParentDir is the shared-state stress target — the race
+	// detector surfaces any data race on the MkdirAll path. A start-gate
+	// tightens the race window so all goroutines hit MkdirAll close together.
+	base := filepath.Join(t.TempDir(), "shared", "nested", "dir")
+
+	const N = 10
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range N {
+		wg.Go(func() {
+			<-start
+			path := filepath.Join(base, fmt.Sprintf("db-%d.sqlite", i))
+			b, err := Open(t.Context(), path)
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.NoError(t, b.Close())
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	entries, err := os.ReadDir(base)
+	require.NoError(t, err)
+	assert.Len(t, entries, N, "every goroutine's db file should land in the shared parent")
+}
+
+func TestOpen_ParentPathIsRegularFile_Errors(t *testing.T) {
+	// When a path component is a regular file, MkdirAll can't turn it into a
+	// directory. Open must surface a clear error rather than panic.
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("hello"), 0o600))
+
+	_, err := Open(t.Context(), filepath.Join(blocker, "nested", "db.sqlite"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory",
+		"stdlib MkdirAll error surfaces when a path component is a file")
 }

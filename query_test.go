@@ -419,25 +419,6 @@ func TestEndsWith(t *testing.T) {
 	assert.Len(t, results, 2) // Beta, Delta
 }
 
-func TestStringContains_EscapesSpecialChars(t *testing.T) {
-	db := dentest.MustOpen(t, &QueryProduct{})
-	ctx := context.Background()
-
-	// Insert a product with LIKE special characters in the name
-	p := &QueryProduct{Name: "100% off_sale", Price: 5.0, Category: "A"}
-	require.NoError(t, den.Insert(ctx, db, p))
-
-	// Search for literal "%" — should not match everything
-	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StringContains("%")).All(ctx)
-	require.NoError(t, err)
-	assert.Len(t, results, 1)
-
-	// Search for literal "_" — should not match single chars
-	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StringContains("_")).All(ctx)
-	require.NoError(t, err)
-	assert.Len(t, results, 1)
-}
-
 func TestQuerySet_Update_NoMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()

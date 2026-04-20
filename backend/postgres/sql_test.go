@@ -162,6 +162,59 @@ func TestBuildSelectSQL_Contains(t *testing.T) {
 	assert.Equal(t, []any{"go"}, args)
 }
 
+func TestBuildSelectSQL_StartsWith(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("name").StartsWith("Widget")},
+	}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, `jsonb_extract_path_text(data, 'name') LIKE $1 ESCAPE '\'`)
+	assert.Equal(t, []any{`Widget%`}, args)
+}
+
+func TestBuildSelectSQL_EndsWith(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("name").EndsWith("Widget")},
+	}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, `LIKE $1 ESCAPE '\'`)
+	assert.Equal(t, []any{`%Widget`}, args)
+}
+
+func TestBuildSelectSQL_StringContains(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{where.Field("name").StringContains("idge")},
+	}
+	sql, args := buildSelectSQL("products", q)
+	assert.Contains(t, sql, `LIKE $1 ESCAPE '\'`)
+	assert.Equal(t, []any{`%idge%`}, args)
+}
+
+func TestBuildSelectSQL_LikeOps_EscapeSpecialChars(t *testing.T) {
+	// Confirms escapeLike fires on every LIKE-based operator — the literal
+	// % and _ must be neutralized in the wire arg so a future refactor can't
+	// silently bypass escapeLike in one branch and turn a literal match into
+	// an accidental wildcard.
+	cases := []struct {
+		name string
+		cond where.Condition
+		want any
+	}{
+		{"StartsWith", where.Field("name").StartsWith(`50%_off`), `50\%\_off%`},
+		{"EndsWith", where.Field("name").EndsWith(`50%_off`), `%50\%\_off`},
+		{"StringContains", where.Field("name").StringContains(`50%_off`), `%50\%\_off%`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &den.Query{Collection: "products", Conditions: []where.Condition{tc.cond}}
+			_, args := buildSelectSQL("products", q)
+			assert.Equal(t, []any{tc.want}, args)
+		})
+	}
+}
+
 func TestBuildSelectSQL_ContainsAny(t *testing.T) {
 	q := &den.Query{
 		Collection: "products",

@@ -374,6 +374,67 @@ func TestParity_GroupBy_ZeroMatches(t *testing.T) {
 	}
 }
 
+func TestParity_StringContains_EscapesSpecialChars(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			// Seed names containing each LIKE special character literally so a
+			// search for the same character must match exactly the seeded row.
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "100% off_sale", Price: 1, Category: "X"},
+				{Name: `back\slash`, Price: 2, Category: "X"},
+				{Name: "plain text", Price: 3, Category: "X"},
+			}))
+
+			cases := []struct {
+				query string
+				want  string
+			}{
+				{"%", "100% off_sale"},
+				{"_", "100% off_sale"},
+				{`\`, `back\slash`},
+			}
+			for _, tc := range cases {
+				results, err := den.NewQuery[ParityProduct](db,
+					where.Field("name").StringContains(tc.query)).All(ctx)
+				require.NoError(t, err)
+				require.Len(t, results, 1, "search %q must match exactly one seeded row", tc.query)
+				assert.Equal(t, tc.want, results[0].Name)
+			}
+		})
+	}
+}
+
+func TestParity_StringContains_Unicode(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "café noir", Price: 1, Category: "X"},
+				{Name: "日本語サンプル", Price: 2, Category: "X"},
+				{Name: "party 🎉 time", Price: 3, Category: "X"},
+				{Name: "plain ascii", Price: 4, Category: "X"},
+			}))
+
+			cases := []struct {
+				query string
+				want  string
+			}{
+				{"café", "café noir"},
+				{"日本", "日本語サンプル"},
+				{"🎉", "party 🎉 time"},
+			}
+			for _, tc := range cases {
+				results, err := den.NewQuery[ParityProduct](db,
+					where.Field("name").StringContains(tc.query)).All(ctx)
+				require.NoError(t, err)
+				require.Len(t, results, 1, "multi-byte query %q must match exactly one row", tc.query)
+				assert.Equal(t, tc.want, results[0].Name)
+			}
+		})
+	}
+}
+
 type ParitySoftProduct struct {
 	document.Base
 	document.SoftDelete

@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -389,14 +388,8 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		return 0, err
 	}
 
-	// Validate and cache field lookups before starting the transaction
-	fieldInfos := make(map[string]*internal.FieldInfo, len(fields))
-	for fieldName := range fields {
-		fi := col.structInfo.FieldByName(fieldName)
-		if fi == nil {
-			return 0, fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
-		}
-		fieldInfos[fieldName] = fi
+	if err := validateSetFields(col, fields); err != nil {
+		return 0, err
 	}
 
 	q := qs.buildBackendQuery(col)
@@ -421,11 +414,8 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 				return err
 			}
 			rv := reflect.ValueOf(doc).Elem()
-			for fieldName, newVal := range fields {
-				fv := rv.FieldByIndex(fieldInfos[fieldName].Index)
-				if err := setFieldValue(fv, newVal, fieldName); err != nil {
-					return err
-				}
+			if err := applySetFields(rv, col, fields); err != nil {
+				return err
 			}
 			if err := Update(ctx, tx, doc); err != nil {
 				return err

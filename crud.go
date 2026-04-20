@@ -661,6 +661,19 @@ func applySetFields(rv reflect.Value, col *collectionInfo, fields SetFields) err
 	return nil
 }
 
+// validateSetFields checks that every field name in fields exists on the
+// collection's struct. Shared by callers that need pre-transaction validation
+// (QuerySet.Update) — the in-tx applySetFields re-validates as it goes, so
+// within the tx this step is not required.
+func validateSetFields(col *collectionInfo, fields SetFields) error {
+	for fieldName := range fields {
+		if col.structInfo.FieldByName(fieldName) == nil {
+			return fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
+		}
+	}
+	return nil
+}
+
 // setFieldValue sets a struct field to the given value, handling nil correctly.
 func setFieldValue(fv reflect.Value, newVal any, fieldName string) error {
 	if newVal == nil {

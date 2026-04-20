@@ -440,6 +440,19 @@ func TestQuerySet_Update_InvalidField(t *testing.T) {
 	assert.Contains(t, err.Error(), "field")
 }
 
+// TestQuerySet_Update_InvalidField_NoMatches pins the documented contract that
+// field-name validation runs before the write transaction opens — an invalid
+// field must error even when the predicate matches zero rows.
+func TestQuerySet_Update_InvalidField_NoMatches(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
+		Update(ctx, den.SetFields{"nonexistent": "x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field")
+}
+
 func TestQuerySet_Update_TypeMismatch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	seedQueryProducts(t, db)

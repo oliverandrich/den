@@ -54,7 +54,7 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
 | `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
 | `IncludeSoftDeleted` | `IncludeSoftDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match |
-| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire twice — they must be idempotent |
+| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire once per document (pre-pass only); combining with `WithLinkRule(LinkWrite)` disables the optimization and hooks fire twice |
 | `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
 
 ---

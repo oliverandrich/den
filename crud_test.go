@@ -423,7 +423,81 @@ func TestInsertMany_PreValidate_FailsAtStart(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 }
 
-func TestInsertMany_PreValidate_HooksRunTwice(t *testing.T) {
+// counterLinkedDoc is counterHookDoc + a Link field so the LinkWrite path
+// can be exercised while the same counterHookCalls recorder is reused.
+type counterLinkedDoc struct {
+	document.Base
+	Name string         `json:"name"`
+	Ref  den.Link[Door] `json:"ref"`
+}
+
+func (d *counterLinkedDoc) BeforeInsert(_ context.Context) error {
+	counterHookCalls = append(counterHookCalls, "BeforeInsert")
+	return nil
+}
+
+func (d *counterLinkedDoc) BeforeSave(_ context.Context) error {
+	counterHookCalls = append(counterHookCalls, "BeforeSave")
+	return nil
+}
+
+func (d *counterLinkedDoc) Validate() error {
+	counterHookCalls = append(counterHookCalls, "Validate")
+	return nil
+}
+
+func TestInsertMany_PreValidate_LinkWrite_HooksRunTwice(t *testing.T) {
+	// Pins the documented exception: PreValidate + LinkWrite disables the
+	// caching optimization, so the prep chain runs once outside the tx and
+	// again inside it.
+	db := dentest.MustOpen(t, &Door{}, &counterLinkedDoc{})
+	ctx := context.Background()
+	counterHookCalls = nil
+	t.Cleanup(func() { counterHookCalls = nil })
+
+	docs := []*counterLinkedDoc{{
+		Name: "A",
+		Ref:  den.NewLink(&Door{Height: 200, Width: 80}),
+	}}
+	require.NoError(t, den.InsertMany(ctx, db, docs,
+		den.PreValidate(), den.WithLinkRule(den.LinkWrite)))
+
+	expected := []string{
+		"BeforeInsert", "BeforeSave", "Validate",
+		"BeforeInsert", "BeforeSave", "Validate",
+	}
+	assert.Equal(t, expected, counterHookCalls)
+}
+
+func TestInsertMany_PreValidate_LinkWrite_CascadesAndPersists(t *testing.T) {
+	// Guards the LinkWrite + PreValidate branch: cascade must still happen
+	// (the optimization doesn't apply; the fallback runs the standard Insert
+	// per-doc inside the tx). The main contract tested here is that children
+	// get written — not the hook count.
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door1 := &Door{Height: 200, Width: 80}
+	door2 := &Door{Height: 210, Width: 90}
+	houses := []*House{
+		{Name: "A", Door: den.NewLink(door1)},
+		{Name: "B", Door: den.NewLink(door2)},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, houses,
+		den.PreValidate(), den.WithLinkRule(den.LinkWrite)))
+
+	assert.NotEmpty(t, door1.ID)
+	assert.NotEmpty(t, door2.ID)
+	assert.NotEqual(t, door1.ID, door2.ID)
+
+	for _, d := range []*Door{door1, door2} {
+		found, err := den.FindByID[Door](ctx, db, d.ID)
+		require.NoError(t, err)
+		assert.Equal(t, d.Height, found.Height)
+	}
+}
+
+func TestInsertMany_PreValidate_HooksRunOnce(t *testing.T) {
 	db := dentest.MustOpen(t, &counterHookDoc{})
 	ctx := context.Background()
 	counterHookCalls = nil
@@ -432,11 +506,9 @@ func TestInsertMany_PreValidate_HooksRunTwice(t *testing.T) {
 	docs := []*counterHookDoc{{Name: "A"}}
 	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
 
-	// Two full passes through the prep chain: BeforeInsert → BeforeSave → Validate
-	expected := []string{
-		"BeforeInsert", "BeforeSave", "Validate", // pre-pass
-		"BeforeInsert", "BeforeSave", "Validate", // actual insert inside the tx
-	}
+	// Single pass: hooks run in the PreValidate pre-pass, then commitInsert
+	// re-uses the encoded bytes — no second run.
+	expected := []string{"BeforeInsert", "BeforeSave", "Validate"}
 	assert.Equal(t, expected, counterHookCalls)
 }
 

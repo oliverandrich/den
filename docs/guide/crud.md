@@ -36,7 +36,7 @@ err := den.InsertMany(ctx, db, products)
 
 By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior:
 
-**`PreValidate()`** runs the full insert hook + validation chain on every document *before* the write transaction opens. If any document fails validation, no writes are attempted — useful for large imports where a late-failing document would otherwise waste the work of every successful predecessor. Hooks fire twice (pre-pass + actual insert), so any `BeforeInsert` / `BeforeSave` logic must be idempotent.
+**`PreValidate()`** runs the full insert hook + validation chain on every document *before* the write transaction opens. If any document fails validation, no writes are attempted — useful for large imports where a late-failing document would otherwise waste the work of every successful predecessor. Hooks fire exactly once per document: `BeforeInsert` / `BeforeSave` / `Validate` run in the pre-pass, and the in-transaction commit only performs the Put and `AfterInsert` / `AfterSave`. Combining with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade has to run inside the tx), so hooks fire twice on that specific combination.
 
 ```go
 err := den.InsertMany(ctx, db, products, den.PreValidate())

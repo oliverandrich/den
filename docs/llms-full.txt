@@ -587,7 +587,7 @@ err := den.InsertMany(ctx, db, products)
 
 By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior.
 
-`PreValidate()` runs the full insert hook + validation chain on every document before the write transaction opens. If any document fails validation, no writes are attempted. Hooks fire twice (pre-pass + actual insert), so any `BeforeInsert` / `BeforeSave` logic must be idempotent.
+`PreValidate()` runs the full insert hook + validation chain on every document before the write transaction opens. If any document fails validation, no writes are attempted. Hooks fire exactly once per document: `BeforeInsert` / `BeforeSave` / `Validate` run in the pre-pass, and the in-transaction commit only performs the Put and `AfterInsert` / `AfterSave`. Combining with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade has to run inside the tx), so hooks fire twice on that specific combination.
 
 ```go
 err := den.InsertMany(ctx, db, products, den.PreValidate())
@@ -2508,7 +2508,7 @@ Module: `github.com/oliverandrich/den`
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
 | `HardDelete` | `HardDelete() CRUDOption` | `Delete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, scope, doc, den.HardDelete())` |
 | `IncludeSoftDeleted` | `IncludeSoftDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match |
-| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire twice — they must be idempotent |
+| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire once per document (pre-pass only); combining with `WithLinkRule(LinkWrite)` disables the optimization and hooks fire twice |
 | `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
 
 ## Query

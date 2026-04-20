@@ -24,56 +24,72 @@ func Insert[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption
 
 func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
 	o := applyCRUDOpts(opts)
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return err
-	}
 
+	// Cascade stays ahead of the prep chain so BeforeInsert hooks observe
+	// the linked children's IDs that cascade just populated on the parent.
 	if o.linkRule == LinkWrite {
 		if err := cascadeWriteLinks(ctx, db, b, document); err != nil {
 			return err
 		}
 	}
 
-	// Mutating hooks run first so they can populate defaults, compute
-	// derived fields, and normalize values before validation sees them.
-	if err := runBeforeInsertHooks(ctx, document); err != nil {
+	id, data, col, err := prepareInsert(ctx, db, document)
+	if err != nil {
 		return err
 	}
+	return commitInsert(ctx, b, col, document, id, data)
+}
 
-	// Tag-based validation runs after the mutating hooks so declarative
-	// constraints are checked against the final document state.
+// prepareInsert runs the mutating hooks, validation, base-field assignment,
+// revision assignment, and encoding — every part of an insert that can happen
+// without touching the backend. It returns the encoded bytes ready for a
+// subsequent Put, plus the id and collection info the caller needs to perform
+// that Put and fire After-hooks.
+//
+// Cascade is NOT part of prepareInsert because cascade writes through the
+// backend; callers that opt into LinkWrite run cascadeWriteLinks themselves
+// before calling prepareInsert, so BeforeInsert sees populated link IDs.
+func prepareInsert[T any](ctx context.Context, db *DB, document *T) (string, []byte, *collectionInfo, error) {
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	if err := runBeforeInsertHooks(ctx, document); err != nil {
+		return "", nil, nil, err
+	}
 	if db.tagValidator != nil {
 		if err := db.tagValidator(document); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
+			return "", nil, nil, fmt.Errorf("%w: %w", ErrValidation, err)
 		}
 	}
-
-	// Custom Validator.Validate() runs last so it can perform cross-field
-	// checks against the same post-hook state.
 	if err := runValidationHooks(ctx, document); err != nil {
-		return err
+		return "", nil, nil, err
 	}
 
 	rv := reflect.ValueOf(document).Elem()
-	now := time.Now()
-	setBaseFields(rv, col.structInfo, now, true)
-
+	setBaseFields(rv, col.structInfo, time.Now(), true)
 	if col.settings.UseRevision {
 		setRevision(rv, col.structInfo, newRevision())
 	}
 
 	data, err := db.encode(document)
 	if err != nil {
-		return fmt.Errorf("encode: %w", err)
+		return "", nil, nil, fmt.Errorf("encode: %w", err)
 	}
+	return getID(rv, col.structInfo), data, col, nil
+}
 
-	id := getID(rv, col.structInfo)
-
+// commitInsert performs the backend Put, snapshots the written bytes for
+// change tracking, and fires the After-hooks. The encoded data must already
+// reflect every mutation the document will carry: cascade and every Before /
+// Validate hook must have run before commitInsert. Mutating document between
+// the prepare and commit calls desyncs the in-memory doc from the persisted
+// bytes — data is frozen at prepare time.
+func commitInsert[T any](ctx context.Context, b ReadWriter, col *collectionInfo, document *T, id string, data []byte) error {
 	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
 		return err
 	}
-
 	captureSnapshot(data, document)
 	return runAfterInsertHooks(ctx, document)
 }
@@ -445,10 +461,11 @@ func FindOneAndUpsert[T any](
 // on every document before opening the write transaction. If any document
 // fails, no writes are attempted.
 //
-// Hooks fire twice (pre-pass + actual insert) so BeforeInsert / BeforeSave
-// must be idempotent. Link cascading via WithLinkRule is not honored during
-// the pre-pass because cascading writes linked documents — those writes can
-// only happen inside the real transaction.
+// BeforeInsert / BeforeSave / Validate fire exactly once per document; the
+// pre-pass caches the encoded bytes and the in-transaction commit only runs
+// Put + AfterInsert / AfterSave. (When combined with WithLinkRule(LinkWrite),
+// cascade must run inside the tx so the hook chain runs again there — the
+// optimization does not apply to that combination.)
 func PreValidate() CRUDOption {
 	return func(o *crudOpts) {
 		o.preValidate = true
@@ -494,10 +511,49 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 		return insertManyContinueOnError(ctx, s.db(), documents, opts)
 	}
 
+	if o.preValidate && o.linkRule != LinkWrite {
+		// Optimized path: cache encoded bytes between the pre-pass and the
+		// in-tx commit so the hook + validate + encode chain runs once.
+		db := s.db()
+		prepared := make([]preparedInsert[T], 0, len(documents))
+		for i, doc := range documents {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			id, data, col, err := prepareInsert(ctx, db, doc)
+			if err != nil {
+				return fmt.Errorf("den: pre-validation failed at index %d: %w", i, err)
+			}
+			prepared = append(prepared, preparedInsert[T]{doc: doc, id: id, data: data, col: col})
+		}
+		body := func(tx *Tx) error {
+			for i, p := range prepared {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := commitInsert(ctx, tx.tx, p.col, p.doc, p.id, p.data); err != nil {
+					return fmt.Errorf("den: insert failed at index %d: %w", i, err)
+				}
+			}
+			return nil
+		}
+		if tx, ok := s.(*Tx); ok {
+			return body(tx)
+		}
+		return RunInTransaction(ctx, s.db(), body)
+	}
+
 	if o.preValidate {
+		// LinkWrite path: cascade must run inside the tx and before hooks
+		// so they see populated link IDs. The pre-pass only catches early
+		// validation failures; the full Insert chain (including hooks)
+		// runs again in the tx.
 		db := s.db()
 		for i, doc := range documents {
-			if err := preValidateInsert(ctx, db, doc); err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if _, _, _, err := prepareInsert(ctx, db, doc); err != nil {
 				return fmt.Errorf("den: pre-validation failed at index %d: %w", i, err)
 			}
 		}
@@ -517,21 +573,13 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 	return RunInTransaction(ctx, s.db(), body)
 }
 
-// preValidateInsert mirrors the hook + validation prep block of insertCore.
-// Kept as a separate function rather than calling insertCore directly because
-// insertCore also encodes and writes — both side-effects we must avoid here.
-// A future refactor that splits insertCore into prepare + commit would let
-// these two paths share a single helper.
-func preValidateInsert[T any](ctx context.Context, db *DB, doc *T) error {
-	if err := runBeforeInsertHooks(ctx, doc); err != nil {
-		return err
-	}
-	if db.tagValidator != nil {
-		if err := db.tagValidator(doc); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
-	return runValidationHooks(ctx, doc)
+// preparedInsert carries the output of a prepareInsert call between the
+// PreValidate pre-pass and the commit pass inside the write transaction.
+type preparedInsert[T any] struct {
+	doc  *T
+	id   string
+	data []byte
+	col  *collectionInfo
 }
 
 func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption) error {

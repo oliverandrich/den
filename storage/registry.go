@@ -45,10 +45,15 @@ var (
 //	    storage.Register("file", openFileStorage)
 //	}
 //
+// The scheme is normalized to lowercase before storage so registration
+// and lookup stay case-insensitive, matching URL-scheme semantics:
+// "file", "File", and "FILE" all address the same backend.
+//
 // Panics if a different opener is already registered for scheme — mirrors
 // Den's database-backend registration semantics and catches accidental
 // double-imports at process startup instead of at first use.
 func Register(scheme string, opener OpenerFunc) {
+	scheme = strings.ToLower(scheme)
 	if scheme == "" {
 		panic("storage: Register with empty scheme")
 	}
@@ -68,6 +73,9 @@ func Register(scheme string, opener OpenerFunc) {
 // the public URL prefix under which the storage should serve files
 // (ignored by backends that return absolute URLs).
 //
+// The scheme is matched case-insensitively: "file://...", "File://..."
+// and "FILE://..." all resolve to the same backend.
+//
 // Returns an error with a helpful message for empty DSNs, missing
 // schemes, or schemes without a registered opener — the last usually
 // means a backend sub-package needs to be side-effect imported.
@@ -79,6 +87,7 @@ func OpenURL(dsn, urlPrefix string) (den.Storage, error) {
 	if !ok {
 		return nil, fmt.Errorf("storage: missing scheme in DSN %q (expected <scheme>://<location>)", dsn)
 	}
+	scheme = strings.ToLower(scheme)
 	registryMu.RLock()
 	opener := registry[scheme]
 	registryMu.RUnlock()

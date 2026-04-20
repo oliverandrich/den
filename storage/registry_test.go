@@ -88,3 +88,51 @@ func TestStorageOpenURL_ConcurrentRegisterAndOpen(t *testing.T) {
 		assert.Contains(t, err.Error(), "stub opener for "+scheme)
 	}
 }
+
+func TestStorageOpenURL_EmptyDSN(t *testing.T) {
+	_, err := storage.OpenURL("", "/media/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty DSN")
+}
+
+func TestStorageOpenURL_MissingScheme(t *testing.T) {
+	_, err := storage.OpenURL("no-separator-here", "/media/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing scheme",
+		"error should point at the missing :// separator")
+}
+
+func TestStorageOpenURL_UnregisteredScheme(t *testing.T) {
+	_, err := storage.OpenURL("nosuch_scheme_"+regTestPrefix(t)+"://x", "/media/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no backend registered")
+	assert.Contains(t, err.Error(), "did you forget to import a backend sub-package?",
+		"error should nudge callers toward the side-effect import")
+}
+
+func TestStorageRegister_IsCaseInsensitive(t *testing.T) {
+	scheme := regTestPrefix(t) + "_MixedCase"
+	storage.Register(scheme, stubOpener(strings.ToLower(scheme)))
+
+	// Lookup with the original case, all-lower, and all-upper must all resolve.
+	for _, dsn := range []string{
+		scheme + "://x",
+		strings.ToLower(scheme) + "://x",
+		strings.ToUpper(scheme) + "://x",
+	} {
+		_, err := storage.OpenURL(dsn, "/media/")
+		require.Error(t, err, "registered scheme must resolve regardless of case: %s", dsn)
+		assert.Contains(t, err.Error(), "stub opener for "+strings.ToLower(scheme))
+	}
+}
+
+func TestStorageRegister_CaseInsensitiveDuplicatePanics(t *testing.T) {
+	base := regTestPrefix(t) + "_dup"
+	storage.Register(base, stubOpener(strings.ToLower(base)))
+
+	// Different casing refers to the same normalized scheme — registration
+	// must panic rather than silently coexist with the lowercase entry.
+	require.Panics(t, func() {
+		storage.Register(strings.ToUpper(base), stubOpener(strings.ToUpper(base)))
+	})
+}

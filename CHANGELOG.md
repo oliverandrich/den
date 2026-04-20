@@ -40,6 +40,9 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **`QuerySet.Iter` checks `ctx.Err()` before each row** — cancellation now terminates the iteration within at most one row, regardless of how aggressively the backend's own cursor reacts to context cancellation. The seq2 error path carries the context error.
 - **Per-row `ctx.Err()` check extended to the remaining drain loops** — `QuerySet.Update` (drain + write phases), `DeleteMany`, `drainIter` (shared by `All` with `WithFetchLinks`, `AllWithCount`, `Search`, `BackLinks`, `FindByIDs`), `Project`, and `forEachLinkField` (cascade write / delete / fetch-links) now all honor cancellation between rows or between link fields. Cancellation mid-bulk-Update rolls the whole batch back, matching the pre-existing all-or-nothing contract.
 - **Documented `QuerySet.Update`'s fail-fast contract** — any per-row error (hook, validation, revision conflict, backend write) rolls the batch transaction back and returns `(0, err)`. Field names in `SetFields` are validated before the write transaction opens. No behavior change; docs and tests pin the existing contract.
+- **URL-scheme registration and lookup are now case-insensitive** in both `den.RegisterBackend` / `den.OpenURL` and `storage.Register` / `storage.OpenURL`. Both sides normalize schemes to lowercase, matching standard URL semantics: `"file"`, `"File"`, and `"FILE"` all address the same backend.
+- **Latent bug fixed**: `den.RegisterBackend("SQLITE", ...)` previously stored the backend under `"SQLITE"` while `OpenURL` looked up `"sqlite"` via its pre-existing lowercasing, so the lookup silently failed. Any caller that registered with mixed-case schemes will now see their backends resolve.
+- **Duplicate-registration panic** in `storage.Register` now triggers when the same scheme is registered under different casings (e.g. `"a"` then `"A"`), because both normalize to the same registry key.
 
 ## 0.10.1 — 2026-04-19
 

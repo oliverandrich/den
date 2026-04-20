@@ -100,3 +100,40 @@ func TestRegisterBackend_ConcurrentRegisterAndOpen(t *testing.T) {
 		assert.Contains(t, err.Error(), "stub opener for "+scheme)
 	}
 }
+
+func TestOpenURL_EmptyDSN(t *testing.T) {
+	_, err := den.OpenURL(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty database URL")
+}
+
+func TestOpenURL_MissingScheme(t *testing.T) {
+	_, err := den.OpenURL(context.Background(), "no-separator-here")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing scheme",
+		"error should point at the missing :// separator")
+}
+
+func TestOpenURL_UnregisteredScheme(t *testing.T) {
+	_, err := den.OpenURL(context.Background(), "nosuch_scheme_"+regTestPrefix(t)+"://x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported database scheme")
+	assert.Contains(t, err.Error(), "did you import the backend package?",
+		"error should nudge callers toward the side-effect import")
+}
+
+func TestRegisterBackend_IsCaseInsensitive(t *testing.T) {
+	scheme := regTestPrefix(t) + "_MixedCase"
+	den.RegisterBackend(scheme, stubOpener(strings.ToLower(scheme)))
+
+	// Lookup with the original case, all-lower, and all-upper must all resolve.
+	for _, dsn := range []string{
+		scheme + "://x",
+		strings.ToLower(scheme) + "://x",
+		strings.ToUpper(scheme) + "://x",
+	} {
+		_, err := den.OpenURL(context.Background(), dsn)
+		require.Error(t, err, "registered scheme must resolve regardless of case: %s", dsn)
+		assert.Contains(t, err.Error(), "stub opener for "+strings.ToLower(scheme))
+	}
+}

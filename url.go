@@ -16,7 +16,12 @@ var (
 // receives the context supplied to OpenURL so that expensive setup work
 // (dialing, metadata table creation) can honor deadlines and cancellation.
 // Called by backend packages in their init() functions.
+//
+// The scheme is normalized to lowercase so registration and lookup stay
+// case-insensitive, matching URL-scheme semantics: "sqlite", "SQLite",
+// and "SQLITE" all address the same backend.
 func RegisterBackend(scheme string, opener func(ctx context.Context, dsn string) (Backend, error)) {
+	scheme = strings.ToLower(scheme)
 	urlOpenersMu.Lock()
 	defer urlOpenersMu.Unlock()
 	urlOpeners[scheme] = opener

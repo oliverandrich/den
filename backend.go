@@ -148,11 +148,16 @@ type RecordedIndex struct {
 }
 
 // CollectionMeta holds structural metadata for a registered collection.
+//
+// HasSoftDelete is derived from the document struct: true when the type
+// embeds document.SoftDelete. HasRevision reflects DenSettings.UseRevision —
+// a runtime flag on the collection, not a structural property.
 type CollectionMeta struct {
 	Name          string
 	Fields        []FieldMeta
 	Indexes       []IndexDefinition
 	HasSoftDelete bool
+	HasRevision   bool
 }
 
 // FieldMeta describes a single field within a collection.

@@ -32,6 +32,7 @@ func TestMeta(t *testing.T) {
 
 	assert.Equal(t, "note", meta.Name)
 	assert.False(t, meta.HasSoftDelete)
+	assert.False(t, meta.HasRevision, "Note has no UseRevision setting")
 
 	// Should have fields from Base + Note
 	assert.GreaterOrEqual(t, len(meta.Fields), 5) // _id, _created_at, _updated_at, title, body
@@ -52,6 +53,30 @@ func TestMeta(t *testing.T) {
 	require.Len(t, meta.Indexes, 1)
 	assert.Equal(t, "idx_note_title", meta.Indexes[0].Name)
 	assert.False(t, meta.Indexes[0].Unique)
+}
+
+func TestMeta_Flags_SoftDeleteOnly(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	meta, err := den.Meta[SoftProduct](db)
+	require.NoError(t, err)
+	assert.True(t, meta.HasSoftDelete)
+	assert.False(t, meta.HasRevision)
+}
+
+func TestMeta_Flags_RevisionOnly(t *testing.T) {
+	db := dentest.MustOpen(t, &RevProduct{})
+	meta, err := den.Meta[RevProduct](db)
+	require.NoError(t, err)
+	assert.False(t, meta.HasSoftDelete)
+	assert.True(t, meta.HasRevision)
+}
+
+func TestMeta_Flags_BothSoftDeleteAndRevision(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftRevProduct{})
+	meta, err := den.Meta[SoftRevProduct](db)
+	require.NoError(t, err)
+	assert.True(t, meta.HasSoftDelete)
+	assert.True(t, meta.HasRevision)
 }
 
 func TestMeta_Unregistered(t *testing.T) {

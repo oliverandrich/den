@@ -36,6 +36,7 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 			meta.Name = settings.CollectionName
 		}
 		meta.Indexes = append(meta.Indexes, settings.Indexes...)
+		meta.HasRevision = settings.UseRevision
 
 		if err := db.backend.EnsureCollection(ctx, meta.Name, meta); err != nil {
 			return fmt.Errorf("ensure collection %s: %w", meta.Name, err)

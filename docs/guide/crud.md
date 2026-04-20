@@ -90,47 +90,50 @@ count, err := den.NewQuery[Product](db,
 
 ## FindOneAndUpdate
 
-Atomic find-and-modify in a single transaction. Finds the first document matching the conditions, applies the field updates, and returns the modified document.
+Atomic find-and-modify in a single transaction. Finds the document matching the conditions, applies the field updates, and returns the modified document.
+
+The conditions must identify the document uniquely. If they match more than one row, `FindOneAndUpdate` returns `ErrMultipleMatches` instead of silently picking one. If they match nothing, it returns `ErrNotFound`.
 
 ```go
-job, err := den.FindOneAndUpdate[Job](ctx, db,
-    den.SetFields{
-        "status":     "running",
-        "started_at": time.Now(),
-    },
-    where.Field("status").Eq("pending"),
-    where.Field("scheduled_at").Lte(time.Now()),
+counter, err := den.FindOneAndUpdate[Counter](ctx, db,
+    den.SetFields{"value": newValue},
+    []where.Condition{where.Field("name").Eq("downloads")}, // "name" is unique
 )
 if errors.Is(err, den.ErrNotFound) {
-    // no pending jobs available
+    // no row named "downloads" exists yet
+}
+if errors.Is(err, den.ErrMultipleMatches) {
+    // schema bug: name should be unique but isn't
 }
 ```
 
-This is the idiomatic pattern for implementing a job queue. Multiple workers can call `FindOneAndUpdate` concurrently -- each one atomically claims a different job, preventing double-processing:
+Pass `den.IncludeSoftDeleted()` to also match soft-deleted documents.
+
+!!! tip "Job-queue pattern"
+    For claim-one-of-many patterns (job queues, work tickets), reach for `RunInTransaction` together with `QuerySet.ForUpdate(SkipLocked())` — that locks the row at SELECT time so a concurrent worker skips it instead of racing for the same write.
+
+## FindOneAndUpsert
+
+Find an existing document or insert a new one if none matches, then apply field updates. The `defaults` template is used only on the insert path; `fields` is applied on both paths.
 
 ```go
-// Worker loop
-for {
-    job, err := den.FindOneAndUpdate[Job](ctx, db,
-        den.SetFields{
-            "status":    "running",
-            "worker_id": workerID,
-        },
-        where.Field("status").Eq("pending"),
-        where.Field("scheduled_at").Lte(time.Now()),
-    )
-    if errors.Is(err, den.ErrNotFound) {
-        time.Sleep(time.Second)
-        continue
-    }
-    if err != nil {
-        log.Printf("error claiming job: %v", err)
-        continue
-    }
-
-    processJob(job)
+user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
+    &User{Email: "x@y.z", LoginCount: 0}, // insert template
+    den.SetFields{"login_count": 5},      // applied on both paths
+    []where.Condition{where.Field("email").Eq("x@y.z")},
+)
+if err != nil {
+    // ...
+}
+if inserted {
+    log.Println("created new user")
 }
 ```
+
+Like `FindOneAndUpdate`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place.
+
+!!! note "Concurrency"
+    Two concurrent upserts that both miss race for the insert. One wins; the other gets `ErrDuplicate` from the underlying unique constraint on the lookup column. There is no internal retry — callers that want one decide explicitly between retry and surfacing the error.
 
 ## Delete
 

@@ -72,9 +72,10 @@ const (
 type CRUDOption func(*crudOpts)
 
 type crudOpts struct {
-	linkRule       LinkRule
-	ignoreRevision bool
-	hardDelete     bool
+	linkRule           LinkRule
+	ignoreRevision     bool
+	hardDelete         bool
+	includeSoftDeleted bool
 }
 
 // WithLinkRule sets the link cascading rule for Insert/Update/Delete.

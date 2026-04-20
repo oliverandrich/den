@@ -11,6 +11,7 @@ Import: `github.com/oliverandrich/den`
 | Error | Description | When Returned |
 |---|---|---|
 | `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh` when no matching document exists |
+| `ErrMultipleMatches` | A single-document lookup matched more than one row | `FindOneAndUpdate`, `FindOneAndUpsert` when conditions match more than one document. The conditions must identify the document uniquely |
 | `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
 | `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision (another process modified it) |
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |

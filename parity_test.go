@@ -310,6 +310,138 @@ func TestParity_GroupBySQL(t *testing.T) {
 	}
 }
 
+type ParitySoftProduct struct {
+	document.Base
+	document.SoftDelete
+	Name  string  `json:"name"`
+	Price float64 `json:"price"`
+}
+
+func paritySoftDBs(t *testing.T) map[string]*den.DB {
+	t.Helper()
+	return map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &ParitySoftProduct{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParitySoftProduct{}),
+	}
+}
+
+func TestParity_FindOneAndUpdate_MultipleMatches(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "Widget", Price: 10},
+				{Name: "Widget", Price: 20},
+			}))
+
+			_, err := den.FindOneAndUpdate[ParityProduct](ctx, db,
+				den.SetFields{"price": 99.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+			)
+			require.ErrorIs(t, err, den.ErrMultipleMatches)
+		})
+	}
+}
+
+func TestParity_FindOneAndUpsert_Insert(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+
+			doc, inserted, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
+				&ParityProduct{Name: "Widget", Price: 1.0, Category: "X"},
+				den.SetFields{"price": 5.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+			)
+			require.NoError(t, err)
+			assert.True(t, inserted)
+			assert.InDelta(t, 5.0, doc.Price, 0.001)
+			assert.Equal(t, "X", doc.Category)
+		})
+	}
+}
+
+func TestParity_FindOneAndUpsert_Update(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			seed := &ParityProduct{Name: "Widget", Price: 1.0, Category: "X"}
+			require.NoError(t, den.Insert(ctx, db, seed))
+
+			doc, inserted, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
+				&ParityProduct{Name: "Widget", Price: 999.0},
+				den.SetFields{"price": 5.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+			)
+			require.NoError(t, err)
+			assert.False(t, inserted)
+			assert.Equal(t, seed.ID, doc.ID)
+			assert.InDelta(t, 5.0, doc.Price, 0.001)
+		})
+	}
+}
+
+func TestParity_FindOneAndUpsert_MultipleMatches(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "Widget", Price: 10},
+				{Name: "Widget", Price: 20},
+			}))
+
+			_, _, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
+				&ParityProduct{Name: "Widget"},
+				den.SetFields{"price": 99.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+			)
+			require.ErrorIs(t, err, den.ErrMultipleMatches)
+		})
+	}
+}
+
+func TestParity_FindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
+	for name, db := range paritySoftDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			original := &ParitySoftProduct{Name: "Widget", Price: 1.0}
+			require.NoError(t, den.Insert(ctx, db, original))
+			require.NoError(t, den.Delete(ctx, db, original))
+
+			doc, inserted, err := den.FindOneAndUpsert[ParitySoftProduct](ctx, db,
+				&ParitySoftProduct{Name: "Widget", Price: 10.0},
+				den.SetFields{"price": 20.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+			)
+			require.NoError(t, err)
+			assert.True(t, inserted)
+			assert.NotEqual(t, original.ID, doc.ID)
+		})
+	}
+}
+
+func TestParity_FindOneAndUpsert_IncludeSoftDeleted(t *testing.T) {
+	for name, db := range paritySoftDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			original := &ParitySoftProduct{Name: "Widget", Price: 1.0}
+			require.NoError(t, den.Insert(ctx, db, original))
+			require.NoError(t, den.Delete(ctx, db, original))
+
+			doc, inserted, err := den.FindOneAndUpsert[ParitySoftProduct](ctx, db,
+				&ParitySoftProduct{Name: "Widget", Price: 10.0},
+				den.SetFields{"price": 20.0},
+				[]where.Condition{where.Field("name").Eq("Widget")},
+				den.IncludeSoftDeleted(),
+			)
+			require.NoError(t, err)
+			assert.False(t, inserted)
+			assert.Equal(t, original.ID, doc.ID)
+			assert.InDelta(t, 20.0, doc.Price, 0.001)
+		})
+	}
+}
+
 func TestParity_NumericEqConsistency(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

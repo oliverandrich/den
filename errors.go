@@ -4,6 +4,7 @@ import "errors"
 
 var (
 	ErrNotFound          = errors.New("den: document not found")
+	ErrMultipleMatches   = errors.New("den: more than one document matched")
 	ErrDuplicate         = errors.New("den: duplicate key")
 	ErrRevisionConflict  = errors.New("den: revision conflict")
 	ErrNotRegistered     = errors.New("den: document type not registered")

@@ -2,6 +2,7 @@ package den
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -283,61 +284,35 @@ func Refresh[T any](ctx context.Context, s Scope, document *T) error {
 // SetFields is a map of field names to new values for partial updates.
 type SetFields map[string]any
 
-// FindOneAndUpdate atomically finds the first matching document, applies
+// FindOneAndUpdate atomically finds the single matching document, applies
 // the field updates, and returns the modified document.
 // The find and replace are wrapped in a transaction for atomicity.
 //
+// Returns ErrNotFound if no document matches and ErrMultipleMatches if more
+// than one matches — the conditions must identify the document uniquely.
+//
 // When scope is a *DB, a new transaction is opened; when scope is a *Tx,
 // the operation runs inline in the caller's transaction.
-func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions ...where.Condition) (*T, error) {
+//
+// Pass IncludeSoftDeleted to consider soft-deleted documents in the match.
+func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error) {
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
-	// Validate field names before starting the transaction
-	for fieldName := range fields {
-		if col.structInfo.FieldByName(fieldName) == nil {
-			return nil, fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
-		}
-	}
-
-	qs := NewQuery[T](db, conditions...).Limit(1)
-	q := qs.buildBackendQuery(col)
+	o := applyCRUDOpts(opts)
 
 	body := func(tx *Tx) (*T, error) {
-		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
+		doc, err := findOneStrict[T](ctx, tx, conditions, o.includeSoftDeleted)
 		if err != nil {
 			return nil, err
 		}
 
-		if !iter.Next() {
-			err := iter.Err()
-			_ = iter.Close()
-			if err != nil {
-				return nil, err
-			}
-			return nil, ErrNotFound
-		}
-
-		doc := new(T)
-		iterBytes := iter.Bytes()
-		_ = iter.Close()
-		if err := decodeIterRow(db, iterBytes, doc); err != nil {
-			return nil, fmt.Errorf("decode: %w", err)
-		}
-
 		rv := reflect.ValueOf(doc).Elem()
-		for fieldName, newVal := range fields {
-			fi := col.structInfo.FieldByName(fieldName)
-			if fi == nil {
-				return nil, fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
-			}
-			fv := rv.FieldByIndex(fi.Index)
-			if err := setFieldValue(fv, newVal, fieldName); err != nil {
-				return nil, err
-			}
+		if err := applySetFields(rv, col, fields); err != nil {
+			return nil, err
 		}
 
 		if err := Update(ctx, tx, doc); err != nil {
@@ -363,6 +338,100 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 		return nil, txErr
 	}
 	return result, nil
+}
+
+// FindOneAndUpsert atomically finds the single document matching conditions
+// and applies fields, or inserts a new document built from defaults with
+// fields applied on top. The third return value reports which path ran:
+// true means a new document was inserted, false means an existing one was
+// updated.
+//
+// Conditions must identify the document uniquely: ErrMultipleMatches is
+// returned if more than one document matches. The match-and-write happen in
+// a single transaction so the upsert is atomic against itself; concurrent
+// upserts on the same missing row rely on a unique constraint to fail one of
+// the inserters with ErrDuplicate — there is no internal retry, and no row
+// lock is taken on the lookup (an absent row cannot be locked).
+//
+// On the miss path the defaults pointer is mutated by Insert (ID, CreatedAt,
+// UpdatedAt are populated) and returned as the result. Callers reusing a
+// shared defaults template across upserts should pass a fresh value each
+// call — a stale ID would otherwise be carried into the next Insert.
+//
+// Hooks follow the standard Insert / Update order. Exactly one path runs:
+//   - Hit:  BeforeUpdate → BeforeSave → tag-validation → Validate → write → AfterUpdate → AfterSave
+//   - Miss: BeforeInsert → BeforeSave → tag-validation → Validate → write → AfterInsert → AfterSave
+//
+// Soft-deleted matches are ignored by default — pass IncludeSoftDeleted to
+// have them satisfy the lookup. DeletedAt is left as-is when an existing
+// soft-deleted document is updated; clear it explicitly via fields if the
+// caller wants to resurrect.
+//
+// When scope is a *DB, a new transaction is opened; when scope is a *Tx, the
+// operation runs inline in the caller's transaction.
+func FindOneAndUpsert[T any](
+	ctx context.Context,
+	s Scope,
+	defaults *T,
+	fields SetFields,
+	conditions []where.Condition,
+	opts ...CRUDOption,
+) (*T, bool, error) {
+	db := s.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return nil, false, err
+	}
+
+	o := applyCRUDOpts(opts)
+
+	body := func(tx *Tx) (*T, bool, error) {
+		existing, err := findOneStrict[T](ctx, tx, conditions, o.includeSoftDeleted)
+		switch {
+		case err == nil:
+			rv := reflect.ValueOf(existing).Elem()
+			if err := applySetFields(rv, col, fields); err != nil {
+				return nil, false, err
+			}
+			if err := Update(ctx, tx, existing); err != nil {
+				return nil, false, err
+			}
+			return existing, false, nil
+		case errors.Is(err, ErrNotFound):
+			rv := reflect.ValueOf(defaults).Elem()
+			if err := applySetFields(rv, col, fields); err != nil {
+				return nil, false, err
+			}
+			if err := Insert(ctx, tx, defaults); err != nil {
+				return nil, false, err
+			}
+			return defaults, true, nil
+		default:
+			return nil, false, err
+		}
+	}
+
+	if tx, ok := s.(*Tx); ok {
+		return body(tx)
+	}
+
+	var (
+		result   *T
+		inserted bool
+	)
+	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
+		doc, ins, err := body(tx)
+		if err != nil {
+			return err
+		}
+		result = doc
+		inserted = ins
+		return nil
+	})
+	if txErr != nil {
+		return nil, false, txErr
+	}
+	return result, inserted, nil
 }
 
 // InsertMany inserts multiple documents in a single transaction.
@@ -434,6 +503,51 @@ func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Conditio
 		return 0, txErr
 	}
 	return count, nil
+}
+
+// findOneStrict loads exactly one document matching conditions. Returns
+// ErrNotFound if none match, ErrMultipleMatches if more than one matches.
+//
+// Limit(2) lets the backend stop after the second row — enough to detect
+// non-uniqueness without scanning the full match set.
+func findOneStrict[T any](
+	ctx context.Context,
+	s Scope,
+	conditions []where.Condition,
+	includeSoftDeleted bool,
+) (*T, error) {
+	qs := NewQuery[T](s, conditions...).Limit(2)
+	if includeSoftDeleted {
+		qs = qs.IncludeDeleted()
+	}
+	results, err := qs.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	switch len(results) {
+	case 0:
+		return nil, ErrNotFound
+	case 1:
+		return results[0], nil
+	default:
+		return nil, ErrMultipleMatches
+	}
+}
+
+// applySetFields applies a SetFields map to a struct value, validating that
+// each named field exists on the collection's struct.
+func applySetFields(rv reflect.Value, col *collectionInfo, fields SetFields) error {
+	for fieldName, newVal := range fields {
+		fi := col.structInfo.FieldByName(fieldName)
+		if fi == nil {
+			return fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
+		}
+		fv := rv.FieldByIndex(fi.Index)
+		if err := setFieldValue(fv, newVal, fieldName); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setFieldValue sets a struct field to the given value, handling nil correctly.

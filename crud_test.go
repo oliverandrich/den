@@ -388,7 +388,7 @@ func TestFindOneAndUpdate(t *testing.T) {
 
 	updated, err := den.FindOneAndUpdate[Product](ctx, db,
 		den.SetFields{"price": 99.0},
-		where.Field("name").Eq("Widget"),
+		[]where.Condition{where.Field("name").Eq("Widget")},
 	)
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, updated.Price, 0.001)
@@ -406,7 +406,7 @@ func TestFindOneAndUpdate_NotFound(t *testing.T) {
 
 	_, err := den.FindOneAndUpdate[Product](ctx, db,
 		den.SetFields{"price": 99.0},
-		where.Field("name").Eq("Nonexistent"),
+		[]where.Condition{where.Field("name").Eq("Nonexistent")},
 	)
 	require.ErrorIs(t, err, den.ErrNotFound)
 }
@@ -420,10 +420,220 @@ func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
 
 	_, err := den.FindOneAndUpdate[Product](ctx, db,
 		den.SetFields{"nonexistent": "x"},
-		where.Field("name").Eq("Widget"),
+		[]where.Condition{where.Field("name").Eq("Widget")},
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
+}
+
+func TestFindOneAndUpdate_MultipleMatches(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 10.0}))
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 20.0}))
+
+	_, err := den.FindOneAndUpdate[Product](ctx, db,
+		den.SetFields{"price": 99.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.ErrorIs(t, err, den.ErrMultipleMatches)
+
+	all, err := den.NewQuery[Product](db).Sort("price", den.Asc).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	assert.InDelta(t, 10.0, all[0].Price, 0.001)
+	assert.InDelta(t, 20.0, all[1].Price, 0.001)
+}
+
+// --- FindOneAndUpsert tests ---
+
+func TestFindOneAndUpsert_Insert(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	doc, inserted, err := den.FindOneAndUpsert[Product](ctx, db,
+		&Product{Name: "Widget", Price: 1.0},
+		den.SetFields{"price": 5.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted)
+	assert.Equal(t, "Widget", doc.Name)
+	assert.InDelta(t, 5.0, doc.Price, 0.001)
+	assert.NotEmpty(t, doc.ID)
+
+	found, err := den.FindByID[Product](ctx, db, doc.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 5.0, found.Price, 0.001)
+}
+
+func TestFindOneAndUpsert_Update(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	existing := &Product{Name: "Widget", Price: 1.0}
+	require.NoError(t, den.Insert(ctx, db, existing))
+
+	doc, inserted, err := den.FindOneAndUpsert[Product](ctx, db,
+		&Product{Name: "Widget", Price: 999.0}, // defaults must NOT apply on hit
+		den.SetFields{"price": 5.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.Equal(t, existing.ID, doc.ID)
+	assert.InDelta(t, 5.0, doc.Price, 0.001)
+
+	count, err := den.NewQuery[Product](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
+func TestFindOneAndUpsert_MultipleMatches(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 1.0}))
+	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 2.0}))
+
+	_, _, err := den.FindOneAndUpsert[Product](ctx, db,
+		&Product{Name: "Widget"},
+		den.SetFields{"price": 99.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.ErrorIs(t, err, den.ErrMultipleMatches)
+}
+
+func TestFindOneAndUpsert_FieldNotFound(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	_, _, err := den.FindOneAndUpsert[Product](ctx, db,
+		&Product{Name: "Widget"},
+		den.SetFields{"nonexistent": "x"},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field")
+}
+
+func TestFindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	original := &SoftProduct{Name: "Widget", Price: 1.0}
+	require.NoError(t, den.Insert(ctx, db, original))
+	require.NoError(t, den.Delete(ctx, db, original))
+
+	doc, inserted, err := den.FindOneAndUpsert[SoftProduct](ctx, db,
+		&SoftProduct{Name: "Widget", Price: 10.0},
+		den.SetFields{"price": 20.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted, "soft-deleted match should not satisfy upsert")
+	assert.NotEqual(t, original.ID, doc.ID)
+	assert.InDelta(t, 20.0, doc.Price, 0.001)
+}
+
+func TestFindOneAndUpsert_IncludeSoftDeletedUpdates(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	original := &SoftProduct{Name: "Widget", Price: 1.0}
+	require.NoError(t, den.Insert(ctx, db, original))
+	require.NoError(t, den.Delete(ctx, db, original))
+
+	doc, inserted, err := den.FindOneAndUpsert[SoftProduct](ctx, db,
+		&SoftProduct{Name: "Widget", Price: 10.0},
+		den.SetFields{"price": 20.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+		den.IncludeSoftDeleted(),
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted, "soft-deleted match should be updated")
+	assert.Equal(t, original.ID, doc.ID)
+	assert.InDelta(t, 20.0, doc.Price, 0.001)
+	assert.True(t, doc.IsDeleted(), "DeletedAt is preserved; caller clears it via SetFields if desired")
+}
+
+// hookCalls is a package-level recorder so loaded-from-DB instances still
+// observe the same trace as the ones constructed in test code. Tests that
+// touch it must NOT use t.Parallel — there is no synchronization.
+var hookCalls []string
+
+// hookProduct records lifecycle hook invocations to pin the upsert hook order.
+type hookProduct struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (h *hookProduct) BeforeInsert(_ context.Context) error {
+	hookCalls = append(hookCalls, "BeforeInsert")
+	return nil
+}
+func (h *hookProduct) AfterInsert(_ context.Context) error {
+	hookCalls = append(hookCalls, "AfterInsert")
+	return nil
+}
+func (h *hookProduct) BeforeUpdate(_ context.Context) error {
+	hookCalls = append(hookCalls, "BeforeUpdate")
+	return nil
+}
+func (h *hookProduct) AfterUpdate(_ context.Context) error {
+	hookCalls = append(hookCalls, "AfterUpdate")
+	return nil
+}
+func (h *hookProduct) BeforeSave(_ context.Context) error {
+	hookCalls = append(hookCalls, "BeforeSave")
+	return nil
+}
+func (h *hookProduct) AfterSave(_ context.Context) error {
+	hookCalls = append(hookCalls, "AfterSave")
+	return nil
+}
+
+func TestFindOneAndUpsert_HookOrder_InsertPath(t *testing.T) {
+	db := dentest.MustOpen(t, &hookProduct{})
+	ctx := context.Background()
+	hookCalls = nil
+	t.Cleanup(func() { hookCalls = nil })
+
+	_, inserted, err := den.FindOneAndUpsert[hookProduct](ctx, db,
+		&hookProduct{Name: "Widget"},
+		den.SetFields{},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted)
+	assert.Equal(t,
+		[]string{"BeforeInsert", "BeforeSave", "AfterInsert", "AfterSave"},
+		hookCalls,
+		"only Insert hooks fire on miss path",
+	)
+}
+
+func TestFindOneAndUpsert_HookOrder_UpdatePath(t *testing.T) {
+	db := dentest.MustOpen(t, &hookProduct{})
+	ctx := context.Background()
+	t.Cleanup(func() { hookCalls = nil })
+
+	require.NoError(t, den.Insert(ctx, db, &hookProduct{Name: "Widget"}))
+	hookCalls = nil // discard insert hooks from seed
+
+	_, inserted, err := den.FindOneAndUpsert[hookProduct](ctx, db,
+		&hookProduct{Name: "Widget"},
+		den.SetFields{},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.Equal(t,
+		[]string{"BeforeUpdate", "BeforeSave", "AfterUpdate", "AfterSave"},
+		hookCalls,
+		"only Update hooks fire on hit path",
+	)
 }
 
 func TestUpdate_MissingIDWrapsErrValidation(t *testing.T) {

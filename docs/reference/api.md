@@ -42,7 +42,8 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 | Function | Signature | Description |
 |---|---|---|
 | `Update[T]` | `Update[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
-| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions ...where.Condition) (*T, error)` | Atomically find the first matching document, apply field updates, and return the modified document |
+| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error)` | Atomically find the single matching document, apply field updates, and return the modified document. Returns `ErrNotFound` on miss and `ErrMultipleMatches` if more than one row matches |
+| `FindOneAndUpsert[T]` | `FindOneAndUpsert[T](ctx context.Context, s Scope, defaults *T, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, bool, error)` | Atomic find-or-create-then-update. `defaults` is used only on miss; `fields` is applied on both paths. Returns `(doc, inserted, err)`. `IncludeSoftDeleted()` makes soft-deleted matches satisfy the lookup |
 | `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T) error` | Re-read the document from storage, replacing all field values |
 
 ### Delete
@@ -52,6 +53,7 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 | `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
 | `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
+| `IncludeSoftDeleted` | `IncludeSoftDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match |
 
 ---
 

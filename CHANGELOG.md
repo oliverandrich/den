@@ -2,6 +2,34 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+### Breaking Changes
+
+- **`FindOneAndUpdate` now requires a unique match** — previously the function silently picked the first row when conditions matched more than one document. It now returns the new `ErrMultipleMatches` instead. The conditions parameter has also moved from variadic `where.Condition` to a `[]where.Condition` slice to make room for trailing `CRUDOption`s. Update call sites:
+
+    ```go
+    // before
+    den.FindOneAndUpdate[Job](ctx, db, fields, where.Field("id").Eq(jobID))
+    // after
+    den.FindOneAndUpdate[Job](ctx, db, fields, []where.Condition{where.Field("id").Eq(jobID)})
+    ```
+
+### Added
+
+- **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.
+
+    ```go
+    user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
+        &User{Email: "x@y.z", LoginCount: 0},   // applied only on miss
+        den.SetFields{"login_count": 5},         // applied always
+        []where.Condition{where.Field("email").Eq("x@y.z")},
+    )
+    ```
+
+- **`IncludeSoftDeleted()` CRUDOption** — opts lookup-style operations into considering soft-deleted documents. Honored by `FindOneAndUpdate` and `FindOneAndUpsert`.
+- **`ErrMultipleMatches`** — returned when a single-document lookup matches more than one row.
+
 ## 0.10.1 — 2026-04-19
 
 ### Changed

@@ -54,6 +54,38 @@ func RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error 
 	return nil
 }
 
+// runOnScope executes body inside a write transaction. If s is already a *Tx,
+// body runs inline in the caller's transaction; otherwise a new transaction
+// is opened via RunInTransaction.
+//
+// Centralizes the Scope-dispatch pattern used by InsertMany, DeleteMany,
+// FindOneAndUpdate, FindOneAndUpsert, and QuerySet.Update. Use runOnScopeVoid
+// when body only needs to return an error.
+func runOnScope[T any](ctx context.Context, s Scope, body func(*Tx) (T, error)) (T, error) {
+	if tx, ok := s.(*Tx); ok {
+		return body(tx)
+	}
+	var result T
+	txErr := RunInTransaction(ctx, s.db(), func(tx *Tx) error {
+		r, err := body(tx)
+		if err != nil {
+			return err
+		}
+		result = r
+		return nil
+	})
+	return result, txErr
+}
+
+// runOnScopeVoid is the error-only variant of runOnScope — for callers whose
+// body either has no result or captures one via an outer-scope closure.
+func runOnScopeVoid(ctx context.Context, s Scope, body func(*Tx) error) error {
+	if tx, ok := s.(*Tx); ok {
+		return body(tx)
+	}
+	return RunInTransaction(ctx, s.db(), body)
+}
+
 // runInWriteTx is an internal helper that executes fn in a write transaction.
 // Used by updateCore to wrap revision-checking updates atomically.
 func runInWriteTx(ctx context.Context, b Backend, fn func(tx Transaction) error) error {

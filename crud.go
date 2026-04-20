@@ -344,23 +344,7 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 		return doc, nil
 	}
 
-	if tx, ok := s.(*Tx); ok {
-		return body(tx)
-	}
-
-	var result *T
-	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
-		doc, err := body(tx)
-		if err != nil {
-			return err
-		}
-		result = doc
-		return nil
-	})
-	if txErr != nil {
-		return nil, txErr
-	}
-	return result, nil
+	return runOnScope(ctx, s, body)
 }
 
 // FindOneAndUpsert atomically finds the single document matching conditions
@@ -408,53 +392,45 @@ func FindOneAndUpsert[T any](
 
 	o := applyCRUDOpts(opts)
 
-	body := func(tx *Tx) (*T, bool, error) {
+	body := func(tx *Tx) (upsertResult[T], error) {
 		existing, err := findOneStrict[T](ctx, tx, conditions, o.includeSoftDeleted)
 		switch {
 		case err == nil:
 			rv := reflect.ValueOf(existing).Elem()
 			if err := applySetFields(rv, col, fields); err != nil {
-				return nil, false, err
+				return upsertResult[T]{}, err
 			}
 			if err := Update(ctx, tx, existing); err != nil {
-				return nil, false, err
+				return upsertResult[T]{}, err
 			}
-			return existing, false, nil
+			return upsertResult[T]{doc: existing, inserted: false}, nil
 		case errors.Is(err, ErrNotFound):
 			rv := reflect.ValueOf(defaults).Elem()
 			if err := applySetFields(rv, col, fields); err != nil {
-				return nil, false, err
+				return upsertResult[T]{}, err
 			}
 			if err := Insert(ctx, tx, defaults); err != nil {
-				return nil, false, err
+				return upsertResult[T]{}, err
 			}
-			return defaults, true, nil
+			return upsertResult[T]{doc: defaults, inserted: true}, nil
 		default:
-			return nil, false, err
+			return upsertResult[T]{}, err
 		}
 	}
 
-	if tx, ok := s.(*Tx); ok {
-		return body(tx)
+	res, err := runOnScope(ctx, s, body)
+	if err != nil {
+		return nil, false, err
 	}
+	return res.doc, res.inserted, nil
+}
 
-	var (
-		result   *T
-		inserted bool
-	)
-	txErr := RunInTransaction(ctx, db, func(tx *Tx) error {
-		doc, ins, err := body(tx)
-		if err != nil {
-			return err
-		}
-		result = doc
-		inserted = ins
-		return nil
-	})
-	if txErr != nil {
-		return nil, false, txErr
-	}
-	return result, inserted, nil
+// upsertResult bundles FindOneAndUpsert's two return values so the helper
+// runOnScope (which is single-valued over T) can carry both across the tx
+// dispatch.
+type upsertResult[T any] struct {
+	doc      *T
+	inserted bool
 }
 
 // PreValidate makes InsertMany run the full insert hook + validation chain
@@ -537,10 +513,7 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 			}
 			return nil
 		}
-		if tx, ok := s.(*Tx); ok {
-			return body(tx)
-		}
-		return RunInTransaction(ctx, s.db(), body)
+		return runOnScopeVoid(ctx, s, body)
 	}
 
 	if o.preValidate {
@@ -567,10 +540,7 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 		}
 		return nil
 	}
-	if tx, ok := s.(*Tx); ok {
-		return body(tx)
-	}
-	return RunInTransaction(ctx, s.db(), body)
+	return runOnScopeVoid(ctx, s, body)
 }
 
 // preparedInsert carries the output of a prepareInsert call between the
@@ -640,15 +610,8 @@ func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Conditio
 		return it.Err()
 	}
 
-	if tx, ok := s.(*Tx); ok {
-		if err := body(tx); err != nil {
-			return 0, err
-		}
-		return count, nil
-	}
-	txErr := RunInTransaction(ctx, db, body)
-	if txErr != nil {
-		return 0, txErr
+	if err := runOnScopeVoid(ctx, s, body); err != nil {
+		return 0, err
 	}
 	return count, nil
 }

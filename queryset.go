@@ -435,13 +435,7 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		return nil
 	}
 
-	if tx, ok := qs.scope.(*Tx); ok {
-		if err := body(tx); err != nil {
-			return 0, err
-		}
-		return count, nil
-	}
-	if err := RunInTransaction(ctx, db, body); err != nil {
+	if err := runOnScopeVoid(ctx, qs.scope, body); err != nil {
 		return 0, err
 	}
 	return count, nil

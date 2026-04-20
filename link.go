@@ -333,23 +333,7 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 	id := getID(tv, col.structInfo)
 	isInsert := id == ""
 
-	if isInsert {
-		if err := runBeforeInsertHooks(ctx, target); err != nil {
-			return err
-		}
-	} else {
-		if err := runBeforeUpdateHooks(ctx, target); err != nil {
-			return err
-		}
-	}
-
-	if db.tagValidator != nil {
-		if err := db.tagValidator(target); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
-
-	if err := runValidationHooks(ctx, target); err != nil {
+	if err := runPrePersistHooks(ctx, db, target, isInsert); err != nil {
 		return err
 	}
 

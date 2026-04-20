@@ -40,6 +40,38 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	return commitInsert(ctx, b, col, document, id, data)
 }
 
+// runPrePersistHooks runs the mutating hook, tag-validator, and Validate
+// chain that every insert and update path executes before touching the
+// backend. Shared by prepareInsert, updateCore, and saveSingleLinkedValue so
+// the chain lives in exactly one place. Pick the right BeforeInsert /
+// BeforeUpdate branch via isInsert — downstream steps (setBaseFields,
+// revision handling, encode, Put) differ and remain at each call site.
+//
+// Order is load-bearing:
+//   - Mutating hooks run first so they can populate defaults, compute
+//     derived fields, and normalize values before validation sees them.
+//   - Tag-based validation runs next so declarative constraints are checked
+//     against the final post-hook state.
+//   - Custom Validator.Validate() runs last so it can perform cross-field
+//     checks against that same post-hook state.
+func runPrePersistHooks(ctx context.Context, db *DB, doc any, isInsert bool) error {
+	if isInsert {
+		if err := runBeforeInsertHooks(ctx, doc); err != nil {
+			return err
+		}
+	} else {
+		if err := runBeforeUpdateHooks(ctx, doc); err != nil {
+			return err
+		}
+	}
+	if db.tagValidator != nil {
+		if err := db.tagValidator(doc); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+	}
+	return runValidationHooks(ctx, doc)
+}
+
 // prepareInsert runs the mutating hooks, validation, base-field assignment,
 // revision assignment, and encoding — every part of an insert that can happen
 // without touching the backend. It returns the encoded bytes ready for a
@@ -55,15 +87,7 @@ func prepareInsert[T any](ctx context.Context, db *DB, document *T) (string, []b
 		return "", nil, nil, err
 	}
 
-	if err := runBeforeInsertHooks(ctx, document); err != nil {
-		return "", nil, nil, err
-	}
-	if db.tagValidator != nil {
-		if err := db.tagValidator(document); err != nil {
-			return "", nil, nil, fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
-	if err := runValidationHooks(ctx, document); err != nil {
+	if err := runPrePersistHooks(ctx, db, document, true); err != nil {
 		return "", nil, nil, err
 	}
 
@@ -182,23 +206,7 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		return fmt.Errorf("%w: cannot update document without ID", ErrValidation)
 	}
 
-	// Mutating hooks run first so they can populate defaults, compute
-	// derived fields, and normalize values before validation sees them.
-	if err := runBeforeUpdateHooks(ctx, document); err != nil {
-		return err
-	}
-
-	// Tag-based validation runs after the mutating hooks so declarative
-	// constraints are checked against the final document state.
-	if db.tagValidator != nil {
-		if err := db.tagValidator(document); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
-	}
-
-	// Custom Validator.Validate() runs last so it can perform cross-field
-	// checks against the same post-hook state.
-	if err := runValidationHooks(ctx, document); err != nil {
+	if err := runPrePersistHooks(ctx, db, document, false); err != nil {
 		return err
 	}
 

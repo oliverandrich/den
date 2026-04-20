@@ -608,7 +608,7 @@ if errors.As(err, &multi) {
 }
 ```
 
-When both options are set, `ContinueOnError` wins (each doc gets its own transaction, so the pre-pass would be redundant).
+The two options cannot be combined — `InsertMany` returns `ErrIncompatibleOptions`. Each doc-level transaction in `ContinueOnError` would make a global pre-pass guarantee meaningless, so the rejection is intentional.
 
 ## FindByID / FindByIDs
 
@@ -2763,6 +2763,8 @@ Import: `github.com/oliverandrich/den`
 | `ErrDeadlock` | PostgreSQL reported a deadlock (SQLSTATE 40P01) | Any operation when the server cancels the query with a deadlock. Callers retry the transaction |
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized (SQLSTATE 40001) | PostgreSQL under stricter isolation |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend has no `FTSProvider` |
+| `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` against a `*Tx` |
+| `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
 | `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel |
 
 ## Usage with errors.Is

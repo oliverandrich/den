@@ -57,7 +57,7 @@ if errors.As(err, &multi) {
 }
 ```
 
-When both options are set, `ContinueOnError` wins (each doc gets its own transaction, so the pre-pass would be redundant).
+The two options cannot be combined — `InsertMany` returns `ErrIncompatibleOptions`. Each doc-level transaction in `ContinueOnError` would make a global pre-pass guarantee meaningless, so the rejection is intentional.
 
 ## FindByID / FindByIDs
 

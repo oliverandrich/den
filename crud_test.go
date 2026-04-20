@@ -356,9 +356,10 @@ func TestInsertMany(t *testing.T) {
 	assert.Len(t, all, 3)
 }
 
-// counterHookCalls counts BeforeInsert invocations on counterHookDoc.
-// Tests touching it must NOT use t.Parallel.
-var counterHookCalls int
+// counterHookCalls records hook invocations on counterHookDoc to pin the
+// "PreValidate fires every hook twice" contract. Tests touching it must
+// NOT use t.Parallel — it has no synchronization.
+var counterHookCalls []string
 
 type counterHookDoc struct {
 	document.Base
@@ -366,7 +367,17 @@ type counterHookDoc struct {
 }
 
 func (c *counterHookDoc) BeforeInsert(_ context.Context) error {
-	counterHookCalls++
+	counterHookCalls = append(counterHookCalls, "BeforeInsert")
+	return nil
+}
+
+func (c *counterHookDoc) BeforeSave(_ context.Context) error {
+	counterHookCalls = append(counterHookCalls, "BeforeSave")
+	return nil
+}
+
+func (c *counterHookDoc) Validate() error {
+	counterHookCalls = append(counterHookCalls, "Validate")
 	return nil
 }
 
@@ -415,12 +426,18 @@ func TestInsertMany_PreValidate_FailsAtStart(t *testing.T) {
 func TestInsertMany_PreValidate_HooksRunTwice(t *testing.T) {
 	db := dentest.MustOpen(t, &counterHookDoc{})
 	ctx := context.Background()
-	counterHookCalls = 0
-	t.Cleanup(func() { counterHookCalls = 0 })
+	counterHookCalls = nil
+	t.Cleanup(func() { counterHookCalls = nil })
 
-	docs := []*counterHookDoc{{Name: "A"}, {Name: "B"}}
+	docs := []*counterHookDoc{{Name: "A"}}
 	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
-	assert.Equal(t, 4, counterHookCalls, "BeforeInsert fires once per doc per pass; 2 docs × 2 passes")
+
+	// Two full passes through the prep chain: BeforeInsert → BeforeSave → Validate
+	expected := []string{
+		"BeforeInsert", "BeforeSave", "Validate", // pre-pass
+		"BeforeInsert", "BeforeSave", "Validate", // actual insert inside the tx
+	}
+	assert.Equal(t, expected, counterHookCalls)
 }
 
 func TestInsertMany_ContinueOnError_PartialSuccess(t *testing.T) {
@@ -485,25 +502,34 @@ func TestInsertMany_ContinueOnError_RejectsTxScope(t *testing.T) {
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		return den.InsertMany(ctx, tx, []*Validated{{Name: "A"}}, den.ContinueOnError())
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "ContinueOnError")
+	require.ErrorIs(t, err, den.ErrIncompatibleScope)
 }
 
-func TestInsertMany_BothOptions_ContinueOnErrorWins(t *testing.T) {
+func TestInsertMany_RejectsPreValidatePlusContinueOnError(t *testing.T) {
 	db := dentest.MustOpen(t, &Validated{})
 	ctx := context.Background()
 
-	docs := []*Validated{{Name: "A"}, {Name: ""}, {Name: "C"}}
-	err := den.InsertMany(ctx, db, docs, den.PreValidate(), den.ContinueOnError())
-
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 1)
-	assert.Equal(t, 1, multi.Failures[0].Index)
+	err := den.InsertMany(ctx, db,
+		[]*Validated{{Name: "A"}},
+		den.PreValidate(), den.ContinueOnError(),
+	)
+	require.ErrorIs(t, err, den.ErrIncompatibleOptions)
 
 	count, err := den.NewQuery[Validated](db).Count(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), count, "valid docs are written even with both options")
+	assert.Equal(t, int64(0), count, "rejected option combo writes nothing")
+}
+
+func TestInsertMany_ContinueOnError_HonorsContextCancellation(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := den.InsertMany(ctx, db,
+		[]*Validated{{Name: "A"}, {Name: "B"}},
+		den.ContinueOnError(),
+	)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestDeleteMany(t *testing.T) {

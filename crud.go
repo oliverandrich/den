@@ -434,15 +434,14 @@ func FindOneAndUpsert[T any](
 	return result, inserted, nil
 }
 
-// PreValidate runs the full insert hook + validation chain on every document
-// before opening the write transaction. If any document fails, no writes are
-// attempted — useful for large batches where a late-failing document would
-// otherwise waste the work of every successful predecessor.
+// PreValidate makes InsertMany run the full insert hook + validation chain
+// on every document before opening the write transaction. If any document
+// fails, no writes are attempted.
 //
-// Hooks fire twice (once during the pre-pass, once during the actual insert)
-// so any BeforeInsert / BeforeSave logic must be idempotent.
-//
-// Currently honored by InsertMany.
+// Hooks fire twice (pre-pass + actual insert) so BeforeInsert / BeforeSave
+// must be idempotent. Link cascading via WithLinkRule is not honored during
+// the pre-pass because cascading writes linked documents — those writes can
+// only happen inside the real transaction.
 func PreValidate() CRUDOption {
 	return func(o *crudOpts) {
 		o.preValidate = true
@@ -451,12 +450,14 @@ func PreValidate() CRUDOption {
 
 // ContinueOnError makes InsertMany write each document in its own short-lived
 // transaction instead of failing the whole batch on the first error. The
-// returned error (if any) is an *InsertManyError listing the per-document
+// returned error (if any) is an *InsertManyError listing per-document
 // failures by input index.
 //
 // Loses cross-document atomicity — successful inserts are committed even when
-// later ones fail. Cannot be combined with a *Tx scope; the caller's
-// transaction cannot be split.
+// later ones fail. Returns ErrIncompatibleScope when called with a *Tx scope;
+// returns ErrIncompatibleOptions when combined with PreValidate (each doc
+// gets its own transaction, so a global pre-pass would leave the per-doc
+// guarantee ill-defined).
 func ContinueOnError() CRUDOption {
 	return func(o *crudOpts) {
 		o.continueOnError = true
@@ -468,20 +469,20 @@ func ContinueOnError() CRUDOption {
 // When scope is a *DB, a new transaction is opened for the batch; when
 // scope is a *Tx, the inserts run inline in the caller's transaction.
 //
-// PreValidate runs validation up-front so a late-failing document doesn't
-// waste the encode + write work of its predecessors. ContinueOnError swaps
-// the batch transaction for per-document transactions and returns an
-// *InsertManyError aggregating the failures; with both options set,
-// ContinueOnError wins and the pre-pass is redundant.
+// See PreValidate and ContinueOnError for the available behavioral options.
 func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRUDOption) error {
 	if len(documents) == 0 {
 		return nil
 	}
 	o := applyCRUDOpts(opts)
 
+	if o.continueOnError && o.preValidate {
+		return fmt.Errorf("%w: PreValidate and ContinueOnError", ErrIncompatibleOptions)
+	}
+
 	if o.continueOnError {
 		if _, ok := s.(*Tx); ok {
-			return fmt.Errorf("den: ContinueOnError requires a *DB scope, not *Tx")
+			return fmt.Errorf("%w: ContinueOnError requires *DB", ErrIncompatibleScope)
 		}
 		return insertManyContinueOnError(ctx, s.db(), documents, opts)
 	}
@@ -509,11 +510,11 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRU
 	return RunInTransaction(ctx, s.db(), body)
 }
 
-// preValidateInsert runs the prep work that precedes the Put inside
-// insertCore: BeforeInsert + BeforeSave hooks (mutating), then tag-based
-// validation, then the custom Validator hook. The document is mutated in
-// place; the actual Insert call repeats this work, so hooks must be
-// idempotent for PreValidate to be safe.
+// preValidateInsert mirrors the hook + validation prep block of insertCore.
+// Kept as a separate function rather than calling insertCore directly because
+// insertCore also encodes and writes — both side-effects we must avoid here.
+// A future refactor that splits insertCore into prepare + commit would let
+// these two paths share a single helper.
 func preValidateInsert[T any](ctx context.Context, db *DB, doc *T) error {
 	if err := runBeforeInsertHooks(ctx, doc); err != nil {
 		return err
@@ -526,11 +527,12 @@ func preValidateInsert[T any](ctx context.Context, db *DB, doc *T) error {
 	return runValidationHooks(ctx, doc)
 }
 
-// insertManyContinueOnError attempts every document independently in its own
-// transaction, returning an *InsertManyError if any failed.
 func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption) error {
 	var failures []InsertFailure
 	for i, doc := range docs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		err := RunInTransaction(ctx, db, func(tx *Tx) error {
 			return Insert(ctx, tx, doc, opts...)
 		})

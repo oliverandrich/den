@@ -30,9 +30,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **`IncludeSoftDeleted()` CRUDOption** — opts lookup-style operations into considering soft-deleted documents. Honored by `FindOneAndUpdate` and `FindOneAndUpsert`.
 - **`ErrMultipleMatches`** — returned when a single-document lookup matches more than one row.
 - **`InsertMany` now accepts `...CRUDOption`** — backward-compatible signature change. Two new options ride along:
-    - **`PreValidate()`** runs the full insert hook + validation chain on every document before opening the write transaction. A late-failing document fails the batch without writing anything. Hooks fire twice (pre-pass + actual insert), so any `BeforeInsert` / `BeforeSave` logic must be idempotent.
-    - **`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing the per-document failures by input index. Trades cross-document atomicity for partial commit. Cannot be combined with a `*Tx` scope.
+    - **`PreValidate()`** runs the full insert hook + validation chain on every document before opening the write transaction. A late-failing document fails the batch without writing anything. Hooks fire twice (pre-pass + actual insert), so `BeforeInsert` / `BeforeSave` must be idempotent. Link cascading via `WithLinkRule(LinkWrite)` is not honored during the pre-pass.
+    - **`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Trades cross-document atomicity for partial commit. Honors `ctx` cancellation between documents. Returns `ErrIncompatibleScope` when called inside a `*Tx`; returns `ErrIncompatibleOptions` when combined with `PreValidate`.
 - **`InsertManyError`** — new struct error type carrying `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error` so `errors.Is` traverses every wrapped failure.
+- **`ErrIncompatibleScope` and `ErrIncompatibleOptions`** — new sentinels for option/scope mismatches.
 
 ## 0.10.1 — 2026-04-19
 

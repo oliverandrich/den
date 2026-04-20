@@ -25,6 +25,13 @@ var (
 	// is only meaningful inside a transaction because the lock is released
 	// when the enclosing statement commits.
 	ErrLockRequiresTransaction = errors.New("den: ForUpdate requires a transaction scope (*Tx)")
+	// ErrIncompatibleScope is returned when a CRUDOption demands a scope the
+	// caller did not provide (e.g. ContinueOnError requires *DB because the
+	// caller's transaction cannot be split into per-document transactions).
+	ErrIncompatibleScope = errors.New("den: option not compatible with the provided scope")
+	// ErrIncompatibleOptions is returned when two mutually-exclusive
+	// CRUDOptions are passed together.
+	ErrIncompatibleOptions = errors.New("den: incompatible options combined")
 )
 
 // InsertFailure pairs a failed document's position in the input slice with

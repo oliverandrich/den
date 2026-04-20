@@ -25,5 +25,5 @@ func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID s
 	}
 	defer func() { _ = iter.Close() }()
 
-	return drainIter[T](db, iter, 0)
+	return drainIter[T](ctx, db, iter, 0)
 }

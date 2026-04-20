@@ -132,6 +132,9 @@ func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
 	enc := qs.scope.db().getEncoder()
 
 	for iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rawBytes := make([]byte, len(iter.Bytes()))
 		copy(rawBytes, iter.Bytes())
 		var docMap map[string]any

@@ -602,6 +602,34 @@ func TestParity_InsertMany_PreValidate_FailsAtEnd(t *testing.T) {
 	}
 }
 
+func TestParity_QuerySetUpdate_HonorsCtxCancellation(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			docs := []*ParityProduct{
+				{Name: "a", Price: 1, Category: "bulk"},
+				{Name: "b", Price: 2, Category: "bulk"},
+				{Name: "c", Price: 3, Category: "bulk"},
+				{Name: "d", Price: 4, Category: "bulk"},
+				{Name: "e", Price: 5, Category: "bulk"},
+			}
+			require.NoError(t, den.InsertMany(ctx, db, docs))
+
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			count, err := den.NewQuery[ParityProduct](db, where.Field("category").Eq("bulk")).
+				Update(cancelCtx, den.SetFields{"category": "updated"})
+			require.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, int64(0), count)
+
+			remaining, err := den.NewQuery[ParityProduct](db, where.Field("category").Eq("updated")).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(0), remaining, "batch tx rolled back on cancellation")
+		})
+	}
+}
+
 func TestParity_Iter_HonorsCtxCancellation(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

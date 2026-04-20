@@ -581,6 +581,99 @@ func TestQuerySet_Update_HooksFirePerRow(t *testing.T) {
 	assert.Equal(t, 3, updateHookCounter.afterUpdate, "AfterUpdate fires per row")
 }
 
+func TestQuerySet_Update_HonorsCtxCancellation(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	// Seed enough rows that the cancel-before-start case is meaningful.
+	for i := range 5 {
+		require.NoError(t, den.Insert(ctx, db, &QueryProduct{
+			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
+		}))
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
+		Update(cancelCtx, den.SetFields{"category": "updated"})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), count, "no rows updated when ctx is cancelled up front")
+
+	// The batch transaction must roll back — no row survives the attempt.
+	remaining, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("updated")).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), remaining)
+}
+
+// midLoopCancelFn is invoked by cancelOnBeforeUpdate's BeforeUpdate hook on
+// the first document it sees, so tests can force ctx cancellation mid-batch
+// without juggling goroutines. Tests touching it must NOT use t.Parallel.
+var midLoopCancelFn context.CancelFunc
+
+type cancelOnBeforeUpdate struct {
+	document.Base
+	Name     string `json:"name"`
+	Category string `json:"category"`
+}
+
+func (d *cancelOnBeforeUpdate) BeforeUpdate(_ context.Context) error {
+	if midLoopCancelFn != nil {
+		fire := midLoopCancelFn
+		midLoopCancelFn = nil // fire only once, on the first doc
+		fire()
+	}
+	return nil
+}
+
+func TestQuerySet_Update_HonorsCtxCancellation_MidLoop(t *testing.T) {
+	db := dentest.MustOpen(t, &cancelOnBeforeUpdate{})
+	ctx := context.Background()
+	for i := range 5 {
+		require.NoError(t, den.Insert(ctx, db, &cancelOnBeforeUpdate{
+			Name: fmt.Sprintf("p%d", i), Category: "bulk",
+		}))
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	midLoopCancelFn = cancel
+	t.Cleanup(func() { midLoopCancelFn = nil })
+
+	count, err := den.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("bulk")).
+		Update(cancelCtx, den.SetFields{"category": "updated"})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), count, "outer return is (0, err) when body returns an error")
+
+	updated, err := den.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("updated")).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), updated,
+		"mid-loop cancellation rolls the whole batch back — no row carries the new category")
+}
+
+func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	for i := range 5 {
+		require.NoError(t, den.Insert(ctx, db, &QueryProduct{
+			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
+		}))
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	count, err := den.DeleteMany[QueryProduct](cancelCtx, db,
+		[]where.Condition{where.Field("category").Eq("bulk")})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), count, "no rows deleted when ctx is cancelled up front")
+
+	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), remaining, "batch tx rolled back — all rows survive")
+}
+
 func TestQuerySet_Update_NilValue(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	seedQueryProducts(t, db)

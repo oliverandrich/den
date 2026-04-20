@@ -142,7 +142,7 @@ func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, dep
 		return nil
 	}
 
-	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
 		return resolveSingleLink(ctx, db, rw, elem, lf)
 	})
 }
@@ -262,13 +262,23 @@ func detectLinkType(t reflect.Type) bool {
 // calling fn for each individual link element together with its pre-
 // resolved linkFieldInfo so callbacks can use FieldByIndex instead of
 // FieldByName.
-func forEachLinkField(doc any, fn func(elem reflect.Value, lf linkFieldInfo) error) error {
+//
+// Cancelling ctx stops the walk between link elements; the inner backend
+// calls in fn already honor ctx, so the explicit check upper-bounds the
+// latency to one link field rather than one more backend round-trip.
+func forEachLinkField(ctx context.Context, doc any, fn func(elem reflect.Value, lf linkFieldInfo) error) error {
 	v := reflect.ValueOf(doc).Elem()
 
 	for _, lf := range getLinkFields(v.Type()) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		fv := v.Field(lf.index)
 		if lf.slice {
 			for j := range fv.Len() {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if err := fn(fv.Index(j), lf); err != nil {
 					return err
 				}
@@ -292,14 +302,14 @@ func applyCRUDOpts(opts []CRUDOption) crudOpts {
 
 // cascadeWriteLinks saves all linked documents that have a Value set.
 func cascadeWriteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
-	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
 		return saveSingleLinkedValue(ctx, db, b, elem, lf)
 	})
 }
 
 // cascadeDeleteLinks deletes all linked documents.
 func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
-	return forEachLinkField(doc, func(elem reflect.Value, lf linkFieldInfo) error {
+	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
 		return deleteSingleLinkedValue(ctx, db, b, elem, lf)
 	})
 }
@@ -514,6 +524,10 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 	loaded := reflect.MakeSlice(reflect.SliceOf(reflect.PointerTo(lf.targetType)), 0, len(slotsByID))
 	matched := make(map[string]struct{}, len(slotsByID))
 	for iter.Next() {
+		if err := ctx.Err(); err != nil {
+			_ = iter.Close()
+			return err
+		}
 		id := iter.ID()
 		slots, ok := slotsByID[id]
 		if !ok {

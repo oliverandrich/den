@@ -38,6 +38,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 ### Changed
 
 - **`QuerySet.Iter` checks `ctx.Err()` before each row** — cancellation now terminates the iteration within at most one row, regardless of how aggressively the backend's own cursor reacts to context cancellation. The seq2 error path carries the context error.
+- **Per-row `ctx.Err()` check extended to the remaining drain loops** — `QuerySet.Update` (drain + write phases), `DeleteMany`, `drainIter` (shared by `All` with `WithFetchLinks`, `AllWithCount`, `Search`, `BackLinks`, `FindByIDs`), `Project`, and `forEachLinkField` (cascade write / delete / fetch-links) now all honor cancellation between rows or between link fields. Cancellation mid-bulk-Update rolls the whole batch back, matching the pre-existing all-or-nothing contract.
 - **Documented `QuerySet.Update`'s fail-fast contract** — any per-row error (hook, validation, revision conflict, backend write) rolls the batch transaction back and returns `(0, err)`. Field names in `SetFields` are validated before the write transaction opens. No behavior change; docs and tests pin the existing contract.
 
 ## 0.10.1 — 2026-04-19

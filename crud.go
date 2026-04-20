@@ -101,7 +101,7 @@ func FindByIDs[T any](ctx context.Context, s Scope, ids []string) ([]*T, error) 
 	if err != nil {
 		return nil, err
 	}
-	results, err := drainIter[T](db, iter, len(ids))
+	results, err := drainIter[T](ctx, db, iter, len(ids))
 	_ = iter.Close()
 	return results, err
 }
@@ -577,6 +577,9 @@ func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Conditio
 		defer func() { _ = it.Close() }()
 
 		for it.Next() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			doc := new(T)
 			if err := decodeIterRow(db, it.Bytes(), doc); err != nil {
 				return fmt.Errorf("decode: %w", err)

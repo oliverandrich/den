@@ -39,7 +39,7 @@ func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error
 	if err != nil {
 		return nil, err
 	}
-	results, err := drainIter[T](db, iter, qs.limitN)
+	results, err := drainIter[T](ctx, db, iter, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, err

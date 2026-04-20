@@ -206,7 +206,7 @@ func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
 	if err != nil {
 		return nil, err
 	}
-	results, err := drainIter[T](db, iter, qs.limitN)
+	results, err := drainIter[T](ctx, db, iter, qs.limitN)
 	_ = iter.Close()
 	if err != nil {
 		return nil, err
@@ -296,7 +296,7 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		results, err := drainIter[T](db, iter, qs.limitN)
+		results, err := drainIter[T](ctx, db, iter, qs.limitN)
 		_ = iter.Close()
 		if err != nil {
 			return nil, 0, err
@@ -336,12 +336,19 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 // iterator is not closed by this helper — callers own its lifetime so a
 // post-drain batch link resolver can safely route through the same read
 // transaction that owns the iterator without hitting pgx's "conn busy".
-func drainIter[T any](db *DB, iter Iterator, capHint int) ([]*T, error) {
+//
+// Cancelling ctx terminates the drain within at most one row; the check
+// runs at the top of each iteration, matching the cancellation contract
+// QuerySet.Iter documents.
+func drainIter[T any](ctx context.Context, db *DB, iter Iterator, capHint int) ([]*T, error) {
 	var results []*T
 	if capHint > 0 {
 		results = make([]*T, 0, capHint)
 	}
 	for iter.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		doc := new(T)
 		if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
@@ -403,22 +410,16 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		if err != nil {
 			return err
 		}
-		var docs []*T
-		for iter.Next() {
-			doc := new(T)
-			if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
-				_ = iter.Close()
-				return fmt.Errorf("decode: %w", err)
-			}
-			docs = append(docs, doc)
-		}
-		iterErr := iter.Err()
+		docs, err := drainIter[T](ctx, db, iter, qs.limitN)
 		_ = iter.Close()
-		if iterErr != nil {
-			return iterErr
+		if err != nil {
+			return err
 		}
 
 		for _, doc := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			rv := reflect.ValueOf(doc).Elem()
 			for fieldName, newVal := range fields {
 				fv := rv.FieldByIndex(fieldInfos[fieldName].Index)

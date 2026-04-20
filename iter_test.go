@@ -152,6 +152,41 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	assert.Equal(t, []string{"A"}, names, "row after the error must not be yielded")
 }
 
+func TestIter_HonorsCtxCancellation(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	docs := []*Product{
+		{Name: "a", Price: 1.0},
+		{Name: "b", Price: 2.0},
+		{Name: "c", Price: 3.0},
+		{Name: "d", Price: 4.0},
+		{Name: "e", Price: 5.0},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, docs))
+
+	iterCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var (
+		seen    int
+		lastErr error
+	)
+	for _, err := range den.NewQuery[Product](db).Iter(iterCtx) {
+		if err != nil {
+			lastErr = err
+			break
+		}
+		seen++
+		if seen == 1 {
+			cancel()
+		}
+	}
+
+	require.ErrorIs(t, lastErr, context.Canceled)
+	assert.Equal(t, 1, seen, "exactly one row yields before the per-row check fires")
+}
+
 func TestIter_WithConditions(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()

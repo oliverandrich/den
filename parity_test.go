@@ -478,6 +478,43 @@ func TestParity_InsertMany_PreValidate_FailsAtEnd(t *testing.T) {
 	}
 }
 
+func TestParity_Iter_HonorsCtxCancellation(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			docs := []*ParityProduct{
+				{Name: "a", Price: 1.0, Category: "X"},
+				{Name: "b", Price: 2.0, Category: "X"},
+				{Name: "c", Price: 3.0, Category: "X"},
+				{Name: "d", Price: 4.0, Category: "X"},
+				{Name: "e", Price: 5.0, Category: "X"},
+			}
+			require.NoError(t, den.InsertMany(ctx, db, docs))
+
+			iterCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			var (
+				seen    int
+				lastErr error
+			)
+			for _, err := range den.NewQuery[ParityProduct](db).Iter(iterCtx) {
+				if err != nil {
+					lastErr = err
+					break
+				}
+				seen++
+				if seen == 1 {
+					cancel()
+				}
+			}
+
+			require.ErrorIs(t, lastErr, context.Canceled)
+			assert.Equal(t, 1, seen, "exactly one row yields before the per-row check fires")
+		})
+	}
+}
+
 func TestParity_NumericEqConsistency(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

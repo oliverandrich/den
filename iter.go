@@ -14,6 +14,14 @@ import (
 //	    if err != nil { return err }
 //	    fmt.Println(doc.Name)
 //	}
+//
+// Cancelling ctx stops the iteration: the per-row prologue checks
+// ctx.Err() and surfaces it through the seq2 error path, so at most one
+// further document is yielded to the consumer after cancellation. With
+// WithFetchLinks, an in-flight link fetch may still complete its current
+// backend round-trip before the next prologue check fires; the link
+// resolver passes ctx through, so the round-trip after that observes the
+// cancellation.
 func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 	return func(yield func(*T, error) bool) {
 		col, err := collectionFor[T](qs.scope.db())
@@ -32,6 +40,11 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 		defer func() { _ = it.Close() }()
 
 		for it.Next() {
+			if err := ctx.Err(); err != nil {
+				yield(nil, err)
+				return
+			}
+
 			doc := new(T)
 			if err := decodeIterRow(qs.scope.db(), it.Bytes(), doc); err != nil {
 				yield(nil, fmt.Errorf("decode: %w", err))

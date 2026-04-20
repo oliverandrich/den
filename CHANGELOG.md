@@ -35,6 +35,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **`InsertManyError`** — new struct error type carrying `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error` so `errors.Is` traverses every wrapped failure.
 - **`ErrIncompatibleScope` and `ErrIncompatibleOptions`** — new sentinels for option/scope mismatches.
 
+### Changed
+
+- **`QuerySet.Iter` checks `ctx.Err()` before each row** — cancellation now terminates the iteration within at most one row, regardless of how aggressively the backend's own cursor reacts to context cancellation. The seq2 error path carries the context error.
+
 ## 0.10.1 — 2026-04-19
 
 ### Changed

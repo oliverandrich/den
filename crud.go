@@ -434,18 +434,71 @@ func FindOneAndUpsert[T any](
 	return result, inserted, nil
 }
 
+// PreValidate runs the full insert hook + validation chain on every document
+// before opening the write transaction. If any document fails, no writes are
+// attempted — useful for large batches where a late-failing document would
+// otherwise waste the work of every successful predecessor.
+//
+// Hooks fire twice (once during the pre-pass, once during the actual insert)
+// so any BeforeInsert / BeforeSave logic must be idempotent.
+//
+// Currently honored by InsertMany.
+func PreValidate() CRUDOption {
+	return func(o *crudOpts) {
+		o.preValidate = true
+	}
+}
+
+// ContinueOnError makes InsertMany write each document in its own short-lived
+// transaction instead of failing the whole batch on the first error. The
+// returned error (if any) is an *InsertManyError listing the per-document
+// failures by input index.
+//
+// Loses cross-document atomicity — successful inserts are committed even when
+// later ones fail. Cannot be combined with a *Tx scope; the caller's
+// transaction cannot be split.
+func ContinueOnError() CRUDOption {
+	return func(o *crudOpts) {
+		o.continueOnError = true
+	}
+}
+
 // InsertMany inserts multiple documents in a single transaction.
 //
 // When scope is a *DB, a new transaction is opened for the batch; when
 // scope is a *Tx, the inserts run inline in the caller's transaction.
-func InsertMany[T any](ctx context.Context, s Scope, documents []*T) error {
+//
+// PreValidate runs validation up-front so a late-failing document doesn't
+// waste the encode + write work of its predecessors. ContinueOnError swaps
+// the batch transaction for per-document transactions and returns an
+// *InsertManyError aggregating the failures; with both options set,
+// ContinueOnError wins and the pre-pass is redundant.
+func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRUDOption) error {
 	if len(documents) == 0 {
 		return nil
 	}
+	o := applyCRUDOpts(opts)
+
+	if o.continueOnError {
+		if _, ok := s.(*Tx); ok {
+			return fmt.Errorf("den: ContinueOnError requires a *DB scope, not *Tx")
+		}
+		return insertManyContinueOnError(ctx, s.db(), documents, opts)
+	}
+
+	if o.preValidate {
+		db := s.db()
+		for i, doc := range documents {
+			if err := preValidateInsert(ctx, db, doc); err != nil {
+				return fmt.Errorf("den: pre-validation failed at index %d: %w", i, err)
+			}
+		}
+	}
+
 	body := func(tx *Tx) error {
-		for _, doc := range documents {
-			if err := Insert(ctx, tx, doc); err != nil {
-				return err
+		for i, doc := range documents {
+			if err := Insert(ctx, tx, doc, opts...); err != nil {
+				return fmt.Errorf("den: insert failed at index %d: %w", i, err)
 			}
 		}
 		return nil
@@ -454,6 +507,41 @@ func InsertMany[T any](ctx context.Context, s Scope, documents []*T) error {
 		return body(tx)
 	}
 	return RunInTransaction(ctx, s.db(), body)
+}
+
+// preValidateInsert runs the prep work that precedes the Put inside
+// insertCore: BeforeInsert + BeforeSave hooks (mutating), then tag-based
+// validation, then the custom Validator hook. The document is mutated in
+// place; the actual Insert call repeats this work, so hooks must be
+// idempotent for PreValidate to be safe.
+func preValidateInsert[T any](ctx context.Context, db *DB, doc *T) error {
+	if err := runBeforeInsertHooks(ctx, doc); err != nil {
+		return err
+	}
+	if db.tagValidator != nil {
+		if err := db.tagValidator(doc); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
+	}
+	return runValidationHooks(ctx, doc)
+}
+
+// insertManyContinueOnError attempts every document independently in its own
+// transaction, returning an *InsertManyError if any failed.
+func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption) error {
+	var failures []InsertFailure
+	for i, doc := range docs {
+		err := RunInTransaction(ctx, db, func(tx *Tx) error {
+			return Insert(ctx, tx, doc, opts...)
+		})
+		if err != nil {
+			failures = append(failures, InsertFailure{Index: i, Err: err})
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return &InsertManyError{Failures: failures}
 }
 
 // DeleteMany deletes all documents matching the given conditions.

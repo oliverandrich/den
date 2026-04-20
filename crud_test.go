@@ -356,6 +356,156 @@ func TestInsertMany(t *testing.T) {
 	assert.Len(t, all, 3)
 }
 
+// counterHookCalls counts BeforeInsert invocations on counterHookDoc.
+// Tests touching it must NOT use t.Parallel.
+var counterHookCalls int
+
+type counterHookDoc struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (c *counterHookDoc) BeforeInsert(_ context.Context) error {
+	counterHookCalls++
+	return nil
+}
+
+func TestInsertMany_PreValidate_AllValid(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: "A"}, {Name: "B"}, {Name: "C"}}
+	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
+
+	all, err := den.NewQuery[Validated](db).All(ctx)
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+}
+
+func TestInsertMany_PreValidate_FailsAtEnd(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: "A"}, {Name: "B"}, {Name: ""}}
+	err := den.InsertMany(ctx, db, docs, den.PreValidate())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "index 2", "error must point at the failing document")
+	require.ErrorIs(t, err, den.ErrValidation)
+
+	count, err := den.NewQuery[Validated](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count, "no document is written when pre-validation fails")
+}
+
+func TestInsertMany_PreValidate_FailsAtStart(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: ""}, {Name: "B"}, {Name: "C"}}
+	err := den.InsertMany(ctx, db, docs, den.PreValidate())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "index 0")
+	require.ErrorIs(t, err, den.ErrValidation)
+
+	count, err := den.NewQuery[Validated](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestInsertMany_PreValidate_HooksRunTwice(t *testing.T) {
+	db := dentest.MustOpen(t, &counterHookDoc{})
+	ctx := context.Background()
+	counterHookCalls = 0
+	t.Cleanup(func() { counterHookCalls = 0 })
+
+	docs := []*counterHookDoc{{Name: "A"}, {Name: "B"}}
+	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
+	assert.Equal(t, 4, counterHookCalls, "BeforeInsert fires once per doc per pass; 2 docs × 2 passes")
+}
+
+func TestInsertMany_ContinueOnError_PartialSuccess(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{
+		{Name: "A"},
+		{Name: ""}, // invalid
+		{Name: "C"},
+		{Name: ""}, // invalid
+		{Name: "E"},
+	}
+	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
+	require.Error(t, err)
+
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	require.Len(t, multi.Failures, 2)
+	assert.Equal(t, 1, multi.Failures[0].Index)
+	assert.Equal(t, 3, multi.Failures[1].Index)
+	require.ErrorIs(t, multi.Failures[0].Err, den.ErrValidation)
+	require.ErrorIs(t, err, den.ErrValidation, "InsertManyError unwraps to wrapped sentinels")
+
+	all, err := den.NewQuery[Validated](db).All(ctx)
+	require.NoError(t, err)
+	assert.Len(t, all, 3, "valid docs are written")
+}
+
+func TestInsertMany_ContinueOnError_AllSucceed(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: "A"}, {Name: "B"}}
+	require.NoError(t, den.InsertMany(ctx, db, docs, den.ContinueOnError()))
+
+	count, err := den.NewQuery[Validated](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+}
+
+func TestInsertMany_ContinueOnError_AllFail(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: ""}, {Name: ""}}
+	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
+
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 2)
+
+	count, err := den.NewQuery[Validated](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestInsertMany_ContinueOnError_RejectsTxScope(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		return den.InsertMany(ctx, tx, []*Validated{{Name: "A"}}, den.ContinueOnError())
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ContinueOnError")
+}
+
+func TestInsertMany_BothOptions_ContinueOnErrorWins(t *testing.T) {
+	db := dentest.MustOpen(t, &Validated{})
+	ctx := context.Background()
+
+	docs := []*Validated{{Name: "A"}, {Name: ""}, {Name: "C"}}
+	err := den.InsertMany(ctx, db, docs, den.PreValidate(), den.ContinueOnError())
+
+	var multi *den.InsertManyError
+	require.ErrorAs(t, err, &multi)
+	assert.Len(t, multi.Failures, 1)
+	assert.Equal(t, 1, multi.Failures[0].Index)
+
+	count, err := den.NewQuery[Validated](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count, "valid docs are written even with both options")
+}
+
 func TestDeleteMany(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()

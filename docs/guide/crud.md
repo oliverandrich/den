@@ -23,7 +23,7 @@ Insert triggers the full lifecycle hook chain: `BeforeInsert` -> `BeforeSave` ->
 
 ### InsertMany
 
-Insert multiple documents in a single batch:
+Insert multiple documents in a single batch transaction:
 
 ```go
 products := []*Product{
@@ -33,6 +33,31 @@ products := []*Product{
 }
 err := den.InsertMany(ctx, db, products)
 ```
+
+By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior:
+
+**`PreValidate()`** runs the full insert hook + validation chain on every document *before* the write transaction opens. If any document fails validation, no writes are attempted — useful for large imports where a late-failing document would otherwise waste the work of every successful predecessor. Hooks fire twice (pre-pass + actual insert), so any `BeforeInsert` / `BeforeSave` logic must be idempotent.
+
+```go
+err := den.InsertMany(ctx, db, products, den.PreValidate())
+if errors.Is(err, den.ErrValidation) {
+    // a document failed pre-validation; nothing was written
+}
+```
+
+**`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Successful inserts are committed, so partial success is visible. Cannot be combined with a `*Tx` scope.
+
+```go
+err := den.InsertMany(ctx, db, products, den.ContinueOnError())
+var multi *den.InsertManyError
+if errors.As(err, &multi) {
+    for _, f := range multi.Failures {
+        log.Printf("doc[%d]: %v", f.Index, f.Err)
+    }
+}
+```
+
+When both options are set, `ContinueOnError` wins (each doc gets its own transaction, so the pre-pass would be redundant).
 
 ## FindByID / FindByIDs
 

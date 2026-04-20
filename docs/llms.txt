@@ -15,7 +15,7 @@
 ## Guide — Core
 
 - [Documents](https://den-odm.readthedocs.io/guide/documents/): Base + composable SoftDelete and Tracked embeds, struct tags, collection naming, ULID IDs, DenSettings interface
-- [CRUD Operations](https://den-odm.readthedocs.io/guide/crud/): Insert, InsertMany, FindByID, FindByIDs, Update, bulk Update, FindOneAndUpdate, FindOneAndUpsert, Delete, DeleteMany, HardDelete, IncludeSoftDeleted, Refresh
+- [CRUD Operations](https://den-odm.readthedocs.io/guide/crud/): Insert, InsertMany (PreValidate, ContinueOnError), FindByID, FindByIDs, Update, bulk Update, FindOneAndUpdate, FindOneAndUpsert, Delete, DeleteMany, HardDelete, IncludeSoftDeleted, Refresh
 - [Queries](https://den-odm.readthedocs.io/guide/queries/): Chainable QuerySet with lazy evaluation, where conditions, sort/limit/skip, cursor-based pagination, projections, streaming with Iter()
 - [Relations](https://den-odm.readthedocs.io/guide/relations/): Generic Link[T] type for one-to-one and one-to-many, lazy/eager/on-demand fetch, cascade write/delete rules, BackLinks, nesting depth
 

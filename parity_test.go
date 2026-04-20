@@ -2,6 +2,7 @@ package den_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -438,6 +439,41 @@ func TestParity_FindOneAndUpsert_IncludeSoftDeleted(t *testing.T) {
 			assert.False(t, inserted)
 			assert.Equal(t, original.ID, doc.ID)
 			assert.InDelta(t, 20.0, doc.Price, 0.001)
+		})
+	}
+}
+
+type ParityValidated struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (v *ParityValidated) Validate() error {
+	if v.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
+}
+
+func parityValidatedDBs(t *testing.T) map[string]*den.DB {
+	t.Helper()
+	return map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &ParityValidated{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParityValidated{}),
+	}
+}
+
+func TestParity_InsertMany_PreValidate_FailsAtEnd(t *testing.T) {
+	for name, db := range parityValidatedDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			docs := []*ParityValidated{{Name: "A"}, {Name: "B"}, {Name: ""}}
+			err := den.InsertMany(ctx, db, docs, den.PreValidate())
+			require.ErrorIs(t, err, den.ErrValidation)
+
+			count, err := den.NewQuery[ParityValidated](db).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(0), count, "no document is written when pre-validation fails")
 		})
 	}
 }

@@ -28,7 +28,7 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 | Function | Signature | Description |
 |---|---|---|
 | `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction |
+| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction. Honors `PreValidate()` and `ContinueOnError()` |
 
 ### Read
 
@@ -54,6 +54,8 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 | `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
 | `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
 | `IncludeSoftDeleted` | `IncludeSoftDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match |
+| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire twice — they must be idempotent |
+| `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
 
 ---
 

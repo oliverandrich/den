@@ -76,6 +76,8 @@ type crudOpts struct {
 	ignoreRevision     bool
 	hardDelete         bool
 	includeSoftDeleted bool
+	preValidate        bool
+	continueOnError    bool
 }
 
 // WithLinkRule sets the link cascading rule for Insert/Update/Delete.

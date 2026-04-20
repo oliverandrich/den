@@ -1,6 +1,10 @@
 package den
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 var (
 	ErrNotFound          = errors.New("den: document not found")
@@ -22,3 +26,45 @@ var (
 	// when the enclosing statement commits.
 	ErrLockRequiresTransaction = errors.New("den: ForUpdate requires a transaction scope (*Tx)")
 )
+
+// InsertFailure pairs a failed document's position in the input slice with
+// the underlying error. Used by InsertManyError.
+type InsertFailure struct {
+	Index int
+	Err   error
+}
+
+// InsertManyError aggregates per-document failures from InsertMany when the
+// ContinueOnError option is set. Failures are listed in input order.
+//
+// errors.Is matches any sentinel wrapped by any failure; errors.As on a
+// per-failure error returns the wrapped concrete type.
+type InsertManyError struct {
+	Failures []InsertFailure
+}
+
+func (e *InsertManyError) Error() string {
+	switch len(e.Failures) {
+	case 0:
+		return "den: insert many: no failures"
+	case 1:
+		return fmt.Sprintf("den: insert many: 1 failure (index %d: %v)",
+			e.Failures[0].Index, e.Failures[0].Err)
+	}
+	parts := make([]string, len(e.Failures))
+	for i, f := range e.Failures {
+		parts[i] = fmt.Sprintf("index %d: %v", f.Index, f.Err)
+	}
+	return fmt.Sprintf("den: insert many: %d failures (%s)",
+		len(e.Failures), strings.Join(parts, "; "))
+}
+
+// Unwrap returns the wrapped errors so errors.Is and errors.As traverse
+// every failure.
+func (e *InsertManyError) Unwrap() []error {
+	out := make([]error, len(e.Failures))
+	for i, f := range e.Failures {
+		out[i] = f.Err
+	}
+	return out
+}

@@ -27,6 +27,18 @@ type registeredMigration struct {
 }
 
 // Registry holds registered migrations and provides the runner API.
+//
+// A Registry caches the result of its one-time migration-log setup: the
+// first Up/UpOne/Down/DownOne caller runs EnsureCollection for the internal
+// _den_migrations collection, and every subsequent call on the same Registry
+// reuses that outcome — success OR error. This keeps concurrent in-process
+// starters from racing CREATE INDEX CONCURRENTLY on PostgreSQL, but it also
+// means startup errors are sticky: if EnsureCollection fails (wrong
+// credentials, missing permissions, unreachable backend), every subsequent
+// call returns the same cached error even after the underlying problem is
+// fixed. To retry, construct a fresh Registry with NewRegistry and re-
+// Register every migration; there is no Reset by design — tests that need a
+// clean slate should rebuild the Registry.
 type Registry struct {
 	migrations []registeredMigration
 
@@ -60,6 +72,9 @@ func (r *Registry) Register(version string, m Migration) {
 // Up runs all pending forward migrations, each in its own transaction.
 // Concurrent starters serialize on an advisory lock; every registered
 // migration runs exactly once across processes.
+//
+// See the Registry godoc for the one-time migration-log setup and the
+// sticky-error caveat that affects repeated calls.
 func (r *Registry) Up(ctx context.Context, db *den.DB) error {
 	if err := r.ensureMigrationTable(ctx, db); err != nil {
 		return err
@@ -75,6 +90,9 @@ func (r *Registry) Up(ctx context.Context, db *den.DB) error {
 // UpOne runs the next pending forward migration in a transaction.
 // Loads the current applied set to find the first pending version; the
 // actual "apply exactly once" guarantee comes from the lock in runForward.
+//
+// See the Registry godoc for the one-time migration-log setup and the
+// sticky-error caveat that affects repeated calls.
 func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
 	if err := r.ensureMigrationTable(ctx, db); err != nil {
 		return err
@@ -94,6 +112,9 @@ func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
 }
 
 // DownOne rolls back the last applied migration in a transaction.
+//
+// See the Registry godoc for the one-time migration-log setup and the
+// sticky-error caveat that affects repeated calls.
 func (r *Registry) DownOne(ctx context.Context, db *den.DB) error {
 	applied, err := r.loadApplied(ctx, db)
 	if err != nil {
@@ -117,6 +138,9 @@ func (r *Registry) DownOne(ctx context.Context, db *den.DB) error {
 }
 
 // Down rolls back all applied migrations in reverse order, each in its own transaction.
+//
+// See the Registry godoc for the one-time migration-log setup and the
+// sticky-error caveat that affects repeated calls.
 func (r *Registry) Down(ctx context.Context, db *den.DB) error {
 	applied, err := r.loadApplied(ctx, db)
 	if err != nil {

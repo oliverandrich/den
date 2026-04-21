@@ -1,3 +1,24 @@
+// Package dentest provides test helpers for opening a Den database in a
+// temporary directory (SQLite) or against a reachable PostgreSQL instance.
+// It is intended for use from `_test.go` files only.
+//
+// # Import guidance
+//
+// Do NOT import this package from production code. It side-effect-imports
+// BOTH backend packages (SQLite and PostgreSQL) so that callers get either
+// scheme registered without extra setup. A production binary that drags in
+// dentest therefore links in the drivers for the backend it doesn't use —
+// modernc.org/sqlite and jackc/pgx/v5 each contribute several MB to the
+// final binary and are completely unnecessary when only one backend is in
+// play. The helpers also accept a *testing.TB, which ties them to the
+// testing package in ways that make them unsuitable for production
+// contexts in the first place.
+//
+// No build constraint enforces the test-only restriction — the package
+// stays importable from production code so it remains ergonomic for the
+// common case (tests across a module). Keep dentest imports confined to
+// files whose names end in `_test.go` and any reasonable code review will
+// catch accidental leaks.
 package dentest
 
 import (

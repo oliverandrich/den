@@ -13,11 +13,17 @@ type FTSProvider interface {
 
 // Search performs a full-text search on the QuerySet.
 //
-// Search always routes through the backend's FTSProvider implementation
-// because full-text indexes live at the backend level (FTS5 virtual tables
-// on SQLite, tsvector columns on PostgreSQL). Tx-bound QuerySets are
-// accepted but delegate the FTS query to the DB's backend rather than the
-// transaction — FTS reads do not need the in-transaction snapshot.
+// Search always runs against the DB backend — full-text indexes are a
+// backend-level concern and den does not proxy FTS through the caller's
+// transaction.
+//
+// Tx-visibility caveat: because the caller's uncommitted writes live only
+// on the tx connection, docs inserted or updated inside the caller's tx
+// are not visible to Search until the tx commits. Non-FTS predicates
+// (Where, Sort, etc.) on a Tx-bound QuerySet DO honor the tx. If tx-local
+// visibility matters, run Search after commit, or fall back to
+// Where(Field("body").Contains(q)) — accepting that Contains is a literal
+// substring match without FTS stemming or ranking.
 func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error) {
 	if err := qs.preflight(); err != nil {
 		return nil, err

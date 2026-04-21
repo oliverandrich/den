@@ -36,6 +36,48 @@ func TestSearch_SQLite(t *testing.T) {
 	assert.Equal(t, "Go Programming", results[0].Title)
 }
 
+// TestSearch_TxLocalDocInvisibleUntilCommit pins the documented Tx-
+// visibility caveat on both backends: FTS reads go to the DB backend,
+// not the tx, so a doc inserted inside the caller's tx is not Searchable
+// until the tx commits. The Postgres variant rules out any MVCC-based
+// same-tx visibility — both backends behave identically because the
+// caveat is about Search's routing decision, not about index timing.
+func TestSearch_TxLocalDocInvisibleUntilCommit(t *testing.T) {
+	dbs := map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
+	}
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+
+			// Capture the in-tx Search result and assert outside the closure
+			// so a failed assertion doesn't leak through with the tx silently
+			// committed (assert in-closure would record fail + return nil).
+			var insideHits []*FTSArticle
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				if err := den.Insert(ctx, tx, &FTSArticle{
+					Title: "HiddenUntilCommit", Body: "tx-local body", Category: "tech",
+				}); err != nil {
+					return err
+				}
+				hits, err := den.NewQuery[FTSArticle](tx).Search(ctx, "HiddenUntilCommit")
+				if err != nil {
+					return err
+				}
+				insideHits = hits
+				return nil // commit intentionally; we want the post-commit visibility check
+			})
+			require.NoError(t, err)
+			assert.Empty(t, insideHits, "FTS bypasses the tx — tx-local docs stay invisible")
+
+			after, err := den.NewQuery[FTSArticle](db).Search(ctx, "HiddenUntilCommit")
+			require.NoError(t, err)
+			require.Len(t, after, 1, "after commit the FTS index is updated and Search hits")
+		})
+	}
+}
+
 func TestSearch_SQLite_MultipleResults(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()

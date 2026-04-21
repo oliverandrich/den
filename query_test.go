@@ -727,6 +727,67 @@ func TestQuerySet_Update_HonorsCtxCancellation_MidLoop(t *testing.T) {
 		"mid-loop cancellation rolls the whole batch back — no row carries the new category")
 }
 
+// linkUpdateHook captures what each BeforeUpdate fire saw of Link.Value, so
+// the no-op test can prove the hook ran AND saw nil — separately. Test must
+// not run in parallel.
+var linkUpdateHook struct {
+	fires        int
+	sawPopulated bool
+}
+
+type linkUpdateDoc struct {
+	document.Base
+	Name  string         `json:"name"`
+	Owner den.Link[Door] `json:"owner"`
+}
+
+func (d *linkUpdateDoc) BeforeUpdate(_ context.Context) error {
+	linkUpdateHook.fires++
+	if d.Owner.Value != nil {
+		linkUpdateHook.sawPopulated = true
+	}
+	return nil
+}
+
+// TestQuerySet_Update_FetchModifiers_AreNoOp pins that WithFetchLinks and
+// WithNestingDepth do not resolve Link.Value on docs passed to BeforeUpdate
+// during a bulk Update. Bulk Update returns a count and discards the loaded
+// docs after the per-row write, so honoring the modifiers would only matter
+// for hooks. The current behavior is "no-op"; this test exists so a future
+// change that starts resolving here is a deliberate choice, not an accidental
+// regression.
+func TestQuerySet_Update_FetchModifiers_AreNoOp(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &linkUpdateDoc{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Insert(ctx, db, &linkUpdateDoc{
+		Name: "v1", Owner: den.NewLink(door),
+	}))
+
+	linkUpdateHook = struct {
+		fires        int
+		sawPopulated bool
+	}{}
+	t.Cleanup(func() {
+		linkUpdateHook = struct {
+			fires        int
+			sawPopulated bool
+		}{}
+	})
+
+	count, err := den.NewQuery[linkUpdateDoc](db).
+		WithFetchLinks().
+		WithNestingDepth(3).
+		Update(ctx, den.SetFields{"name": "v2"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+	assert.Equal(t, 1, linkUpdateHook.fires, "BeforeUpdate must run for the matched row")
+	assert.False(t, linkUpdateHook.sawPopulated,
+		"WithFetchLinks/WithNestingDepth must remain no-op on Update — Link.Value must be nil")
+}
+
 func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()

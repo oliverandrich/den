@@ -105,12 +105,21 @@ func (qs QuerySet[T]) Before(id string) QuerySet[T] {
 }
 
 // WithFetchLinks enables eager loading of linked documents.
+//
+// Honored only by terminals that return *T values: All, AllWithCount, First,
+// Iter, and Search. Every other terminal — counts, aggregates, projections,
+// GroupBy.Into, and bulk Update — ignores it because it has no documents to
+// attach the resolved links to. See Update's godoc for the hook-visibility
+// caveat that follows from this rule.
 func (qs QuerySet[T]) WithFetchLinks() QuerySet[T] {
 	qs.fetchLinks = true
 	return qs
 }
 
 // WithNestingDepth sets the maximum link resolution depth.
+//
+// Only meaningful in combination with WithFetchLinks; honored by the same
+// set of terminals and ignored on the same set of terminals.
 func (qs QuerySet[T]) WithNestingDepth(depth int) QuerySet[T] {
 	qs.nestDepth = depth
 	return qs
@@ -390,6 +399,12 @@ func drainIter[T any](ctx context.Context, db *DB, iter Iterator, capHint int) (
 // opens — an unknown name returns immediately without opening the tx.
 // Callers that want to validate field names at application start can
 // iterate Meta[T].Fields.
+//
+// WithFetchLinks and WithNestingDepth have no effect on Update. The loaded
+// docs are loop-local and discarded after the per-row write, so resolving
+// links would only be visible to BeforeUpdate / Validate hooks — Update
+// keeps that path lean and Link.Value remains unresolved (nil). Hooks that
+// need linked data should call FetchLink or FetchAllLinks themselves.
 func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, error) {
 	if err := qs.preflight(); err != nil {
 		return 0, err

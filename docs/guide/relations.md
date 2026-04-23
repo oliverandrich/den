@@ -2,6 +2,46 @@
 
 Den models relations via the generic `Link[T]` type, inspired by Beanie's `Link[Document]`. Links store only an ID in the database -- the referenced document is fetched on demand or eagerly during queries.
 
+## Embed or Link?
+
+Den uses the word *embed* in two senses — keep them apart:
+
+- **Go-level embedding** (`document.Base`, `document.SoftDelete`, ...) is struct composition, a way to mix feature fields and methods into a document type.
+- **Relational embedding** is a modelling decision: nest a sub-struct *inside* a parent document's JSONB, or give it its own collection and reference it by ID with `Link[T]`. This section is about the second kind.
+
+### When to embed, when to link
+
+| Question | Embed (nested struct) | Link (`Link[T]`) |
+|---|---|---|
+| Does it have its own identity you query or update independently? | No | Yes |
+| Is it shared between multiple parents? | No | Yes |
+| Do you load the parent without needing the child? | Rarely | Often |
+| Does it have its own lifecycle or outlive the parent? | No | Yes |
+| Is it a small value object (address, money, flags)? | Yes | No |
+
+**Rule of thumb:** embed *value objects* (always read together with the parent, no independent identity, bound to the parent's lifecycle). Link *entities* (own ID, queried on their own, possibly shared, possibly outliving the parent).
+
+### Example
+
+```go
+// Address is a value object — no identity, always read with the Order,
+// never queried on its own. Embed it as a nested struct.
+type Address struct {
+    Street  string `json:"street"`
+    City    string `json:"city"`
+    Country string `json:"country"`
+}
+
+type Order struct {
+    document.Base
+    Ship   Address        `json:"ship"`
+    Bill   Address        `json:"bill"`
+    Author den.Link[User] `json:"author"` // User is an entity — own collection, shared
+}
+```
+
+Embedded `Address` values live inside the order's JSONB. The `Author` link stores only the user's ID; `den.FetchLink` or `WithFetchLinks()` resolves it when needed.
+
 ## Link Type
 
 ```go

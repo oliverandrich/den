@@ -74,6 +74,9 @@ type Media struct {
 
 Den detects features **structurally**: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface, attachments by reflection over `document.Attachment` fields during hard-delete. Any type that carries the right fields / methods participates, even without these specific embeds.
 
+!!! tip "Modelling relationships between documents"
+    The embeds above are Go struct composition for feature opt-in. For the separate decision of whether one document should nest another as a sub-struct or reference it by ID, see [Embed or Link?](relations.md#embed-or-link) in the Relations guide.
+
 ## Struct Tag Syntax
 
 Den uses two struct tags with distinct responsibilities:

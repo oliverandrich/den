@@ -83,6 +83,34 @@ func TestMax(t *testing.T) {
 	assert.InDelta(t, 50.0, max, 0.001)
 }
 
+// TestScalarAggregate_IgnoresLimitSkipSort pins that scalar aggregates
+// (Avg / Sum / Min / Max) operate on the full WHERE-filtered set. The
+// backend builder emits WHERE only, so Limit / Skip / Sort on the QuerySet
+// have no effect on the returned scalar.
+func TestScalarAggregate_IgnoresLimitSkipSort(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	qs := den.NewQuery[AggProduct](db).Limit(2).Skip(1).Sort("price", den.Desc)
+
+	sum, err := qs.Sum(ctx, "price")
+	require.NoError(t, err)
+	assert.InDelta(t, 150.0, sum, 0.001, "Sum must operate on the full filtered set")
+
+	avg, err := qs.Avg(ctx, "price")
+	require.NoError(t, err)
+	assert.InDelta(t, 30.0, avg, 0.001)
+
+	min, err := qs.Min(ctx, "price")
+	require.NoError(t, err)
+	assert.InDelta(t, 10.0, min, 0.001)
+
+	max, err := qs.Max(ctx, "price")
+	require.NoError(t, err)
+	assert.InDelta(t, 50.0, max, 0.001)
+}
+
 func TestAvg_Empty(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})
 	ctx := context.Background()

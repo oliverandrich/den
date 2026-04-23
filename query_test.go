@@ -168,6 +168,41 @@ func TestCount_All(t *testing.T) {
 	assert.Equal(t, int64(5), count)
 }
 
+// TestCount_IgnoresLimitAndSkip pins that Count operates on the full match
+// set regardless of Limit/Skip. The underlying backend builder emits
+// COUNT(*) with WHERE only — never LIMIT/OFFSET — so pagination modifiers
+// have no effect on the returned total.
+func TestCount_IgnoresLimitAndSkip(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	count, err := den.NewQuery[QueryProduct](db).Limit(2).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count, "Count must ignore Limit")
+
+	count, err = den.NewQuery[QueryProduct](db).Skip(3).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count, "Count must ignore Skip")
+
+	count, err = den.NewQuery[QueryProduct](db).Sort("name", den.Asc).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count, "Count must ignore Sort")
+}
+
+// TestExists_IgnoresLimitSkipSort pins that Exists returns the same bool
+// regardless of the row-order modifiers. The backend emits WHERE + inner
+// LIMIT 1; Limit/Skip/Sort on the query set have no effect.
+func TestExists_IgnoresLimitSkipSort(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	seedQueryProducts(t, db)
+	ctx := context.Background()
+
+	exists, err := den.NewQuery[QueryProduct](db).Limit(0).Skip(99).Sort("name", den.Desc).Exists(ctx)
+	require.NoError(t, err)
+	assert.True(t, exists, "Exists must not honor Skip past the result set")
+}
+
 func TestExists(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	seedQueryProducts(t, db)

@@ -66,18 +66,32 @@ func (qs QuerySet[T]) Where(conditions ...where.Condition) QuerySet[T] {
 }
 
 // Sort adds a sort criterion. Multiple calls define tie-breakers.
+//
+// Honored by terminals that return ordered rows: All, AllWithCount, First,
+// Iter, Search, Update, and Project. Ignored by Count, Exists, the scalar
+// aggregates (Avg / Sum / Min / Max), and GroupBy.Into — those operate on
+// unordered sets where sort order has no effect on the result.
 func (qs QuerySet[T]) Sort(field string, dir SortDirection) QuerySet[T] {
 	qs.sortFields = append(slices.Clone(qs.sortFields), SortEntry{Field: field, Dir: dir})
 	return qs
 }
 
 // Limit sets the maximum number of results.
+//
+// Honored by the same row-returning terminals as Sort: All, AllWithCount
+// (data slice only; the count path runs unpaginated), First (which rewrites
+// Limit to 1 internally), Iter, Search, Update, and Project. Ignored by
+// Count, Exists, scalar aggregates, and GroupBy.Into — those always operate
+// on the full WHERE-filtered set.
 func (qs QuerySet[T]) Limit(n int) QuerySet[T] {
 	qs.limitN = n
 	return qs
 }
 
 // Skip sets the number of results to skip (offset pagination).
+//
+// Honored by the same row-returning terminals as Limit. Ignored by Count,
+// Exists, scalar aggregates, and GroupBy.Into.
 //
 // Cannot be combined with After or Before (cursor pagination) — terminal
 // methods return ErrIncompatiblePagination when both styles are set.
@@ -251,6 +265,9 @@ func (qs QuerySet[T]) First(ctx context.Context) (*T, error) {
 }
 
 // Count returns the number of matching documents.
+//
+// Limit, Skip, and Sort are ignored — Count always operates on the full
+// WHERE-filtered set. After / Before cursor modifiers are honored.
 func (qs QuerySet[T]) Count(ctx context.Context) (int64, error) {
 	if err := qs.preflight(); err != nil {
 		return 0, err
@@ -265,6 +282,9 @@ func (qs QuerySet[T]) Count(ctx context.Context) (int64, error) {
 }
 
 // Exists returns true if at least one document matches.
+//
+// Limit, Skip, and Sort are ignored — the backend emits its own LIMIT 1
+// internally. After / Before cursor modifiers are honored.
 func (qs QuerySet[T]) Exists(ctx context.Context) (bool, error) {
 	if err := qs.preflight(); err != nil {
 		return false, err

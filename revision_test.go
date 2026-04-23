@@ -178,11 +178,9 @@ func TestRevision_ConcurrentUpdates_ExactlyOneSucceeds(t *testing.T) {
 	assert.Equal(t, 1, conflicts, "the other must see ErrRevisionConflict")
 }
 
-// TestRevision_SoftDeleteRestoreUpdate pins the current (surprising) behavior
-// that a soft-delete bypasses the revision chain — Rev stays the same across
-// Delete. A subsequent Update that restores the document (clears DeletedAt)
-// goes through the regular Update path and does bump Rev. See den-mloq for
-// the concurrent-clobber discussion this enables.
+// TestRevision_SoftDeleteRestoreUpdate verifies that soft-delete participates
+// in the revision chain: Rev bumps on soft-delete so a concurrent writer
+// holding the pre-delete revision cannot silently clobber DeletedAt.
 func TestRevision_SoftDeleteRestoreUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &SoftRevProduct{})
 	ctx := context.Background()
@@ -194,20 +192,71 @@ func TestRevision_SoftDeleteRestoreUpdate(t *testing.T) {
 
 	require.NoError(t, den.Delete(ctx, db, p)) // soft-delete
 	require.True(t, p.IsDeleted())
-	assert.Equal(t, revInsert, p.Rev,
-		"current behavior: soft-delete bypasses the revision chain (see den-mloq)")
+	revDelete := p.Rev
+	assert.NotEqual(t, revInsert, revDelete,
+		"soft-delete must bump Rev so concurrent Updates detect the conflict")
 
 	p.DeletedAt = nil // restore
 	p.Name = "restored"
 	require.NoError(t, den.Update(ctx, db, p))
 	revRestore := p.Rev
-	assert.NotEqual(t, revInsert, revRestore,
-		"restore goes through Update and must bump Rev")
+	assert.NotEqual(t, revDelete, revRestore,
+		"restore goes through Update and must bump Rev again")
 
 	p.Name = "v2"
 	require.NoError(t, den.Update(ctx, db, p))
 	assert.NotEqual(t, revRestore, p.Rev,
 		"subsequent Update must continue to bump Rev after restore")
+}
+
+// TestRevision_ConcurrentSoftDeleteUpdate pins the fix for den-mloq: a
+// concurrent writer holding the pre-delete revision must see
+// ErrRevisionConflict on Update after another goroutine soft-deletes the
+// document. Before the fix, soft-delete bypassed checkAndUpdateRevision and
+// the stale Update silently clobbered DeletedAt.
+func TestRevision_ConcurrentSoftDeleteUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftRevProduct{})
+	ctx := context.Background()
+
+	p := &SoftRevProduct{Name: "v1"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	// Two independent loads, identical starting rev.
+	a, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+	b, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, a.Rev, b.Rev)
+
+	// Soft-delete via a; b still holds the pre-delete revision.
+	require.NoError(t, den.Delete(ctx, db, a))
+
+	b.Name = "would-clobber-deletion"
+	err = den.Update(ctx, db, b)
+	require.ErrorIs(t, err, den.ErrRevisionConflict,
+		"stale Update after concurrent soft-delete must conflict, not overwrite DeletedAt")
+
+	// Stored state must still show the soft-deletion.
+	found, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.True(t, found.IsDeleted(), "DeletedAt must survive the stale Update attempt")
+	assert.Equal(t, "v1", found.Name, "stale Update must not take effect")
+}
+
+// TestRevision_SoftDeleteIgnoreRevision confirms that HardDelete-less
+// soft-deletes still respect IgnoreRevision — callers that deliberately want
+// to bypass the check can do so.
+func TestRevision_SoftDeleteIgnoreRevision(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftRevProduct{})
+	ctx := context.Background()
+
+	p := &SoftRevProduct{Name: "v1"}
+	require.NoError(t, den.Insert(ctx, db, p))
+
+	// Mutate the in-memory rev so the check would fail without IgnoreRevision.
+	p.Rev = "stale"
+	require.NoError(t, den.Delete(ctx, db, p, den.IgnoreRevision()))
+	assert.True(t, p.IsDeleted())
 }
 
 func TestRevision_IgnoreRevision(t *testing.T) {

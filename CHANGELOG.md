@@ -44,6 +44,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **Latent bug fixed**: `den.RegisterBackend("SQLITE", ...)` previously stored the backend under `"SQLITE"` while `OpenURL` looked up `"sqlite"` via its pre-existing lowercasing, so the lookup silently failed. Any caller that registered with mixed-case schemes will now see their backends resolve.
 - **Duplicate-registration panic** in `storage.Register` now triggers when the same scheme is registered under different casings (e.g. `"a"` then `"A"`), because both normalize to the same registry key.
 
+### Fixed
+
+- **Soft-delete now participates in the revision chain** — `Delete` on a document that opts into both `SoftDelete` and `UseRevision` verifies and bumps `_rev` just like `Update`. Previously the soft-delete path wrote directly without revision accounting, so a concurrent writer holding the pre-delete revision could silently clobber `DeletedAt`. Combines atomically via the same auto-wrapping write tx the update path uses; `IgnoreRevision()` opts out; `HardDelete()` is unaffected.
+
 ## 0.10.1 — 2026-04-19
 
 ### Changed

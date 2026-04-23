@@ -545,6 +545,70 @@ func TestParity_FindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
 	}
 }
 
+type ParitySoftRevProduct struct {
+	document.Base
+	document.SoftDelete
+	Name string `json:"name"`
+}
+
+func (p ParitySoftRevProduct) DenSettings() den.Settings {
+	return den.Settings{UseRevision: true}
+}
+
+func paritySoftRevDBs(t *testing.T) map[string]*den.DB {
+	t.Helper()
+	return map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &ParitySoftRevProduct{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParitySoftRevProduct{}),
+	}
+}
+
+// TestParity_SoftDelete_BumpsRevision confirms both backends bump _rev on
+// soft-delete so the revision chain stays consistent across Delete and
+// Update.
+func TestParity_SoftDelete_BumpsRevision(t *testing.T) {
+	for name, db := range paritySoftRevDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			p := &ParitySoftRevProduct{Name: "v1"}
+			require.NoError(t, den.Insert(ctx, db, p))
+			revInsert := p.Rev
+
+			require.NoError(t, den.Delete(ctx, db, p))
+			assert.NotEqual(t, revInsert, p.Rev, "soft-delete must bump Rev")
+		})
+	}
+}
+
+// TestParity_SoftDelete_ConcurrentUpdateConflicts confirms on both backends
+// that a stale Update after a concurrent soft-delete fails with
+// ErrRevisionConflict instead of clobbering DeletedAt.
+func TestParity_SoftDelete_ConcurrentUpdateConflicts(t *testing.T) {
+	for name, db := range paritySoftRevDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			p := &ParitySoftRevProduct{Name: "v1"}
+			require.NoError(t, den.Insert(ctx, db, p))
+
+			a, err := den.FindByID[ParitySoftRevProduct](ctx, db, p.ID)
+			require.NoError(t, err)
+			b, err := den.FindByID[ParitySoftRevProduct](ctx, db, p.ID)
+			require.NoError(t, err)
+
+			require.NoError(t, den.Delete(ctx, db, a))
+
+			b.Name = "clobber"
+			err = den.Update(ctx, db, b)
+			require.ErrorIs(t, err, den.ErrRevisionConflict)
+
+			found, err := den.FindByID[ParitySoftRevProduct](ctx, db, p.ID)
+			require.NoError(t, err)
+			assert.True(t, found.IsDeleted())
+			assert.Equal(t, "v1", found.Name)
+		})
+	}
+}
+
 func TestParity_FindOneAndUpsert_IncludeSoftDeleted(t *testing.T) {
 	for name, db := range paritySoftDBs(t) {
 		t.Run(name, func(t *testing.T) {

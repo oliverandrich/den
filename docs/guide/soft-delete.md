@@ -70,6 +70,35 @@ if product.IsDeleted() {
 }
 ```
 
+## Combining with Revision Control
+
+When a soft-delete document also opts into [revision control](revision-control.md) (`UseRevision: true`), soft-delete participates in the revision chain exactly like `Update`:
+
+- `Delete` verifies the stored `_rev` against the in-memory value, assigns a fresh `_rev`, and writes atomically.
+- A concurrent writer holding the pre-delete revision sees `ErrRevisionConflict` on its next `Update` — it cannot silently clobber `DeletedAt`.
+- `IgnoreRevision()` composes with `Delete`, so callers can deliberately bypass the check when needed.
+
+```go
+type Article struct {
+    document.Base
+    document.SoftDelete
+    Title string `json:"title"`
+}
+
+func (a Article) DenSettings() den.Settings {
+    return den.Settings{UseRevision: true}
+}
+
+// Both goroutines loaded the same _rev.
+_ = den.Delete(ctx, db, a) // bumps _rev, records DeletedAt
+
+b.Title = "stale update"
+err := den.Update(ctx, db, b)
+// err == den.ErrRevisionConflict — b held the pre-delete revision
+```
+
+`HardDelete()` physically removes the row and is not subject to revision checks.
+
 ## Combining with Change Tracking
 
 `SoftDelete` and `Tracked` are independent embeds — compose them freely:

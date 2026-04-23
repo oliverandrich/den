@@ -33,7 +33,30 @@ func IncludeSoftDeleted() CRUDOption {
 }
 
 // softDelete sets DeletedAt on a document and replaces it in storage.
-func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, document *T, col *collectionInfo) error {
+//
+// For revisioned collections (UseRevision: true), soft-delete participates in
+// the revision chain exactly like Update: the stored _rev is verified against
+// the in-memory value, a fresh _rev is assigned, and the pair is written
+// atomically. Concurrent writers holding the pre-delete revision therefore
+// see ErrRevisionConflict on their next Update instead of silently clobbering
+// DeletedAt. Pass IgnoreRevision to opt out.
+func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, document *T, col *collectionInfo, ignoreRevision bool) error {
+	// When revision checking is active and we're not already in a
+	// transaction, auto-wrap so the revision check (Get) and write (Put)
+	// are atomic — preventing TOCTOU races on PostgreSQL where concurrent
+	// pool connections can interleave. Mirrors updateCore's wrapping.
+	if col.settings.UseRevision && !ignoreRevision {
+		if backend, ok := b.(Backend); ok {
+			return runInWriteTx(ctx, backend, func(tx Transaction) error {
+				return softDelete(ctx, db, tx, rv, document, col, ignoreRevision)
+			})
+		}
+	}
+
+	if err := checkAndUpdateRevision(ctx, db, b, col, rv, ignoreRevision); err != nil {
+		return err
+	}
+
 	now := time.Now()
 	setSoftDeletedAt(rv, col.structInfo, &now)
 

@@ -16,6 +16,11 @@ import "time"
 // rows with DeletedAt set unless IncludeDeleted() is used. HardDelete()
 // bypasses the soft path and physically removes the row.
 //
+// Soft-delete participates in revision control: on a document that also opts
+// into UseRevision, Delete verifies and bumps _rev like Update so concurrent
+// writers holding the pre-delete revision fail with ErrRevisionConflict
+// instead of silently clobbering DeletedAt.
+//
 // Den detects soft-delete support structurally via the `_deleted_at` JSON
 // field — any type carrying that field (through this embed or otherwise)
 // participates in soft-delete handling.

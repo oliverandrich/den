@@ -117,3 +117,7 @@ Revision control is useful when:
 
 !!! note
     Revision control is orthogonal to transactions. Transactions provide isolation at the database level. Revision control provides conflict detection at the application level, across separate request cycles.
+
+## Interaction with Soft Delete
+
+`Delete` on a document that opts into both `SoftDelete` and `UseRevision` participates in the revision chain: the stored `_rev` is verified, a fresh `_rev` is assigned, and the write is atomic. A concurrent writer holding the pre-delete revision therefore sees `ErrRevisionConflict` on its next `Update` instead of silently clobbering `DeletedAt`. `IgnoreRevision()` opts out; `HardDelete()` removes the row outright and is not subject to the check. See [Soft Delete](soft-delete.md#combining-with-revision-control) for the full pattern.

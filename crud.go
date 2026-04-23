@@ -262,7 +262,7 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	}
 
 	if col.meta.HasSoftDelete && !o.hardDelete {
-		if err := softDelete(ctx, db, b, rv, document, col); err != nil {
+		if err := softDelete(ctx, db, b, rv, document, col, o.ignoreRevision); err != nil {
 			return err
 		}
 		return runAfterDeleteHooks(ctx, document)

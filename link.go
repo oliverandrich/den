@@ -76,6 +76,8 @@ type crudOpts struct {
 	ignoreRevision         bool
 	hardDelete             bool
 	includeSoftDeleted     bool
+	softDeleteBy           string
+	softDeleteReason       string
 	preValidate            bool
 	continueOnError        bool
 	maxRecordedFailures    int

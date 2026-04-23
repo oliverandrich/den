@@ -21,11 +21,17 @@ import "time"
 // writers holding the pre-delete revision fail with ErrRevisionConflict
 // instead of silently clobbering DeletedAt.
 //
+// DeletedBy and DeleteReason are optional audit fields populated by the
+// SoftDeleteBy and SoftDeleteReason CRUDOptions. Both default to empty so
+// existing data stays compatible; empty values omit from the encoded JSON.
+//
 // Den detects soft-delete support structurally via the `_deleted_at` JSON
 // field — any type carrying that field (through this embed or otherwise)
 // participates in soft-delete handling.
 type SoftDelete struct {
-	DeletedAt *time.Time `json:"_deleted_at,omitempty"`
+	DeletedAt    *time.Time `json:"_deleted_at,omitempty"`
+	DeletedBy    string     `json:"_deleted_by,omitempty"`
+	DeleteReason string     `json:"_delete_reason,omitempty"`
 }
 
 // IsDeleted reports whether the document has been soft-deleted.

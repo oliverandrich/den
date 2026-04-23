@@ -31,6 +31,19 @@ type AfterDeleter interface {
 	AfterDelete(ctx context.Context) error
 }
 
+// BeforeSoftDeleter fires only on the soft-delete path — after BeforeDelete,
+// before the write. HardDelete() bypasses this hook. Use it for audit-log
+// side effects that should not fire on permanent deletion.
+type BeforeSoftDeleter interface {
+	BeforeSoftDelete(ctx context.Context) error
+}
+
+// AfterSoftDeleter fires only on the soft-delete path — after the write,
+// before AfterDelete. HardDelete() bypasses this hook.
+type AfterSoftDeleter interface {
+	AfterSoftDelete(ctx context.Context) error
+}
+
 type BeforeSaver interface {
 	BeforeSave(ctx context.Context) error
 }
@@ -132,6 +145,24 @@ func runBeforeDeleteHooks(ctx context.Context, doc any) error {
 func runAfterDeleteHooks(ctx context.Context, doc any) error {
 	if h, ok := doc.(AfterDeleter); ok {
 		if err := h.AfterDelete(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runBeforeSoftDeleteHooks(ctx context.Context, doc any) error {
+	if h, ok := doc.(BeforeSoftDeleter); ok {
+		if err := h.BeforeSoftDelete(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runAfterSoftDeleteHooks(ctx context.Context, doc any) error {
+	if h, ok := doc.(AfterSoftDeleter); ok {
+		if err := h.AfterSoftDelete(ctx); err != nil {
 			return err
 		}
 	}

@@ -71,6 +71,12 @@ func (d *orderingSoftDoc) record(name string) error {
 
 func (d *orderingSoftDoc) BeforeDelete(_ context.Context) error { return d.record("BeforeDelete") }
 func (d *orderingSoftDoc) AfterDelete(_ context.Context) error  { return d.record("AfterDelete") }
+func (d *orderingSoftDoc) BeforeSoftDelete(_ context.Context) error {
+	return d.record("BeforeSoftDelete")
+}
+func (d *orderingSoftDoc) AfterSoftDelete(_ context.Context) error {
+	return d.record("AfterSoftDelete")
+}
 
 // --- Insert ---
 
@@ -222,8 +228,10 @@ func TestHookOrder_SoftDelete_FullChain(t *testing.T) {
 	resetHookOrderCalls(t)
 
 	require.NoError(t, den.Delete(ctx, db, doc))
-	assert.Equal(t, []string{"BeforeDelete", "AfterDelete"}, hookOrderCalls,
-		"Soft-delete walks the same hook pair as hard-delete")
+	assert.Equal(t,
+		[]string{"BeforeDelete", "BeforeSoftDelete", "AfterSoftDelete", "AfterDelete"},
+		hookOrderCalls,
+		"Soft-delete nests the soft-only hook pair inside the general Delete pair")
 	assert.True(t, doc.IsDeleted())
 }
 
@@ -244,6 +252,45 @@ func TestHookOrder_SoftDelete_BeforeError_StopsImmediately(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, persisted.IsDeleted(),
 		"BeforeDelete failure must skip the soft-delete write")
+}
+
+func TestHookOrder_SoftDelete_BeforeSoftError_SkipsWrite(t *testing.T) {
+	db := dentest.MustOpen(t, &orderingSoftDoc{})
+	ctx := context.Background()
+
+	doc := &orderingSoftDoc{Name: "seed"}
+	require.NoError(t, den.Insert(ctx, db, doc))
+	resetHookOrderCalls(t)
+	doc.FailHook = "BeforeSoftDelete"
+
+	err := den.Delete(ctx, db, doc)
+	require.Error(t, err)
+	assert.Equal(t, []string{"BeforeDelete", "BeforeSoftDelete"}, hookOrderCalls,
+		"BeforeSoftDelete failure aborts before the write and before After hooks fire")
+
+	persisted, err := den.FindByID[orderingSoftDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+	assert.False(t, persisted.IsDeleted(),
+		"BeforeSoftDelete failure must leave DeletedAt unset")
+}
+
+// TestHookOrder_HardDeleteOfSoftDoc_SkipsSoftHooks pins that HardDelete() on
+// a SoftDelete-embedding document fires only the general Delete hooks — the
+// soft-only hooks must NOT fire because the soft-delete path is bypassed.
+func TestHookOrder_HardDeleteOfSoftDoc_SkipsSoftHooks(t *testing.T) {
+	db := dentest.MustOpen(t, &orderingSoftDoc{})
+	ctx := context.Background()
+
+	doc := &orderingSoftDoc{Name: "seed"}
+	require.NoError(t, den.Insert(ctx, db, doc))
+	resetHookOrderCalls(t)
+
+	require.NoError(t, den.Delete(ctx, db, doc, den.HardDelete()))
+	assert.Equal(t, []string{"BeforeDelete", "AfterDelete"}, hookOrderCalls,
+		"HardDelete bypasses soft-delete and must not fire BeforeSoftDelete/AfterSoftDelete")
+
+	_, err := den.FindByID[orderingSoftDoc](ctx, db, doc.ID)
+	require.ErrorIs(t, err, den.ErrNotFound)
 }
 
 // --- InsertMany ---

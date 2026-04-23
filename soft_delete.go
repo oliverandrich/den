@@ -32,7 +32,28 @@ func IncludeSoftDeleted() CRUDOption {
 	}
 }
 
-// softDelete sets DeletedAt on a document and replaces it in storage.
+// SoftDeleteBy returns a CRUDOption that records an actor identifier (user
+// ID, service name, etc.) on the document's DeletedBy field during a
+// soft-delete. Silently ignored on the hard-delete path or on documents that
+// do not embed document.SoftDelete — there is nowhere to store the value.
+func SoftDeleteBy(actor string) CRUDOption {
+	return func(o *crudOpts) {
+		o.softDeleteBy = actor
+	}
+}
+
+// SoftDeleteReason returns a CRUDOption that records a free-form reason on
+// the document's DeleteReason field during a soft-delete. Silently ignored
+// on the hard-delete path or on documents that do not embed
+// document.SoftDelete.
+func SoftDeleteReason(reason string) CRUDOption {
+	return func(o *crudOpts) {
+		o.softDeleteReason = reason
+	}
+}
+
+// softDelete sets DeletedAt (and optionally DeletedBy / DeleteReason) on a
+// document and replaces it in storage.
 //
 // For revisioned collections (UseRevision: true), soft-delete participates in
 // the revision chain exactly like Update: the stored _rev is verified against
@@ -40,25 +61,26 @@ func IncludeSoftDeleted() CRUDOption {
 // atomically. Concurrent writers holding the pre-delete revision therefore
 // see ErrRevisionConflict on their next Update instead of silently clobbering
 // DeletedAt. Pass IgnoreRevision to opt out.
-func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, document *T, col *collectionInfo, ignoreRevision bool) error {
+func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, document *T, col *collectionInfo, o crudOpts) error {
 	// When revision checking is active and we're not already in a
 	// transaction, auto-wrap so the revision check (Get) and write (Put)
 	// are atomic — preventing TOCTOU races on PostgreSQL where concurrent
 	// pool connections can interleave. Mirrors updateCore's wrapping.
-	if col.settings.UseRevision && !ignoreRevision {
+	if col.settings.UseRevision && !o.ignoreRevision {
 		if backend, ok := b.(Backend); ok {
 			return runInWriteTx(ctx, backend, func(tx Transaction) error {
-				return softDelete(ctx, db, tx, rv, document, col, ignoreRevision)
+				return softDelete(ctx, db, tx, rv, document, col, o)
 			})
 		}
 	}
 
-	if err := checkAndUpdateRevision(ctx, db, b, col, rv, ignoreRevision); err != nil {
+	if err := checkAndUpdateRevision(ctx, db, b, col, rv, o.ignoreRevision); err != nil {
 		return err
 	}
 
 	now := time.Now()
 	setSoftDeletedAt(rv, col.structInfo, &now)
+	setSoftDeleteAuditFields(rv, col.structInfo, o.softDeleteBy, o.softDeleteReason)
 
 	data, err := db.encode(document)
 	if err != nil {
@@ -84,5 +106,22 @@ func setSoftDeletedAt(v reflect.Value, info *internal.StructInfo, t *time.Time) 
 		fv.Set(reflect.Zero(fv.Type()))
 	} else {
 		fv.Set(reflect.ValueOf(t))
+	}
+}
+
+// setSoftDeleteAuditFields assigns the optional audit metadata produced by
+// SoftDeleteBy / SoftDeleteReason. Documents without the corresponding
+// fields (hand-rolled soft-delete types that omit them) silently skip —
+// consistent with the structural soft-delete detection.
+func setSoftDeleteAuditFields(v reflect.Value, info *internal.StructInfo, by, reason string) {
+	if by != "" {
+		if f := info.FieldByName("_deleted_by"); f != nil {
+			v.FieldByIndex(f.Index).SetString(by)
+		}
+	}
+	if reason != "" {
+		if f := info.FieldByName("_delete_reason"); f != nil {
+			v.FieldByIndex(f.Index).SetString(reason)
+		}
 	}
 }

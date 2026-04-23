@@ -79,6 +79,64 @@ func TestHardDelete(t *testing.T) {
 	require.ErrorIs(t, err, den.ErrNotFound)
 }
 
+// TestSoftDelete_AuditFields_Defaults pins that a bare soft-delete without
+// the audit-field options leaves DeletedBy and DeleteReason as the zero
+// string — existing callers see no behavior change.
+func TestSoftDelete_AuditFields_Defaults(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	p := &SoftProduct{Name: "Widget"}
+	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Delete(ctx, db, p))
+
+	assert.True(t, p.IsDeleted())
+	assert.Empty(t, p.DeletedBy)
+	assert.Empty(t, p.DeleteReason)
+}
+
+// TestSoftDelete_AuditFields_Populated confirms SoftDeleteBy and
+// SoftDeleteReason record audit metadata on the stored document.
+func TestSoftDelete_AuditFields_Populated(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	p := &SoftProduct{Name: "Widget"}
+	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Delete(ctx, db, p,
+		den.SoftDeleteBy("usr_42"),
+		den.SoftDeleteReason("violated terms"),
+	))
+
+	assert.Equal(t, "usr_42", p.DeletedBy)
+	assert.Equal(t, "violated terms", p.DeleteReason)
+
+	found, err := den.FindByID[SoftProduct](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.True(t, found.IsDeleted())
+	assert.Equal(t, "usr_42", found.DeletedBy)
+	assert.Equal(t, "violated terms", found.DeleteReason)
+}
+
+// TestSoftDelete_AuditFields_IgnoredOnHardDelete confirms the soft-only
+// options are silently no-ops on the hard-delete path (the row is gone,
+// there is no place to store the audit data).
+func TestSoftDelete_AuditFields_IgnoredOnHardDelete(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftProduct{})
+	ctx := context.Background()
+
+	p := &SoftProduct{Name: "Widget"}
+	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Delete(ctx, db, p,
+		den.HardDelete(),
+		den.SoftDeleteBy("usr_42"),
+		den.SoftDeleteReason("violated terms"),
+	))
+
+	_, err := den.FindByID[SoftProduct](ctx, db, p.ID)
+	require.ErrorIs(t, err, den.ErrNotFound)
+}
+
 func TestSoftDelete_Count(t *testing.T) {
 	db := dentest.MustOpen(t, &SoftProduct{})
 	ctx := context.Background()

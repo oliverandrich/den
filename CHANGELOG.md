@@ -28,6 +28,18 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     ```
 
 - **`IncludeSoftDeleted()` CRUDOption** — opts lookup-style operations into considering soft-deleted documents. Honored by `FindOneAndUpdate` and `FindOneAndUpsert`.
+- **Soft-delete audit fields** — `document.SoftDelete` gained optional `DeletedBy` and `DeleteReason` strings. Populate them via two new CRUDOptions:
+
+    ```go
+    den.Delete(ctx, db, doc,
+        den.SoftDeleteBy("usr_42"),
+        den.SoftDeleteReason("violated terms"),
+    )
+    ```
+
+    Both default to empty with `omitempty`, so existing data stays compatible. Silently no-ops on the `HardDelete()` path and on types that do not embed `document.SoftDelete`.
+
+- **`BeforeSoftDeleter` / `AfterSoftDeleter` hook interfaces** — fire only on the soft-delete path. Ordering: `BeforeDelete → BeforeSoftDelete → [write] → AfterSoftDelete → AfterDelete`. `BeforeDelete` / `AfterDelete` still fire for both soft and hard deletes, so existing hook code is unaffected. Use the soft-only pair for audit-log side effects that should not run on `HardDelete()`.
 - **`ErrMultipleMatches`** — returned when a single-document lookup matches more than one row.
 - **`InsertMany` now accepts `...CRUDOption`** — backward-compatible signature change. Two new options ride along:
     - **`PreValidate()`** runs the full insert hook + validation chain on every document before opening the write transaction. A late-failing document fails the batch without writing anything. `BeforeInsert` / `BeforeSave` / `Validate` fire exactly once per document — the pre-pass caches the encoded bytes and the in-transaction commit only performs the Put + `AfterInsert` / `AfterSave`. Combining `PreValidate()` with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade must run inside the tx), so hooks fire twice on that specific combination.

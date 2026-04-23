@@ -70,6 +70,47 @@ if product.IsDeleted() {
 }
 ```
 
+## Audit Fields
+
+`SoftDelete` records two optional audit fields alongside `DeletedAt`:
+
+```go
+type SoftDelete struct {
+    DeletedAt    *time.Time `json:"_deleted_at,omitempty"`
+    DeletedBy    string     `json:"_deleted_by,omitempty"`
+    DeleteReason string     `json:"_delete_reason,omitempty"`
+}
+```
+
+Both default to empty — existing data stays compatible. Populate them during `Delete` via the `SoftDeleteBy` and `SoftDeleteReason` CRUDOptions:
+
+```go
+err := den.Delete(ctx, db, product,
+    den.SoftDeleteBy("usr_42"),
+    den.SoftDeleteReason("violated terms"),
+)
+```
+
+Both options are silently no-ops on the `HardDelete()` path — the row is gone, there is nowhere to store the metadata.
+
+## Soft-Only Hooks
+
+Use `BeforeSoftDeleter` and `AfterSoftDeleter` when you need side effects that should fire only when the document remains in storage (for example, appending to an audit log). The general `BeforeDelete` / `AfterDelete` hooks still fire for both soft and hard deletions:
+
+```go
+func (p *Product) BeforeSoftDelete(ctx context.Context) error {
+    return audit.Log(ctx, "soft-delete", p.ID)
+}
+```
+
+Firing order for the soft-delete path:
+
+```
+BeforeDelete -> BeforeSoftDelete -> [write] -> AfterSoftDelete -> AfterDelete
+```
+
+`HardDelete()` bypasses the soft hooks — only `BeforeDelete` and `AfterDelete` fire.
+
 ## Combining with Revision Control
 
 When a soft-delete document also opts into [revision control](revision-control.md) (`UseRevision: true`), soft-delete participates in the revision chain exactly like `Update`:

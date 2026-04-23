@@ -31,6 +31,14 @@ type AfterDeleter interface {
     AfterDelete(ctx context.Context) error
 }
 
+type BeforeSoftDeleter interface {
+    BeforeSoftDelete(ctx context.Context) error
+}
+
+type AfterSoftDeleter interface {
+    AfterSoftDelete(ctx context.Context) error
+}
+
 type BeforeSaver interface {
     BeforeSave(ctx context.Context) error
 }
@@ -68,6 +76,16 @@ BeforeUpdate() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB
 ```
 BeforeDelete() -> [delete from DB] -> AfterDelete()
 ```
+
+### Soft-Delete
+
+When a `SoftDelete`-embedding document is deleted without `HardDelete()`, the soft-only hook pair nests inside the general Delete pair:
+
+```
+BeforeDelete() -> BeforeSoftDelete() -> [write soft-delete] -> AfterSoftDelete() -> AfterDelete()
+```
+
+`BeforeSoftDelete` and `AfterSoftDelete` do not fire on `HardDelete()` — use them for audit-log side effects that should only run when the document remains in storage.
 
 If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
 

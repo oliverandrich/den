@@ -580,6 +580,28 @@ func TestParity_SoftDelete_BumpsRevision(t *testing.T) {
 	}
 }
 
+// TestParity_SoftDelete_AuditFields confirms DeletedBy and DeleteReason are
+// recorded on the persisted document on both backends.
+func TestParity_SoftDelete_AuditFields(t *testing.T) {
+	for name, db := range paritySoftDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			p := &ParitySoftProduct{Name: "Widget"}
+			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Delete(ctx, db, p,
+				den.SoftDeleteBy("usr_42"),
+				den.SoftDeleteReason("cleanup"),
+			))
+
+			found, err := den.FindByID[ParitySoftProduct](ctx, db, p.ID)
+			require.NoError(t, err)
+			assert.True(t, found.IsDeleted())
+			assert.Equal(t, "usr_42", found.DeletedBy)
+			assert.Equal(t, "cleanup", found.DeleteReason)
+		})
+	}
+}
+
 // TestParity_SoftDelete_ConcurrentUpdateConflicts confirms on both backends
 // that a stale Update after a concurrent soft-delete fails with
 // ErrRevisionConflict instead of clobbering DeletedAt.

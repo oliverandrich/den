@@ -188,15 +188,16 @@ err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
 
 ### LinkDelete
 
-Cascades deletion to all linked documents:
+Cascades deletion to the immediate linked documents:
 
 ```go
 err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete))
-// Deletes the House, its Door, and all its Windows
+// Deletes the House, its Door, and its Windows.
+// If Door or Window has its own links, those are NOT touched.
 ```
 
-!!! warning
-    `LinkDelete` cascades recursively. If a Door has its own links, those are also deleted. Be mindful of the nesting depth and your document graph when using cascade delete.
+!!! note
+    `LinkDelete` is single-level: only the immediate link targets are deleted. Linked-document graphs beyond one level stay intact (orphan references point at deleted parents). If you need transitive cleanup, call `Delete(..., WithLinkRule(LinkDelete))` explicitly on each node, or walk the graph yourself — the framework does not recurse. This design keeps one mis-configured delete from wiping an unbounded subgraph.
 
 ## BackLinks -- Reverse Queries
 

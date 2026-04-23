@@ -60,6 +60,11 @@ func (l Link[T]) IsLoaded() bool {
 }
 
 // LinkRule controls cascading behavior for write and delete operations.
+//
+// LinkDelete cascades a Delete to the immediate link targets only — it does
+// not recurse into the targets' own links. Callers that need transitive
+// cleanup must walk the graph themselves. This keeps a mis-configured delete
+// from wiping an unbounded subgraph.
 type LinkRule int
 
 const (
@@ -311,7 +316,11 @@ func cascadeWriteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error
 	})
 }
 
-// cascadeDeleteLinks deletes all linked documents.
+// cascadeDeleteLinks deletes the immediate link targets of doc. The walk is
+// strictly single-level: each target is removed via the backend directly
+// without re-entering Delete() / deleteCore() / cascadeDeleteLinks, so the
+// targets' own links are left intact. Callers that need transitive deletion
+// must drive it themselves.
 func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
 	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
 		return deleteSingleLinkedValue(ctx, db, b, elem, lf)
@@ -373,6 +382,10 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 	return runAfterUpdateHooks(ctx, target)
 }
 
+// deleteSingleLinkedValue removes one link target: loads the stored doc,
+// fires BeforeDelete / AfterDelete hooks, and writes the backend delete
+// (or the soft-delete flip). The backend call is terminal for this target —
+// no cascade re-enters from here, so the target's own links stay untouched.
 func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
 	idField := linkVal.FieldByIndex(lf.idIdx)
 	if idField.String() == "" {

@@ -21,8 +21,11 @@ import (
 
 ctx := context.Background()
 
-// SQLite: file-backed
-db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
+// SQLite: relative path (three slashes)
+db, err := den.OpenURL(ctx, "sqlite:///data.db")
+
+// SQLite: absolute path (four slashes)
+db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
 
 // SQLite: in-memory
 db, err := den.OpenURL(ctx, "sqlite://:memory:")
@@ -56,7 +59,8 @@ db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 
 | Backend | Scheme | Format | Example |
 |---|---|---|---|
-| SQLite (file) | `sqlite` | `sqlite:///path/to/file.db` | `sqlite:///data/myapp.db` |
+| SQLite (relative) | `sqlite` | `sqlite:///relative/path.db` | `sqlite:///data/myapp.db` |
+| SQLite (absolute) | `sqlite` | `sqlite:////absolute/path.db` | `sqlite:////var/lib/myapp/data.db` |
 | SQLite (memory) | `sqlite` | `sqlite://:memory:` | `sqlite://:memory:` |
 | PostgreSQL | `postgres` | `postgres://user:pass@host:port/dbname` | `postgres://admin:secret@localhost:5432/myapp` |
 | PostgreSQL | `postgresql` | `postgresql://user:pass@host:port/dbname` | `postgresql://admin:secret@db.example.com/myapp` |

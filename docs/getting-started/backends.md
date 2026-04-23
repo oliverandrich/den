@@ -36,14 +36,18 @@ Den supports two storage backends behind a unified API. Both store documents as 
 === "SQLite"
 
     ```go
-    // File-based database
-    db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
+    // Relative path (three slashes — resolved against the current working directory)
+    db, err := den.OpenURL(ctx, "sqlite:///local.db")
 
-    // Relative path
-    db, err := den.OpenURL(ctx, "sqlite:///./local.db")
+    // Absolute path (four slashes)
+    db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
+
+    // In-memory database
+    db, err := den.OpenURL(ctx, "sqlite://:memory:")
     ```
 
-    The path after `sqlite:///` is passed directly to the SQLite driver. Use an absolute path for production and a relative path for development.
+    !!! note "Three slashes vs. four"
+        Den follows the same convention as SQLAlchemy: after stripping the `sqlite://` scheme, it removes exactly one leading `/`. So `sqlite:///local.db` becomes the relative path `local.db`, while `sqlite:////var/lib/myapp/data.db` becomes the absolute `/var/lib/myapp/data.db`. Use three slashes for cwd-relative paths and four for absolute paths.
 
 === "PostgreSQL"
 

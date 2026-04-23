@@ -66,7 +66,8 @@ func main() {
     }
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
 
-    // Query with conditions
+    // Query with conditions. den.Asc and den.Desc are the sort-direction
+    // constants accepted by Sort.
     products, err := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
     ).Sort("name", den.Asc).All(ctx)

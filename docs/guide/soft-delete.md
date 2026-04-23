@@ -47,6 +47,18 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
+!!! note "QuerySet vs. CRUDOption"
+    `IncludeDeleted()` is a **QuerySet modifier** — it only affects reads driven by `den.NewQuery`. For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, use the `den.IncludeSoftDeleted()` **CRUDOption** to match soft-deleted rows during the atomic lookup step.
+
+    ```go
+    // Find a soft-deleted product and bring it back
+    p, err := den.FindOneAndUpdate[Product](ctx, db,
+        den.SetFields{"_deleted_at": nil},
+        []where.Condition{where.Field("sku").Eq("abc")},
+        den.IncludeSoftDeleted(),
+    )
+    ```
+
 ## Permanent Removal
 
 Pass `HardDelete()` as a `CRUDOption` to `Delete` to permanently remove a document from storage:

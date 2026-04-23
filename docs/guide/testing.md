@@ -53,8 +53,14 @@ func TestProductInsertPG(t *testing.T) {
 }
 ```
 
-!!! note
-    `MustOpenPostgres` requires a running PostgreSQL instance. It creates a fresh schema for each test run and cleans up via `t.Cleanup`.
+!!! note "Cleanup behavior"
+    `MustOpenPostgres` does not create a fresh schema — it connects to the database you supply. On `t.Cleanup`, it drops every collection that was registered through the helper (by name) and then closes the connection. Data in unrelated collections is untouched.
+
+!!! tip "Picking a connection string"
+    Use `dentest.PostgresURL()` to pull the DSN from the `DEN_POSTGRES_URL` environment variable (default `postgres://localhost/den_test`). This keeps tests portable between developer machines and CI.
+
+!!! warning "Parallel tests and collection names"
+    Tests that run in parallel against the same database must register disjoint document types, or each test must use its own database. Two tests registering `Product` against the same database will race on the shared collection; the helper does not sandbox them.
 
 ## Complete Test Example
 

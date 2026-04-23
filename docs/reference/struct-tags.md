@@ -54,6 +54,9 @@ Options can be combined with commas:
 Tags []string `json:"tags" den:"index,omitempty"`
 ```
 
+!!! note "`unique` already implies a lookup index"
+    A unique index is itself a usable lookup index, so `den:"unique"` alone is enough for equality queries — you do not need to combine it with `index`. `den:"index,unique"` is accepted but redundant: Den creates only the unique index and silently drops the plain one.
+
 ### Complete Example
 
 ```go

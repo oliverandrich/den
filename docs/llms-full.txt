@@ -190,7 +190,8 @@ func main() {
     }
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
 
-    // Query with conditions
+    // Query with conditions. den.Asc and den.Desc are the sort-direction
+    // constants accepted by Sort.
     products, err := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
     ).Sort("name", den.Asc).All(ctx)
@@ -262,14 +263,17 @@ Since both backends share the same API, you can prototype with SQLite and move t
 **SQLite:**
 
 ```go
-// File-based database
-db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
+// Relative path (three slashes — resolved against the current working directory)
+db, err := den.OpenURL(ctx, "sqlite:///local.db")
 
-// Relative path
-db, err := den.OpenURL(ctx, "sqlite:///./local.db")
+// Absolute path (four slashes)
+db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
+
+// In-memory database
+db, err := den.OpenURL(ctx, "sqlite://:memory:")
 ```
 
-The path after `sqlite:///` is passed directly to the SQLite driver. Use an absolute path for production and a relative path for development.
+Den follows the same convention as SQLAlchemy: after stripping the `sqlite://` scheme, it removes exactly one leading `/`. So `sqlite:///local.db` becomes the relative path `local.db`, while `sqlite:////var/lib/myapp/data.db` becomes the absolute `/var/lib/myapp/data.db`. Use three slashes for cwd-relative paths and four for absolute paths.
 
 **PostgreSQL:**
 
@@ -1912,6 +1916,16 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
+`IncludeDeleted()` is a QuerySet modifier and only affects reads driven by `den.NewQuery`. For `FindOneAndUpdate` and `FindOneAndUpsert`, use the `den.IncludeSoftDeleted()` CRUDOption to match soft-deleted rows during the atomic lookup step.
+
+```go
+p, err := den.FindOneAndUpdate[Product](ctx, db,
+    den.SetFields{"_deleted_at": nil},
+    []where.Condition{where.Field("sku").Eq("abc")},
+    den.IncludeSoftDeleted(),
+)
+```
+
 ## Permanent Removal
 
 Pass `HardDelete()` as a `CRUDOption` to `Delete` to permanently remove a document from storage:
@@ -2414,7 +2428,11 @@ func TestProductInsertPG(t *testing.T) {
 }
 ```
 
-`MustOpenPostgres` requires a running PostgreSQL instance. It creates a fresh schema for each test run and cleans up via `t.Cleanup`.
+`MustOpenPostgres` does not create a fresh schema — it connects to the database you supply. On `t.Cleanup`, every collection registered through the helper is dropped and the connection is closed. Data in unrelated collections is untouched.
+
+Use `dentest.PostgresURL()` to pull the DSN from the `DEN_POSTGRES_URL` environment variable (default `postgres://localhost/den_test`) to keep tests portable between developer machines and CI.
+
+Parallel tests against the same database must register disjoint document types, or each test must use its own database — the helper does not sandbox collections.
 
 ## Complete Test Example
 
@@ -2874,6 +2892,8 @@ The `den` tag carries Den-specific metadata. It does not set the field name.
 
 Options can be combined: `den:"index,omitempty"`
 
+A unique index is itself a usable lookup index, so `den:"unique"` alone is enough for equality queries. `den:"index,unique"` is accepted but redundant — Den creates only the unique index and silently drops the plain one.
+
 ### Nullable Unique Fields
 
 Pointer fields with `unique` create a nullable unique constraint. Multiple documents can have `nil` without violating the constraint. Both backends implement this as a partial unique index (`WHERE ... IS NOT NULL`).
@@ -2933,8 +2953,11 @@ import (
     _ "github.com/oliverandrich/den/backend/postgres"
 )
 
-// SQLite: file-backed
-db, err := den.OpenURL(ctx, "sqlite:///path/to/data.db")
+// SQLite: relative path (three slashes)
+db, err := den.OpenURL(ctx, "sqlite:///data.db")
+
+// SQLite: absolute path (four slashes)
+db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
 
 // SQLite: in-memory
 db, err := den.OpenURL(ctx, "sqlite://:memory:")
@@ -2962,7 +2985,8 @@ db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 
 | Backend | Scheme | Format | Example |
 |---|---|---|---|
-| SQLite (file) | `sqlite` | `sqlite:///path/to/file.db` | `sqlite:///data/myapp.db` |
+| SQLite (relative) | `sqlite` | `sqlite:///relative/path.db` | `sqlite:///data/myapp.db` |
+| SQLite (absolute) | `sqlite` | `sqlite:////absolute/path.db` | `sqlite:////var/lib/myapp/data.db` |
 | SQLite (memory) | `sqlite` | `sqlite://:memory:` | `sqlite://:memory:` |
 | PostgreSQL | `postgres` | `postgres://user:pass@host:port/dbname` | `postgres://admin:secret@localhost:5432/myapp` |
 | PostgreSQL | `postgresql` | `postgresql://user:pass@host:port/dbname` | `postgresql://admin:secret@db.example.com/myapp` |

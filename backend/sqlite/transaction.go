@@ -89,12 +89,12 @@ func (t *transaction) Aggregate(ctx context.Context, collection string, op den.A
 	return result, err
 }
 
-func (t *transaction) GroupBy(ctx context.Context, collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
-	sqlStr, args, err := buildGroupBySQL(collection, groupField, aggs, q)
+func (t *transaction) GroupBy(ctx context.Context, collection string, groupFields []string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
+	sqlStr, args, err := buildGroupBySQL(collection, groupFields, aggs, q)
 	if err != nil {
 		return nil, err
 	}
-	return scanGroupByRows(ctx, t.tx, sqlStr, args, len(aggs))
+	return scanGroupByRows(ctx, t.tx, sqlStr, args, len(groupFields), len(aggs))
 }
 
 func (t *transaction) Commit() error {

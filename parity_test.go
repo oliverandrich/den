@@ -311,6 +311,58 @@ func TestParity_GroupBySQL(t *testing.T) {
 	}
 }
 
+type ParityRegionProduct struct {
+	document.Base
+	Name     string  `json:"name"`
+	Price    float64 `json:"price"`
+	Category string  `json:"category"`
+	Region   string  `json:"region"`
+}
+
+func parityRegionDBs(t *testing.T) map[string]*den.DB {
+	t.Helper()
+	return map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &ParityRegionProduct{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParityRegionProduct{}),
+	}
+}
+
+// TestParity_GroupBy_MultiKey pins two-key GROUP BY on both backends.
+func TestParity_GroupBy_MultiKey(t *testing.T) {
+	for name, db := range parityRegionDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityRegionProduct{
+				{Name: "a", Price: 10, Category: "X", Region: "north"},
+				{Name: "b", Price: 20, Category: "X", Region: "north"},
+				{Name: "c", Price: 30, Category: "X", Region: "south"},
+				{Name: "d", Price: 40, Category: "Y", Region: "north"},
+			}))
+
+			type Stats struct {
+				Category string  `den:"group_key:0"`
+				Region   string  `den:"group_key:1"`
+				Count    int64   `den:"count"`
+				Total    float64 `den:"sum:price"`
+			}
+
+			var stats []Stats
+			err := den.NewQuery[ParityRegionProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+			require.NoError(t, err)
+			require.Len(t, stats, 3)
+
+			byKey := map[string]Stats{}
+			for _, s := range stats {
+				byKey[s.Category+"|"+s.Region] = s
+			}
+			assert.Equal(t, int64(2), byKey["X|north"].Count)
+			assert.InDelta(t, 30.0, byKey["X|north"].Total, 0.001)
+			assert.Equal(t, int64(1), byKey["X|south"].Count)
+			assert.Equal(t, int64(1), byKey["Y|north"].Count)
+		})
+	}
+}
+
 func TestParity_GroupBy_NullAggregateValue(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

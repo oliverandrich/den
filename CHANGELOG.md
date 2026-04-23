@@ -15,6 +15,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     den.FindOneAndUpdate[Job](ctx, db, fields, []where.Condition{where.Field("id").Eq(jobID)})
     ```
 
+- **`GroupByRow.Key string` → `GroupByRow.Keys []string`** and **`Backend.GroupBy(groupField string, ...)` → `Backend.GroupBy(groupFields []string, ...)`**. Internal interface contracts only — the public `QuerySet.GroupBy` API stays backward-compatible through variadic arguments. External backend implementers (none known) must adapt to the new signatures; `Keys` holds one entry per requested group field in call order.
+
 ### Added
 
 - **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.
@@ -47,6 +49,19 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     - **`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Trades cross-document atomicity for partial commit. Honors `ctx` cancellation between documents. Returns `ErrIncompatibleScope` when called inside a `*Tx`; returns `ErrIncompatibleOptions` when combined with `PreValidate`.
 - **`InsertManyError`** — new struct error type carrying `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error` so `errors.Is` traverses every wrapped failure.
 - **`ErrIncompatibleScope` and `ErrIncompatibleOptions`** — new sentinels for option/scope mismatches.
+- **Multi-key `GroupBy`** — `qs.GroupBy(fields ...string)` now accepts more than one field. Target structs declare positional slots with `den:"group_key:N"`:
+
+    ```go
+    type Stats struct {
+        Category string  `den:"group_key:0"`
+        Region   string  `den:"group_key:1"`
+        Count    int64   `den:"count"`
+        Total    float64 `den:"sum:price"`
+    }
+    qs.GroupBy("category", "region").Into(ctx, &stats)
+    ```
+
+    Single-field callers keep using `den:"group_key"` unchanged (treated as slot 0). Invalid tag shapes — missing slots, duplicate slots, mixed unindexed + positional tags, out-of-range slots — are caught pre-query with a clear error.
 
 ### Changed
 

@@ -122,12 +122,18 @@ func buildAggregateSQL(collection string, op den.AggregateOp, field string, q *d
 	return sql, args, nil
 }
 
-func buildGroupBySQL(collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) (string, []any, error) {
-	gf := sanitizeFieldName(groupField)
-	groupExpr := fmt.Sprintf("json_extract(data, '$.%s')", gf)
+func buildGroupBySQL(collection string, groupFields []string, aggs []den.GroupByAgg, q *den.Query) (string, []any, error) {
+	if len(groupFields) == 0 {
+		return "", nil, fmt.Errorf("den: GroupBy requires at least one field")
+	}
 
-	// Build SELECT: group key + aggregate expressions
-	selectParts := []string{groupExpr}
+	groupExprs := make([]string, len(groupFields))
+	for i, f := range groupFields {
+		groupExprs[i] = fmt.Sprintf("json_extract(data, '$.%s')", sanitizeFieldName(f))
+	}
+
+	// Build SELECT: group keys + aggregate expressions
+	selectParts := append([]string(nil), groupExprs...)
 	for _, agg := range aggs {
 		switch agg.Op {
 		case den.OpCount:
@@ -150,7 +156,7 @@ func buildGroupBySQL(collection string, groupField string, aggs []den.GroupByAgg
 		sb.WriteString(" WHERE ")
 		sb.WriteString(strings.Join(clauses, " AND "))
 	}
-	fmt.Fprintf(&sb, " GROUP BY %s", groupExpr)
+	fmt.Fprintf(&sb, " GROUP BY %s", strings.Join(groupExprs, ", "))
 
 	return sb.String(), args, nil
 }

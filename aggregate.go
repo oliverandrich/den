@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -181,15 +182,22 @@ func mapProjection(doc map[string]any, elem reflect.Value, elemType reflect.Type
 	}
 }
 
-// GroupByBuilder allows specifying a group-by field.
+// GroupByBuilder allows specifying group-by fields. The builder is typically
+// obtained from QuerySet.GroupBy.
 type GroupByBuilder[T any] struct {
-	qs    QuerySet[T]
-	field string
+	qs     QuerySet[T]
+	fields []string
 }
 
-// GroupBy starts a group-by aggregation on the given field.
-func (qs QuerySet[T]) GroupBy(field string) GroupByBuilder[T] {
-	return GroupByBuilder[T]{qs: qs, field: field}
+// GroupBy starts a group-by aggregation on one or more fields.
+//
+// The target struct passed to Into must carry one field tagged `den:"group_key:N"`
+// for each field listed here, with N running 0..len(fields)-1. The legacy
+// unindexed `den:"group_key"` is accepted when exactly one field is requested
+// and is treated as slot 0; mixing the unindexed form with positional tags
+// returns an error.
+func (qs QuerySet[T]) GroupBy(fields ...string) GroupByBuilder[T] {
+	return GroupByBuilder[T]{qs: qs, fields: fields}
 }
 
 // Into executes the group-by aggregation and maps results into the target slice.
@@ -197,6 +205,9 @@ func (qs QuerySet[T]) GroupBy(field string) GroupByBuilder[T] {
 func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	if err := gb.qs.preflight(); err != nil {
 		return err
+	}
+	if len(gb.fields) == 0 {
+		return fmt.Errorf("den: GroupBy requires at least one field")
 	}
 	col, err := collectionFor[T](gb.qs.scope.db())
 	if err != nil {
@@ -212,11 +223,16 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	elemType := sliceVal.Type().Elem()
 	mappings := getGroupMappings(elemType)
 
+	keySlots, err := resolveGroupKeySlots(mappings, len(gb.fields))
+	if err != nil {
+		return err
+	}
+
 	// Build the list of aggregate expressions from the target struct's den tags.
 	aggs, aggIndices := buildAggsFromMappings(mappings)
 
 	q := gb.qs.buildBackendQuery(col)
-	rows, err := gb.qs.scope.readWriter().GroupBy(ctx, col.meta.Name, gb.field, aggs, q)
+	rows, err := gb.qs.scope.readWriter().GroupBy(ctx, col.meta.Name, gb.fields, aggs, q)
 	if err != nil {
 		return err
 	}
@@ -224,21 +240,37 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	for _, row := range rows {
 		elem := reflect.New(elemType).Elem()
 
-		for _, m := range mappings {
-			fv := elem.Field(m.index)
+		// Populate group-key fields by slot.
+		for slot, structIdx := range keySlots {
+			if structIdx < 0 {
+				continue
+			}
+			fv := elem.Field(structIdx)
+			targetType := elemType.Field(structIdx).Type
+			var keyVal string
+			if slot < len(row.Keys) {
+				keyVal = row.Keys[slot]
+			}
+			kv := reflect.ValueOf(keyVal)
+			if kv.Type().ConvertibleTo(targetType) {
+				fv.Set(kv.Convert(targetType))
+			}
+		}
 
-			if m.tag == "group_key" {
-				targetType := elemType.Field(m.index).Type
-				kv := reflect.ValueOf(row.Key)
-				if kv.Type().ConvertibleTo(targetType) {
-					fv.Set(kv.Convert(targetType))
-				}
-			} else if idx, ok := aggIndices[m.tag]; ok {
-				if m.tag == "count" {
-					fv.SetInt(int64(row.Values[idx]))
-				} else {
-					fv.SetFloat(row.Values[idx])
-				}
+		// Populate aggregate fields by tag.
+		for _, m := range mappings {
+			if isGroupKeyTag(m.tag) {
+				continue
+			}
+			idx, ok := aggIndices[m.tag]
+			if !ok {
+				continue
+			}
+			fv := elem.Field(m.index)
+			if m.tag == "count" {
+				fv.SetInt(int64(row.Values[idx]))
+			} else {
+				fv.SetFloat(row.Values[idx])
 			}
 		}
 
@@ -249,6 +281,68 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	return nil
 }
 
+// isGroupKeyTag reports whether tag is either the legacy "group_key" form or
+// the positional "group_key:N" form.
+func isGroupKeyTag(tag string) bool {
+	return tag == "group_key" || strings.HasPrefix(tag, "group_key:")
+}
+
+// resolveGroupKeySlots returns a slice of length numFields mapping slot →
+// struct-field index. It validates that:
+//   - each slot 0..numFields-1 is claimed by exactly one struct field,
+//   - the legacy unindexed "group_key" tag is only used when numFields == 1,
+//   - unindexed and positional tag forms are not mixed.
+//
+// Returns -1 in a slot only when a field genuinely does not participate (not
+// permitted today — every slot must be claimed; missing slots produce an
+// error).
+func resolveGroupKeySlots(mappings []groupField, numFields int) ([]int, error) {
+	slots := make([]int, numFields)
+	for i := range slots {
+		slots[i] = -1
+	}
+
+	var hasUnindexed, hasPositional bool
+	for _, m := range mappings {
+		switch {
+		case m.tag == "group_key":
+			hasUnindexed = true
+			if numFields != 1 {
+				return nil, fmt.Errorf("den: tag `group_key` without slot requires exactly one GroupBy field; have %d", numFields)
+			}
+			if slots[0] != -1 {
+				return nil, fmt.Errorf("den: multiple struct fields claim group_key slot 0")
+			}
+			slots[0] = m.index
+		case strings.HasPrefix(m.tag, "group_key:"):
+			hasPositional = true
+			slotStr := strings.TrimPrefix(m.tag, "group_key:")
+			slot, err := strconv.Atoi(slotStr)
+			if err != nil {
+				return nil, fmt.Errorf("den: invalid group_key slot %q: %w", slotStr, err)
+			}
+			if slot < 0 || slot >= numFields {
+				return nil, fmt.Errorf("den: group_key:%d out of range [0..%d)", slot, numFields)
+			}
+			if slots[slot] != -1 {
+				return nil, fmt.Errorf("den: multiple struct fields claim group_key slot %d", slot)
+			}
+			slots[slot] = m.index
+		}
+	}
+
+	if hasUnindexed && hasPositional {
+		return nil, fmt.Errorf("den: cannot mix `group_key` with `group_key:N` tags on the same target")
+	}
+
+	for i, idx := range slots {
+		if idx == -1 {
+			return nil, fmt.Errorf("den: missing struct field for group_key slot %d", i)
+		}
+	}
+	return slots, nil
+}
+
 // buildAggsFromMappings converts den struct tags into GroupByAgg descriptors.
 // Returns the aggs and a map from tag → index in the Values slice.
 func buildAggsFromMappings(mappings []groupField) ([]GroupByAgg, map[string]int) {
@@ -257,7 +351,7 @@ func buildAggsFromMappings(mappings []groupField) ([]GroupByAgg, map[string]int)
 
 	for _, m := range mappings {
 		switch {
-		case m.tag == "group_key":
+		case isGroupKeyTag(m.tag):
 			continue
 		case m.tag == "count":
 			indices[m.tag] = len(aggs)

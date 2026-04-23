@@ -284,12 +284,12 @@ func (b *backend) Aggregate(ctx context.Context, collection string, op den.Aggre
 	return result, err
 }
 
-func (b *backend) GroupBy(ctx context.Context, collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
-	sqlStr, args, err := buildGroupBySQL(collection, groupField, aggs, q)
+func (b *backend) GroupBy(ctx context.Context, collection string, groupFields []string, aggs []den.GroupByAgg, q *den.Query) ([]den.GroupByRow, error) {
+	sqlStr, args, err := buildGroupBySQL(collection, groupFields, aggs, q)
 	if err != nil {
 		return nil, err
 	}
-	return scanGroupByRows(ctx, b.db, sqlStr, args, len(aggs))
+	return scanGroupByRows(ctx, b.db, sqlStr, args, len(groupFields), len(aggs))
 }
 
 func (b *backend) EnsureIndex(ctx context.Context, collection string, idx den.IndexDefinition) error {
@@ -339,11 +339,12 @@ func (b *backend) Close() error {
 	return b.db.Close()
 }
 
-// scanGroupByRows executes a GROUP BY query and scans the results.
-// The first column is the group key (text), followed by numAggs float columns.
+// scanGroupByRows executes a GROUP BY query and scans the results. The
+// first numKeys columns are group key values (text, nullable), followed by
+// numAggs float columns.
 func scanGroupByRows(ctx context.Context, db interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}, sqlStr string, args []any, numAggs int) ([]den.GroupByRow, error) {
+}, sqlStr string, args []any, numKeys, numAggs int) ([]den.GroupByRow, error) {
 	rows, err := db.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, err
@@ -351,24 +352,33 @@ func scanGroupByRows(ctx context.Context, db interface {
 	defer func() { _ = rows.Close() }()
 
 	var result []den.GroupByRow
-	var key *string
+	keys := make([]*string, numKeys)
 	vals := make([]*float64, numAggs)
-	scanDest := make([]any, 1+numAggs)
-	scanDest[0] = &key
+	scanDest := make([]any, numKeys+numAggs)
+	for i := range numKeys {
+		scanDest[i] = &keys[i]
+	}
 	for i := range numAggs {
-		scanDest[i+1] = &vals[i]
+		scanDest[numKeys+i] = &vals[i]
 	}
 	for rows.Next() {
-		key = nil
+		for i := range keys {
+			keys[i] = nil
+		}
 		for i := range vals {
 			vals[i] = nil
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, err
 		}
-		row := den.GroupByRow{Values: make([]float64, numAggs)}
-		if key != nil {
-			row.Key = *key
+		row := den.GroupByRow{
+			Keys:   make([]string, numKeys),
+			Values: make([]float64, numAggs),
+		}
+		for i, k := range keys {
+			if k != nil {
+				row.Keys[i] = *k
+			}
 		}
 		for i, v := range vals {
 			if v != nil {

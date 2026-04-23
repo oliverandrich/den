@@ -118,11 +118,18 @@ func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 	return sb.String(), args
 }
 
-func buildGroupBySQL(collection string, groupField string, aggs []den.GroupByAgg, q *den.Query) (string, []any, error) {
-	groupExpr := jsonbPathText(groupField)
+func buildGroupBySQL(collection string, groupFields []string, aggs []den.GroupByAgg, q *den.Query) (string, []any, error) {
+	if len(groupFields) == 0 {
+		return "", nil, fmt.Errorf("den: GroupBy requires at least one field")
+	}
 
-	// Build SELECT: group key + aggregate expressions
-	selectParts := []string{groupExpr}
+	groupExprs := make([]string, len(groupFields))
+	for i, f := range groupFields {
+		groupExprs[i] = jsonbPathText(f)
+	}
+
+	// Build SELECT: group keys + aggregate expressions
+	selectParts := append([]string(nil), groupExprs...)
 	for _, agg := range aggs {
 		switch agg.Op {
 		case den.OpCount:
@@ -144,7 +151,7 @@ func buildGroupBySQL(collection string, groupField string, aggs []den.GroupByAgg
 		sb.WriteString(" WHERE ")
 		sb.WriteString(strings.Join(clauses, " AND "))
 	}
-	fmt.Fprintf(&sb, " GROUP BY %s", groupExpr)
+	fmt.Fprintf(&sb, " GROUP BY %s", strings.Join(groupExprs, ", "))
 
 	return sb.String(), args, nil
 }

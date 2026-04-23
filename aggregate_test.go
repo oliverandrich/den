@@ -18,6 +18,7 @@ type AggProduct struct {
 	Name     string  `json:"name"`
 	Price    float64 `json:"price"`
 	Category string  `json:"category"`
+	Region   string  `json:"region,omitempty"`
 }
 
 func seedAggProducts(t *testing.T, db *den.DB) {
@@ -163,6 +164,126 @@ func TestGroupBy(t *testing.T) {
 	assert.InDelta(t, 120.0, y.Total, 0.001)
 	assert.InDelta(t, 30.0, y.MinPrice, 0.001)
 	assert.InDelta(t, 50.0, y.MaxPrice, 0.001)
+}
+
+// TestGroupBy_MultiKey pins two-key GROUP BY: callers pass two fields to
+// GroupBy and the target struct carries positional group_key:N tags.
+func TestGroupBy_MultiKey(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	// Seed with (category, region) pairs so (X, north) has 2 rows,
+	// (X, south) has 1, (Y, north) has 1.
+	products := []AggProduct{
+		{Name: "a", Price: 10, Category: "X", Region: "north"},
+		{Name: "b", Price: 20, Category: "X", Region: "north"},
+		{Name: "c", Price: 30, Category: "X", Region: "south"},
+		{Name: "d", Price: 40, Category: "Y", Region: "north"},
+	}
+	for i := range products {
+		require.NoError(t, den.Insert(ctx, db, &products[i]))
+	}
+
+	type Stats struct {
+		Category string  `den:"group_key:0"`
+		Region   string  `den:"group_key:1"`
+		Count    int64   `den:"count"`
+		Total    float64 `den:"sum:price"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	require.NoError(t, err)
+	require.Len(t, stats, 3)
+
+	byKey := map[string]Stats{}
+	for _, s := range stats {
+		byKey[s.Category+"|"+s.Region] = s
+	}
+
+	require.Contains(t, byKey, "X|north")
+	assert.Equal(t, int64(2), byKey["X|north"].Count)
+	assert.InDelta(t, 30.0, byKey["X|north"].Total, 0.001)
+
+	require.Contains(t, byKey, "X|south")
+	assert.Equal(t, int64(1), byKey["X|south"].Count)
+	assert.InDelta(t, 30.0, byKey["X|south"].Total, 0.001)
+
+	require.Contains(t, byKey, "Y|north")
+	assert.Equal(t, int64(1), byKey["Y|north"].Count)
+	assert.InDelta(t, 40.0, byKey["Y|north"].Total, 0.001)
+}
+
+// TestGroupBy_SingleKeyUnindexedTag confirms the legacy `den:"group_key"`
+// tag still works as slot 0 when exactly one group key is requested.
+func TestGroupBy_SingleKeyUnindexedTag(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
+	require.NoError(t, err)
+	assert.Len(t, stats, 2)
+}
+
+// TestGroupBy_MissingKeyTag rejects targets whose group_key tag count does
+// not match the number of group fields.
+func TestGroupBy_MissingKeyTag(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	// Two fields requested, only one slot tagged — should error.
+	type Stats struct {
+		Category string `den:"group_key:0"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group_key")
+}
+
+// TestGroupBy_MixedTagForms rejects targets that mix `group_key` (unindexed)
+// with `group_key:N` (positional) — only one style per target.
+func TestGroupBy_MixedTagForms(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Region   string `den:"group_key:1"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group_key")
+}
+
+// TestGroupBy_DuplicateSlot rejects targets with two fields claiming the
+// same positional slot.
+func TestGroupBy_DuplicateSlot(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	type Stats struct {
+		A     string `den:"group_key:0"`
+		B     string `den:"group_key:0"`
+		Count int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group_key")
 }
 
 func TestProject(t *testing.T) {

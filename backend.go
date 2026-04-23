@@ -16,7 +16,7 @@ type Backend interface {
 	Count(ctx context.Context, collection string, q *Query) (int64, error)
 	Exists(ctx context.Context, collection string, q *Query) (bool, error)
 	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
-	GroupBy(ctx context.Context, collection string, groupField string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
+	GroupBy(ctx context.Context, collection string, groupFields []string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
 
 	EnsureIndex(ctx context.Context, collection string, idx IndexDefinition) error
 	DropIndex(ctx context.Context, collection string, name string) error
@@ -50,9 +50,11 @@ type GroupByAgg struct {
 	Field string // source field (ignored for OpCount)
 }
 
-// GroupByRow holds one result row from a GROUP BY query.
+// GroupByRow holds one result row from a GROUP BY query. Keys holds one
+// entry per field passed to GroupBy (in the same order); Values holds one
+// entry per GroupByAgg in the order they were requested.
 type GroupByRow struct {
-	Key    string    // group key value (text representation)
+	Keys   []string  // group key values (text representation), one per group field
 	Values []float64 // aggregate values, matching GroupByAgg order
 }
 
@@ -79,7 +81,7 @@ type ReadWriter interface {
 	Count(ctx context.Context, collection string, q *Query) (int64, error)
 	Exists(ctx context.Context, collection string, q *Query) (bool, error)
 	Aggregate(ctx context.Context, collection string, op AggregateOp, field string, q *Query) (*float64, error)
-	GroupBy(ctx context.Context, collection string, groupField string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
+	GroupBy(ctx context.Context, collection string, groupFields []string, aggs []GroupByAgg, q *Query) ([]GroupByRow, error)
 }
 
 // Transaction provides CRUD operations within a transaction boundary.

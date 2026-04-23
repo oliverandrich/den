@@ -63,6 +63,15 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
     Single-field callers keep using `den:"group_key"` unchanged (treated as slot 0). Invalid tag shapes — missing slots, duplicate slots, mixed unindexed + positional tags, out-of-range slots — are caught pre-query with a clear error.
 
+- **ORDER BY + LIMIT on `GroupBy.Into`** — grouped results are now sortable and paginatable server-side. `qs.Sort("category", den.Asc)` sorts by a group key (non-key field returns an error — use `OrderByAgg`); new `GroupByBuilder.OrderByAgg(op, field, dir)` sorts by an aggregate expression. `qs.Limit(n)` / `qs.Skip(n)` cap / offset the group rows. Combines into Top-N queries:
+
+    ```go
+    qs.Limit(5).GroupBy("category").
+        OrderByAgg(den.OpCount, "", den.Desc).Into(ctx, &top)
+    ```
+
+    Previously both SQLite and PostgreSQL ignored `SortFields` / `LimitN` / `SkipN` in their `buildGroupBySQL`, forcing callers to sort and trim in Go.
+
 ### Changed
 
 - **`QuerySet.Iter` checks `ctx.Err()` before each row** — cancellation now terminates the iteration within at most one row, regardless of how aggressively the backend's own cursor reacts to context cancellation. The seq2 error path carries the context error.

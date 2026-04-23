@@ -116,6 +116,23 @@ Rules:
 - The unindexed `den:"group_key"` is only accepted when exactly one field is requested; mixing it with `group_key:N` returns an error.
 - Two struct fields claiming the same slot, or a slot outside the requested range, also return an error before any SQL runs.
 
+### Ordering and Limiting Groups
+
+`GroupBy.Into` honors the surrounding query set's `Sort`, `Limit`, and `Skip` modifiers. For aggregate ordering, use `GroupByBuilder.OrderByAgg`.
+
+```go
+// Top-5 categories by document count.
+var top []Stats
+err := den.NewQuery[Product](db).Limit(5).
+    GroupBy("category").
+    OrderByAgg(den.OpCount, "", den.Desc).
+    Into(ctx, &top)
+```
+
+- `qs.Sort("category", den.Asc)` sorts by a group key — works for any key-carrying field listed in `GroupBy(...)`. Sorting by a non-key field returns an error: use `OrderByAgg` for aggregate sort.
+- `OrderByAgg(op, field, dir)` sorts by an aggregate expression. `op` is one of `den.OpCount`, `OpSum`, `OpAvg`, `OpMin`, `OpMax`; `field` is ignored for `OpCount`. Multiple calls define tie-breakers in the order they were added.
+- `qs.Limit(n)` / `qs.Skip(n)` cap or offset the number of group rows returned — combine with `OrderByAgg` for top-N queries.
+
 !!! note
     GroupBy queries all matching documents and accumulates results in memory. For large result sets, consider applying filters to reduce the number of documents processed. Scalar aggregations (Avg, Sum, Min, Max, Count) are executed as SQL queries in the database engine without loading documents into memory.
 

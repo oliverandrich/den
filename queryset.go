@@ -68,9 +68,11 @@ func (qs QuerySet[T]) Where(conditions ...where.Condition) QuerySet[T] {
 // Sort adds a sort criterion. Multiple calls define tie-breakers.
 //
 // Honored by terminals that return ordered rows: All, AllWithCount, First,
-// Iter, Search, Update, and Project. Ignored by Count, Exists, the scalar
-// aggregates (Avg / Sum / Min / Max), and GroupBy.Into — those operate on
-// unordered sets where sort order has no effect on the result.
+// Iter, Search, Update, and Project. On GroupBy.Into, Sort is honored when
+// the referenced field matches a group key; a non-key field returns an
+// error — use GroupByBuilder.OrderByAgg for aggregate ordering. Ignored by
+// Count, Exists, and the scalar aggregates (Avg / Sum / Min / Max) — those
+// operate on unordered sets where sort order has no effect on the result.
 func (qs QuerySet[T]) Sort(field string, dir SortDirection) QuerySet[T] {
 	qs.sortFields = append(slices.Clone(qs.sortFields), SortEntry{Field: field, Dir: dir})
 	return qs
@@ -78,11 +80,12 @@ func (qs QuerySet[T]) Sort(field string, dir SortDirection) QuerySet[T] {
 
 // Limit sets the maximum number of results.
 //
-// Honored by the same row-returning terminals as Sort: All, AllWithCount
-// (data slice only; the count path runs unpaginated), First (which rewrites
-// Limit to 1 internally), Iter, Search, Update, and Project. Ignored by
-// Count, Exists, scalar aggregates, and GroupBy.Into — those always operate
-// on the full WHERE-filtered set.
+// Honored by the same row-returning terminals as Sort, plus GroupBy.Into
+// (caps the number of group rows returned): All, AllWithCount (data slice
+// only; the count path runs unpaginated), First (which rewrites Limit to 1
+// internally), Iter, Search, Update, Project, and GroupBy.Into. Ignored by
+// Count, Exists, and scalar aggregates — those always operate on the full
+// WHERE-filtered set.
 func (qs QuerySet[T]) Limit(n int) QuerySet[T] {
 	qs.limitN = n
 	return qs
@@ -90,8 +93,8 @@ func (qs QuerySet[T]) Limit(n int) QuerySet[T] {
 
 // Skip sets the number of results to skip (offset pagination).
 //
-// Honored by the same row-returning terminals as Limit. Ignored by Count,
-// Exists, scalar aggregates, and GroupBy.Into.
+// Honored by the same terminals as Limit (including GroupBy.Into). Ignored
+// by Count, Exists, and scalar aggregates.
 //
 // Cannot be combined with After or Before (cursor pagination) — terminal
 // methods return ErrIncompatiblePagination when both styles are set.

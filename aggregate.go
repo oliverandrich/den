@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,6 +188,21 @@ func mapProjection(doc map[string]any, elem reflect.Value, elemType reflect.Type
 type GroupByBuilder[T any] struct {
 	qs     QuerySet[T]
 	fields []string
+	sort   []GroupBySortEntry
+}
+
+// OrderByAgg appends an ORDER BY entry that sorts grouped results by an
+// aggregate expression. Op selects the aggregate column; field names its
+// source field (ignored for OpCount, which sorts by COUNT(*)). Multiple
+// calls define tie-breakers in the order they were added.
+//
+// To order by a group key, use the ordinary QuerySet.Sort chain on the
+// underlying query set — Sort fields that match a group key translate to
+// ORDER BY the group-key expression. Sort fields that are neither a group
+// key nor an aggregate error out at Into.
+func (gb GroupByBuilder[T]) OrderByAgg(op AggregateOp, field string, dir SortDirection) GroupByBuilder[T] {
+	gb.sort = append(slices.Clone(gb.sort), GroupBySortEntry{Op: op, Field: field, Dir: dir})
+	return gb
 }
 
 // GroupBy starts a group-by aggregation on one or more fields.
@@ -232,6 +248,21 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	aggs, aggIndices := buildAggsFromMappings(mappings)
 
 	q := gb.qs.buildBackendQuery(col)
+
+	// Sort fields on the parent QuerySet must reference a group key — they
+	// translate to ORDER BY the group-key expression. Aggregate ordering
+	// must go through GroupByBuilder.OrderByAgg.
+	groupKeySet := make(map[string]struct{}, len(gb.fields))
+	for _, f := range gb.fields {
+		groupKeySet[f] = struct{}{}
+	}
+	for _, sf := range q.SortFields {
+		if _, ok := groupKeySet[sf.Field]; !ok {
+			return fmt.Errorf("den: GroupBy: Sort field %q is not a group key; use OrderByAgg for aggregate sort", sf.Field)
+		}
+	}
+	q.GroupBySort = gb.sort
+
 	rows, err := gb.qs.scope.readWriter().GroupBy(ctx, col.meta.Name, gb.fields, aggs, q)
 	if err != nil {
 		return err

@@ -158,7 +158,60 @@ func buildGroupBySQL(collection string, groupFields []string, aggs []den.GroupBy
 	}
 	fmt.Fprintf(&sb, " GROUP BY %s", strings.Join(groupExprs, ", "))
 
+	// ORDER BY: group-key sorts first (from SortFields), then aggregate
+	// sorts (from GroupBySort). Aggregate reconstruction matches the
+	// expressions emitted in SELECT above.
+	var orderParts []string
+	for _, sf := range q.SortFields {
+		// Into() already validated sf.Field is a group key.
+		for i, gf := range groupFields {
+			if gf == sf.Field {
+				orderParts = append(orderParts, groupExprs[i]+sortDirSQL(sf.Dir))
+				break
+			}
+		}
+	}
+	for _, gs := range q.GroupBySort {
+		expr, err := groupAggExprSQLite(gs)
+		if err != nil {
+			return "", nil, err
+		}
+		orderParts = append(orderParts, expr+sortDirSQL(gs.Dir))
+	}
+	if len(orderParts) > 0 {
+		fmt.Fprintf(&sb, " ORDER BY %s", strings.Join(orderParts, ", "))
+	}
+
+	if q.LimitN > 0 {
+		fmt.Fprintf(&sb, " LIMIT %d", q.LimitN)
+	}
+	if q.SkipN > 0 {
+		if q.LimitN == 0 {
+			sb.WriteString(" LIMIT -1")
+		}
+		fmt.Fprintf(&sb, " OFFSET %d", q.SkipN)
+	}
+
 	return sb.String(), args, nil
+}
+
+func sortDirSQL(dir den.SortDirection) string {
+	if dir == den.Desc {
+		return " DESC"
+	}
+	return " ASC"
+}
+
+func groupAggExprSQLite(gs den.GroupBySortEntry) (string, error) {
+	switch gs.Op {
+	case den.OpCount:
+		return "COUNT(*)", nil
+	case den.OpSum, den.OpAvg, den.OpMin, den.OpMax:
+		return fmt.Sprintf("%s(CAST(json_extract(data, '$.%s') AS REAL))",
+			string(gs.Op), sanitizeFieldName(gs.Field)), nil
+	default:
+		return "", fmt.Errorf("den: unsupported aggregate op in order-by: %s", gs.Op)
+	}
 }
 
 func buildWhereClauses(conditions []where.Condition) ([]string, []any) {

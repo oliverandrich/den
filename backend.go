@@ -209,4 +209,20 @@ type Query struct {
 	// lock mode. The pointer form rules out the previously-possible
 	// invalid pair of (ForUpdate=false, LockMode!=LockDefault).
 	Lock *LockMode
+
+	// GroupBySort carries ORDER BY entries that target aggregates in a
+	// GROUP BY query. SortFields are used for group-key ordering; aggregate
+	// ordering needs the (Op, Field) tuple because no source-field name
+	// identifies a synthetic aggregate column. Only consumed by GroupBy
+	// paths — other terminals ignore this slice.
+	GroupBySort []GroupBySortEntry
+}
+
+// GroupBySortEntry describes an ORDER BY entry over an aggregate expression
+// inside a GROUP BY query. Op selects which aggregate column to order by;
+// Field names the aggregate's source field (ignored for OpCount).
+type GroupBySortEntry struct {
+	Op    AggregateOp
+	Field string
+	Dir   SortDirection
 }

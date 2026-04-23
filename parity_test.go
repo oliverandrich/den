@@ -327,6 +327,54 @@ func parityRegionDBs(t *testing.T) map[string]*den.DB {
 	}
 }
 
+// TestParity_GroupBy_SortAndLimit pins ORDER BY (by group key and by
+// aggregate) together with LIMIT on grouped results across both backends.
+func TestParity_GroupBy_SortAndLimit(t *testing.T) {
+	for name, db := range paritySoftDBs(t) {
+		// paritySoftDBs already seeds a ParitySoftProduct type with Name
+		// and Price — adequate for single-key GroupBy-with-sort.
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParitySoftProduct{
+				{Name: "A", Price: 10},
+				{Name: "A", Price: 20},
+				{Name: "B", Price: 30},
+				{Name: "C", Price: 40},
+				{Name: "C", Price: 50},
+				{Name: "C", Price: 60},
+			}))
+
+			type Stats struct {
+				Name  string `den:"group_key"`
+				Count int64  `den:"count"`
+			}
+
+			// Top-2 by COUNT(*) DESC — expect C (3 rows) then A (2 rows).
+			var top []Stats
+			err := den.NewQuery[ParitySoftProduct](db).Limit(2).
+				GroupBy("name").
+				OrderByAgg(den.OpCount, "", den.Desc).
+				Into(ctx, &top)
+			require.NoError(t, err)
+			require.Len(t, top, 2)
+			assert.Equal(t, "C", top[0].Name)
+			assert.Equal(t, int64(3), top[0].Count)
+			assert.Equal(t, "A", top[1].Name)
+			assert.Equal(t, int64(2), top[1].Count)
+
+			// Sort by group key ascending, full result.
+			var asc []Stats
+			err = den.NewQuery[ParitySoftProduct](db).Sort("name", den.Asc).
+				GroupBy("name").Into(ctx, &asc)
+			require.NoError(t, err)
+			require.Len(t, asc, 3)
+			assert.Equal(t, "A", asc[0].Name)
+			assert.Equal(t, "B", asc[1].Name)
+			assert.Equal(t, "C", asc[2].Name)
+		})
+	}
+}
+
 // TestParity_GroupBy_MultiKey pins two-key GROUP BY on both backends.
 func TestParity_GroupBy_MultiKey(t *testing.T) {
 	for name, db := range parityRegionDBs(t) {

@@ -286,6 +286,97 @@ func TestGroupBy_DuplicateSlot(t *testing.T) {
 	assert.Contains(t, err.Error(), "group_key")
 }
 
+// TestGroupBy_SortByKey orders grouped results by a group key.
+func TestGroupBy_SortByKey(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	var asc []Stats
+	err := den.NewQuery[AggProduct](db).Sort("category", den.Asc).
+		GroupBy("category").Into(ctx, &asc)
+	require.NoError(t, err)
+	require.Len(t, asc, 2)
+	assert.Equal(t, "X", asc[0].Category)
+	assert.Equal(t, "Y", asc[1].Category)
+
+	var desc []Stats
+	err = den.NewQuery[AggProduct](db).Sort("category", den.Desc).
+		GroupBy("category").Into(ctx, &desc)
+	require.NoError(t, err)
+	require.Len(t, desc, 2)
+	assert.Equal(t, "Y", desc[0].Category)
+	assert.Equal(t, "X", desc[1].Category)
+}
+
+// TestGroupBy_SortByAgg orders grouped results by an aggregate via OrderByAgg.
+func TestGroupBy_SortByAgg(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).
+		GroupBy("category").
+		OrderByAgg(den.OpCount, "", den.Desc).
+		Into(ctx, &stats)
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+	// Y has 3 rows, X has 2 — DESC by COUNT(*) places Y first.
+	assert.Equal(t, "Y", stats[0].Category)
+	assert.Equal(t, int64(3), stats[0].Count)
+	assert.Equal(t, "X", stats[1].Category)
+	assert.Equal(t, int64(2), stats[1].Count)
+}
+
+// TestGroupBy_Limit caps the number of group rows returned.
+func TestGroupBy_Limit(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	seedAggProducts(t, db)
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).Sort("category", den.Asc).Limit(1).
+		GroupBy("category").Into(ctx, &stats)
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "X", stats[0].Category)
+}
+
+// TestGroupBy_SortByNonKey_Error rejects a Sort field that is neither a
+// group key nor an aggregate — callers must use OrderByAgg for aggregates.
+func TestGroupBy_SortByNonKey_Error(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string `den:"group_key"`
+		Count    int64  `den:"count"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).Sort("price", den.Asc).
+		GroupBy("category").Into(ctx, &stats)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "price")
+	assert.Contains(t, err.Error(), "group key")
+}
+
 func TestProject(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})
 	seedAggProducts(t, db)

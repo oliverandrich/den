@@ -63,6 +63,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
     Single-field callers keep using `den:"group_key"` unchanged (treated as slot 0). Invalid tag shapes — missing slots, duplicate slots, mixed unindexed + positional tags, out-of-range slots — are caught pre-query with a clear error.
 
+- **`migrate.Registry` observability hook** — `migrate.NewRegistry(migrate.WithLogger(l))` routes migration lifecycle events through a `*slog.Logger`. Default is `slog.Default()`. Emitted events: `migration_start`, `migration_success` (with `duration_ms`), `migration_failure` (with `duration_ms` and `error`), and `ensure_table_failure` (fires at most once via the Registry's sticky `sync.Once`). Every event carries `version` and `direction` (`up`/`down`). Errors still bubble up the call chain — logging is additive, not a replacement.
+
 - **ORDER BY + LIMIT on `GroupBy.Into`** — grouped results are now sortable and paginatable server-side. `qs.Sort("category", den.Asc)` sorts by a group key (non-key field returns an error — use `OrderByAgg`); new `GroupByBuilder.OrderByAgg(op, field, dir)` sorts by an aggregate expression. `qs.Limit(n)` / `qs.Skip(n)` cap / offset the group rows. Combines into Top-N queries:
 
     ```go

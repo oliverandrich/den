@@ -1,7 +1,11 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -362,4 +366,102 @@ func TestDown_BackwardError(t *testing.T) {
 	err := r.Down(ctx, db)
 	require.Error(t, err)
 	require.ErrorIs(t, err, den.ErrMigrationFailed)
+}
+
+// --- Logger observability ---
+
+// captureLogger builds a slog.Logger that writes JSON lines into buf, so
+// tests can count emitted records and assert structured fields.
+func captureLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+func countLogLines(buf *bytes.Buffer, substr string) int {
+	n := 0
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if strings.Contains(line, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestLogger_EmitsStartSuccessOnUp(t *testing.T) {
+	buf := &bytes.Buffer{}
+	r := NewRegistry(WithLogger(captureLogger(buf)))
+	ctx := context.Background()
+
+	r.Register("001_first", Migration{
+		Forward: func(_ context.Context, _ *den.Tx) error { return nil },
+	})
+	r.Register("002_second", Migration{
+		Forward: func(_ context.Context, _ *den.Tx) error { return nil },
+	})
+
+	db := dentest.MustOpen(t)
+	require.NoError(t, r.Up(ctx, db))
+
+	out := buf.String()
+	assert.Contains(t, out, "migration_start")
+	assert.Contains(t, out, "migration_success")
+	assert.Contains(t, out, "001_first")
+	assert.Contains(t, out, "002_second")
+	// Each of the two migrations emits one start + one success event.
+	assert.Equal(t, 2, countLogLines(buf, `"msg":"migration_start"`))
+	assert.Equal(t, 2, countLogLines(buf, `"msg":"migration_success"`))
+	assert.Equal(t, 0, countLogLines(buf, `"msg":"migration_failure"`))
+	assert.Contains(t, out, `"direction":"up"`)
+}
+
+func TestLogger_EmitsFailureOnForwardError(t *testing.T) {
+	buf := &bytes.Buffer{}
+	r := NewRegistry(WithLogger(captureLogger(buf)))
+	ctx := context.Background()
+
+	r.Register("001_first", Migration{
+		Forward: func(_ context.Context, _ *den.Tx) error {
+			return errors.New("boom")
+		},
+	})
+
+	db := dentest.MustOpen(t)
+	err := r.Up(ctx, db)
+	require.Error(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "migration_start")
+	assert.Contains(t, out, "migration_failure")
+	assert.NotContains(t, out, "migration_success")
+	assert.Equal(t, 1, countLogLines(buf, `"msg":"migration_failure"`))
+	assert.Contains(t, out, "boom")
+}
+
+func TestLogger_EmitsOnDown(t *testing.T) {
+	buf := &bytes.Buffer{}
+	r := NewRegistry(WithLogger(captureLogger(buf)))
+	ctx := context.Background()
+
+	r.Register("001_first", Migration{
+		Forward:  func(_ context.Context, _ *den.Tx) error { return nil },
+		Backward: func(_ context.Context, _ *den.Tx) error { return nil },
+	})
+
+	db := dentest.MustOpen(t)
+	require.NoError(t, r.Up(ctx, db))
+	require.NoError(t, r.Down(ctx, db))
+
+	out := buf.String()
+	// One up pair + one down pair.
+	assert.Equal(t, 2, countLogLines(buf, `"msg":"migration_start"`))
+	assert.Equal(t, 2, countLogLines(buf, `"msg":"migration_success"`))
+	assert.Contains(t, out, `"direction":"up"`)
+	assert.Contains(t, out, `"direction":"down"`)
+}
+
+func TestLogger_DefaultIsSlogDefault(t *testing.T) {
+	// When NewRegistry is called without WithLogger, the Registry's logger
+	// must not be nil — every runForward / runBackward will dereference it.
+	r := NewRegistry()
+	require.NotNil(t, r.logger, "default logger must be slog.Default, never nil")
+	assert.Same(t, slog.Default(), r.logger)
 }

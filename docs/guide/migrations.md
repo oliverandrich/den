@@ -117,6 +117,29 @@ Each migration runs within a Den transaction:
 - If it returns an error, the transaction is rolled back and the migration is marked as failed
 - Subsequent migrations are not executed after a failure
 
+## Observability
+
+The Registry emits structured `slog` events for every migration lifecycle step. By default they go through `slog.Default()`; pass `migrate.WithLogger(...)` to route them through a dedicated logger:
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+r := migrate.NewRegistry(migrate.WithLogger(logger))
+```
+
+Events:
+
+| Message                | Level   | Attributes                                           |
+|------------------------|---------|------------------------------------------------------|
+| `migration_start`      | `INFO`  | `version`, `direction` (`up` or `down`)              |
+| `migration_success`    | `INFO`  | `version`, `direction`, `duration_ms`                |
+| `migration_failure`    | `ERROR` | `version`, `direction`, `duration_ms`, `error`       |
+| `ensure_table_failure` | `ERROR` | `error` — fires at most once per Registry (sticky)   |
+
+The `error` field is attached as a string for structured-log pipelines. The original error value still bubbles up the call chain — logging it here does not swallow it.
+
+!!! note
+    Passing a nil logger via `WithLogger` falls back to `slog.Default()` — keeps configs honest when a logger field is optional.
+
 !!! warning
     If a migration fails, fix the issue and re-run `r.Up()`. Den will retry only the failed and pending migrations.
 

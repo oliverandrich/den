@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"sync"
@@ -42,6 +43,11 @@ type registeredMigration struct {
 type Registry struct {
 	migrations []registeredMigration
 
+	// logger receives structured observability events for every migration
+	// lifecycle step. Defaults to slog.Default() when the caller does not
+	// pass WithLogger; never nil after NewRegistry returns.
+	logger *slog.Logger
+
 	// ensureTableOnce collapses concurrent in-process Up/Down starters into
 	// a single EnsureCollection call for the migration log. Without this,
 	// 8 goroutines simultaneously asking PostgreSQL for the auto GIN index
@@ -52,9 +58,43 @@ type Registry struct {
 	ensureTableErr  error
 }
 
-// NewRegistry creates a new migration registry.
-func NewRegistry() *Registry {
-	return &Registry{}
+// Option configures a Registry at construction time.
+type Option func(*Registry)
+
+// WithLogger sets the slog.Logger that receives migration lifecycle events.
+// When unset, the Registry uses slog.Default().
+//
+// Events emitted (all with the migration's version attached as
+// "version" and the direction as "direction" = "up" | "down"):
+//
+//   - "migration_start"       — a migration is about to run
+//   - "migration_success"     — migration completed; "duration_ms" attached
+//   - "migration_failure"     — migration failed; "duration_ms" and "error"
+//     attached (the error is NOT re-logged at the caller's log site — the
+//     error value still bubbles up through the return chain)
+//   - "ensure_table_failure"  — the one-time migration-log setup failed;
+//     "error" attached. Subsequent calls reuse the cached failure, so this
+//     event fires at most once per Registry.
+//
+// Passing a nil logger is treated as "use slog.Default()" — keeps callers
+// honest if they accidentally thread nil through a config struct.
+func WithLogger(l *slog.Logger) Option {
+	return func(r *Registry) {
+		if l == nil {
+			l = slog.Default()
+		}
+		r.logger = l
+	}
+}
+
+// NewRegistry creates a new migration registry. Optional arguments configure
+// the registry; see WithLogger.
+func NewRegistry(opts ...Option) *Registry {
+	r := &Registry{logger: slog.Default()}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Register adds a migration with the given version identifier.
@@ -80,7 +120,7 @@ func (r *Registry) Up(ctx context.Context, db *den.DB) error {
 		return err
 	}
 	for _, m := range r.migrations {
-		if err := runForward(ctx, db, m); err != nil {
+		if err := r.runForward(ctx, db, m); err != nil {
 			return err
 		}
 	}
@@ -106,7 +146,7 @@ func (r *Registry) UpOne(ctx context.Context, db *den.DB) error {
 		if slices.Contains(applied, m.version) {
 			continue
 		}
-		return runForward(ctx, db, m)
+		return r.runForward(ctx, db, m)
 	}
 	return nil // nothing pending
 }
@@ -134,7 +174,7 @@ func (r *Registry) DownOne(ctx context.Context, db *den.DB) error {
 		return fmt.Errorf("den: migration %q has no backward function", last)
 	}
 
-	return runBackward(ctx, db, m)
+	return r.runBackward(ctx, db, m)
 }
 
 // Down rolls back all applied migrations in reverse order, each in its own transaction.
@@ -157,7 +197,7 @@ func (r *Registry) Down(ctx context.Context, db *den.DB) error {
 			return fmt.Errorf("den: migration %q has no backward function", version)
 		}
 
-		if err := runBackward(ctx, db, m); err != nil {
+		if err := r.runBackward(ctx, db, m); err != nil {
 			return err
 		}
 	}
@@ -170,8 +210,14 @@ func (r *Registry) Down(ctx context.Context, db *den.DB) error {
 // distinct from any other advisory lock a user might use in their own code.
 const migrationLockKey int64 = 0x44656e4d4947524e // "DenMIGRN"
 
-func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
-	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+func (r *Registry) runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
+	start := time.Now()
+	r.logger.InfoContext(ctx, "migration_start",
+		slog.String("version", m.version),
+		slog.String("direction", "up"),
+	)
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		// Serialize concurrent starters: on PG this is pg_advisory_xact_lock,
 		// on SQLite a no-op (IMMEDIATE tx already serializes writers).
 		if err := den.AdvisoryLock(ctx, tx, migrationLockKey); err != nil {
@@ -200,10 +246,19 @@ func runForward(ctx context.Context, db *den.DB, m registeredMigration) error {
 		})
 		return saveEntriesToTx(ctx, tx, entries)
 	})
+
+	r.emitResult(ctx, m.version, "up", start, err)
+	return err
 }
 
-func runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error {
-	return den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+func (r *Registry) runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error {
+	start := time.Now()
+	r.logger.InfoContext(ctx, "migration_start",
+		slog.String("version", m.version),
+		slog.String("direction", "down"),
+	)
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		if err := den.AdvisoryLock(ctx, tx, migrationLockKey); err != nil {
 			return err
 		}
@@ -235,6 +290,30 @@ func runBackward(ctx context.Context, db *den.DB, m *registeredMigration) error 
 		}
 		return saveEntriesToTx(ctx, tx, filtered)
 	})
+
+	r.emitResult(ctx, m.version, "down", start, err)
+	return err
+}
+
+// emitResult fires either migration_success or migration_failure depending on
+// the outcome, tagging duration_ms consistently. The error is logged as a
+// field but not swallowed — callers still receive the original err.
+func (r *Registry) emitResult(ctx context.Context, version, direction string, start time.Time, err error) {
+	durMs := time.Since(start).Milliseconds()
+	if err != nil {
+		r.logger.ErrorContext(ctx, "migration_failure",
+			slog.String("version", version),
+			slog.String("direction", direction),
+			slog.Int64("duration_ms", durMs),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	r.logger.InfoContext(ctx, "migration_success",
+		slog.String("version", version),
+		slog.String("direction", direction),
+		slog.Int64("duration_ms", durMs),
+	)
 }
 
 func (r *Registry) findMigration(version string) (*registeredMigration, bool) {
@@ -257,9 +336,18 @@ const migrationsCollection = "_den_migrations"
 // ensureMigrationTable runs EnsureCollection at most once per Registry.
 // Concurrent callers block on sync.Once so only one goroutine drives the
 // DDL; everyone else observes the cached result.
+//
+// A failure logs ensure_table_failure exactly once (sync.Once collapses
+// concurrent setups), so the sticky-error condition is observable without
+// reading code.
 func (r *Registry) ensureMigrationTable(ctx context.Context, db *den.DB) error {
 	r.ensureTableOnce.Do(func() {
 		r.ensureTableErr = db.Backend().EnsureCollection(ctx, migrationsCollection, den.CollectionMeta{Name: migrationsCollection})
+		if r.ensureTableErr != nil {
+			r.logger.ErrorContext(ctx, "ensure_table_failure",
+				slog.String("error", r.ensureTableErr.Error()),
+			)
+		}
 	})
 	return r.ensureTableErr
 }

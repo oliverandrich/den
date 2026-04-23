@@ -150,14 +150,20 @@ type RecordedIndex struct {
 // CollectionMeta holds structural metadata for a registered collection.
 //
 // HasSoftDelete is derived from the document struct: true when the type
-// embeds document.SoftDelete. HasRevision reflects DenSettings.UseRevision —
-// a runtime flag on the collection, not a structural property.
+// embeds document.SoftDelete (detected structurally via the `_deleted_at`
+// JSON field). HasRevision reflects DenSettings.UseRevision — a runtime flag
+// on the collection, not a structural property. HasChangeTracking is true
+// when the type implements document.Trackable (typically by embedding
+// document.Tracked); since the snapshot lives only in memory it has no
+// persistence impact, but tooling that walks Meta can use the flag to know
+// which collections expose IsChanged / GetChanges / Revert.
 type CollectionMeta struct {
-	Name          string
-	Fields        []FieldMeta
-	Indexes       []IndexDefinition
-	HasSoftDelete bool
-	HasRevision   bool
+	Name              string
+	Fields            []FieldMeta
+	Indexes           []IndexDefinition
+	HasSoftDelete     bool
+	HasRevision       bool
+	HasChangeTracking bool
 }
 
 // FieldMeta describes a single field within a collection.

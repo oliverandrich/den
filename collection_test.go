@@ -79,6 +79,44 @@ func TestMeta_Flags_BothSoftDeleteAndRevision(t *testing.T) {
 	assert.True(t, meta.HasRevision)
 }
 
+func TestMeta_Flags_ChangeTrackingOnly(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedProduct{})
+	meta, err := den.Meta[TrackedProduct](db)
+	require.NoError(t, err)
+	assert.False(t, meta.HasSoftDelete)
+	assert.False(t, meta.HasRevision)
+	assert.True(t, meta.HasChangeTracking)
+}
+
+func TestMeta_Flags_NoChangeTracking(t *testing.T) {
+	db := dentest.MustOpen(t, &Note{})
+	meta, err := den.Meta[Note](db)
+	require.NoError(t, err)
+	assert.False(t, meta.HasChangeTracking)
+}
+
+func TestMeta_Flags_AllThree(t *testing.T) {
+	db := dentest.MustOpen(t, &AuditDoc{})
+	meta, err := den.Meta[AuditDoc](db)
+	require.NoError(t, err)
+	assert.True(t, meta.HasSoftDelete)
+	assert.True(t, meta.HasRevision)
+	assert.True(t, meta.HasChangeTracking)
+}
+
+// AuditDoc exercises the full three-embed combination for the Meta flag
+// parity test.
+type AuditDoc struct {
+	document.Base
+	document.SoftDelete
+	document.Tracked
+	Name string `json:"name"`
+}
+
+func (AuditDoc) DenSettings() den.Settings {
+	return den.Settings{UseRevision: true}
+}
+
 func TestMeta_Unregistered(t *testing.T) {
 	db := dentest.MustOpen(t)
 

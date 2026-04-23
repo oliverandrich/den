@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal"
 )
 
@@ -132,8 +133,9 @@ func Collections(db *DB) []string {
 
 func buildCollectionMeta(info *internal.StructInfo) CollectionMeta {
 	meta := CollectionMeta{
-		Name:          info.CollectionName,
-		HasSoftDelete: info.HasDeletedAt,
+		Name:              info.CollectionName,
+		HasSoftDelete:     info.HasDeletedAt,
+		HasChangeTracking: implementsTrackable(info.GoType),
 	}
 
 	for _, f := range info.Fields {
@@ -195,6 +197,15 @@ func buildCollectionMeta(info *internal.StructInfo) CollectionMeta {
 	}
 
 	return meta
+}
+
+// implementsTrackable reports whether a pointer to a zero value of t satisfies
+// document.Trackable — the same check every change-tracking entry point uses
+// at runtime. Keeps the Meta flag aligned with whether IsChanged / GetChanges
+// / Revert actually do anything for this collection.
+func implementsTrackable(t reflect.Type) bool {
+	_, ok := reflect.New(t).Interface().(document.Trackable)
+	return ok
 }
 
 func sortedKeys(m map[string][]string) []string {

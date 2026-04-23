@@ -762,6 +762,25 @@ func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "field")
 }
 
+// TestFindOneAndUpdate_FieldValidatedBeforeLookup pins that a bad field name
+// is caught before the find-and-update transaction opens, mirroring
+// QuerySet.Update. Against an empty collection the in-tx applySetFields
+// would never run because findOneStrict returns ErrNotFound first — only a
+// pre-tx validation can surface the field-not-found error here.
+func TestFindOneAndUpdate_FieldValidatedBeforeLookup(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	_, err := den.FindOneAndUpdate[Product](ctx, db,
+		den.SetFields{"nonexistent": "x"},
+		[]where.Condition{where.Field("name").Eq("absent")},
+	)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, den.ErrNotFound,
+		"field validation must surface before findOneStrict runs")
+	assert.Contains(t, err.Error(), "nonexistent")
+}
+
 func TestFindOneAndUpdate_MultipleMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()

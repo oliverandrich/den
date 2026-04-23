@@ -328,6 +328,10 @@ type SetFields map[string]any
 // Returns ErrNotFound if no document matches and ErrMultipleMatches if more
 // than one matches — the conditions must identify the document uniquely.
 //
+// Field names in fields are validated against the registered struct before
+// the write transaction opens; an unknown name aborts the call without
+// touching storage. Mirrors QuerySet.Update's pre-tx validation contract.
+//
 // When scope is a *DB, a new transaction is opened; when scope is a *Tx,
 // the operation runs inline in the caller's transaction.
 //
@@ -336,6 +340,9 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateSetFields(col, fields); err != nil {
 		return nil, err
 	}
 
@@ -388,6 +395,10 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 // soft-deleted document is updated; clear it explicitly via fields if the
 // caller wants to resurrect.
 //
+// Field names in fields are validated against the registered struct before
+// the write transaction opens; an unknown name aborts the call without
+// touching storage. Mirrors QuerySet.Update's pre-tx validation contract.
+//
 // When scope is a *DB, a new transaction is opened; when scope is a *Tx, the
 // operation runs inline in the caller's transaction.
 func FindOneAndUpsert[T any](
@@ -401,6 +412,9 @@ func FindOneAndUpsert[T any](
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := validateSetFields(col, fields); err != nil {
 		return nil, false, err
 	}
 

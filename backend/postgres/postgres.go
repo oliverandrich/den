@@ -98,7 +98,7 @@ func (b *backend) Put(ctx context.Context, collection, id string, data []byte) e
 
 func (b *backend) Delete(ctx context.Context, collection, id string) error {
 	_, err := b.pool.Exec(ctx, b.getSQLs(collection).delete, id)
-	return err
+	return mapPGError(err)
 }
 
 func (b *backend) Query(ctx context.Context, collection string, q *den.Query) (den.Iterator, error) {

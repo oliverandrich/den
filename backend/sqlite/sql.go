@@ -15,36 +15,14 @@ var sanitizeFieldName = internal.SanitizeFieldName
 // buildSelectSQL translates a den.Query into a SQLite SELECT statement.
 func buildSelectSQL(collection string, q *den.Query) (string, []any) {
 	var sb strings.Builder
-	var args []any
 
 	fmt.Fprintf(&sb, "SELECT id, json(data) FROM %q", collection)
 
-	clauses, clauseArgs := buildWhereClauses(q.Conditions)
-	hasClauses := len(clauses) > 0
-	if hasClauses {
+	clauses, args := buildWhereClauses(q.Conditions)
+	clauses, args = appendCursorClauses(clauses, args, q)
+	if len(clauses) > 0 {
 		sb.WriteString(" WHERE ")
 		sb.WriteString(strings.Join(clauses, " AND "))
-		args = append(args, clauseArgs...)
-	}
-
-	// Cursor pagination
-	if q.AfterID != "" {
-		if hasClauses {
-			sb.WriteString(" AND ")
-		} else {
-			sb.WriteString(" WHERE ")
-		}
-		sb.WriteString("id > ?")
-		args = append(args, q.AfterID)
-	}
-	if q.BeforeID != "" {
-		if hasClauses || q.AfterID != "" {
-			sb.WriteString(" AND ")
-		} else {
-			sb.WriteString(" WHERE ")
-		}
-		sb.WriteString("id < ?")
-		args = append(args, q.BeforeID)
 	}
 
 	if len(q.SortFields) > 0 {

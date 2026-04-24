@@ -54,6 +54,15 @@ func MustOpenPostgres(t testing.TB, connString string, types ...any) *den.DB {
 	return MustOpenPostgresWith(t, connString, types, nil)
 }
 
+// MustOpenPostgresDefault is MustOpenPostgres with the connection string
+// defaulted to [PostgresURL] — i.e. the DEN_POSTGRES_URL env var or the
+// local fallback. Prefer this helper when the test does not need to
+// override the connection string; it mirrors [MustOpen]'s no-URL
+// ergonomics for the PostgreSQL path.
+func MustOpenPostgresDefault(t testing.TB, types ...any) *den.DB {
+	return MustOpenPostgres(t, PostgresURL(), types...)
+}
+
 // MustOpenWith creates a file-backed SQLite Den database with options.
 func MustOpenWith(t testing.TB, types []any, opts []den.Option) *den.DB {
 	t.Helper()

@@ -22,7 +22,9 @@ type Base struct {
 }
 
 type SoftDelete struct {
-    DeletedAt *time.Time `json:"_deleted_at,omitempty"`
+    DeletedAt    *time.Time `json:"_deleted_at,omitempty"`
+    DeletedBy    string     `json:"_deleted_by,omitempty"`     // populated by SoftDeleteBy()
+    DeleteReason string     `json:"_delete_reason,omitempty"`  // populated by SoftDeleteReason()
 }
 
 type Tracked struct {

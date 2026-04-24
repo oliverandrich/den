@@ -1,6 +1,6 @@
 # Aggregations
 
-Den supports scalar aggregations, grouped aggregations, and projections. Scalar aggregations (Avg, Sum, Min, Max, Count) are pushed down to the database engine via SQL. GroupBy and Project operate in Go memory -- they query matching documents and accumulate or map results in application code.
+Den supports scalar aggregations, grouped aggregations, and projections. Scalar aggregations (Avg, Sum, Min, Max, Count) and GroupBy are pushed down to the database engine via SQL — aggregates compute server-side and only result rows are decoded into Go. Project runs the query server-side too but then decodes every matching row into the projection struct in Go.
 
 ## Scalar Aggregations
 
@@ -134,7 +134,7 @@ err := den.NewQuery[Product](db).Limit(5).
 - `qs.Limit(n)` / `qs.Skip(n)` cap or offset the number of group rows returned — combine with `OrderByAgg` for top-N queries.
 
 !!! note
-    GroupBy queries all matching documents and accumulates results in memory. For large result sets, consider applying filters to reduce the number of documents processed. Scalar aggregations (Avg, Sum, Min, Max, Count) are executed as SQL queries in the database engine without loading documents into memory.
+    GroupBy pushes the `GROUP BY` down to the database engine — aggregates are computed server-side. Only the resulting group rows travel back and are decoded into the target struct, so the cost scales with the number of groups, not the number of source documents. Use `Where(...)` conditions to shrink the working set if needed.
 
 ## Projections
 

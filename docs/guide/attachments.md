@@ -194,10 +194,15 @@ Two cleanup situations to keep in mind:
    `den.Delete(ctx, db, doc, den.HardDelete())` removes a document that
    contains attachments, Den calls `Storage.Delete` for each.
 
-Failures during the cascade are logged via `slog.Warn` but do not fail
-the database delete. A broken reference (DB points at missing bytes) is
-worse than orphan bytes (recoverable via an offline sweep that
-cross-references filesystem paths with `StoragePath` values).
+Hard-deleting an attachment-bearing document without a configured
+Storage is rejected with `ErrValidation` before the database delete
+runs — orphan bytes are worse than a clear error.
+
+Remote `Storage.Delete` failures *after* the database delete succeeds
+are logged via `slog.Warn` but do not roll the delete back. A broken
+reference (DB pointing at missing bytes) is worse than orphan bytes,
+which are recoverable via an offline sweep that cross-references
+filesystem paths with `StoragePath` values.
 
 ## Reading Bytes
 

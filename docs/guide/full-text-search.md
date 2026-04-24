@@ -41,6 +41,18 @@ articles, err := den.NewQuery[Article](db,
 
 The FTS filter and the where conditions are applied together -- the database engine intersects both result sets using its query planner.
 
+### Pagination
+
+`Limit`, `Skip`, and cursor pagination (`After` / `Before`) all apply to `Search`. The default sort is by rank; pair cursor pagination with an explicit `Sort("_id", den.Asc)` so page boundaries stay stable across calls.
+
+```go
+first, _ := den.NewQuery[Article](db).Sort("_id", den.Asc).Limit(20).Search(ctx, "golang")
+more, _ := den.NewQuery[Article](db).Sort("_id", den.Asc).After(first[len(first)-1].ID).
+    Limit(20).Search(ctx, "golang")
+```
+
+Cursor + offset (`After`/`Before` combined with `Skip`) is rejected with `ErrIncompatiblePagination`, matching the rest of the QuerySet API.
+
 ## Backend Implementations
 
 === "SQLite"

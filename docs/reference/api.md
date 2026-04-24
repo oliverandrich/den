@@ -126,7 +126,7 @@ Aggregation methods are chained onto a `QuerySet[T]`.
 
 | Method | Signature | Description |
 |---|---|---|
-| `GroupBy` | `GroupBy(field string) *GroupByBuilder[T]` | Group results by a field |
+| `GroupBy` | `GroupBy(fields ...string) GroupByBuilder[T]` | Group results by one or more fields |
 | `Into` | `Into(ctx context.Context, dest any) error` | Execute grouped aggregation into a target slice of structs |
 | `Project` | `Project(ctx context.Context, dest any) error` | Project query results into a struct with a subset of fields |
 

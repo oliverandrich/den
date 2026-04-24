@@ -423,6 +423,10 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 	}
 
 	if col.meta.HasSoftDelete {
+		if err := runBeforeSoftDeleteHooks(ctx, doc); err != nil {
+			return err
+		}
+
 		now := time.Now()
 		setSoftDeletedAt(docPtr.Elem(), col.structInfo, &now)
 
@@ -431,6 +435,9 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 			return fmt.Errorf("encode soft delete linked %s: %w", colName, err)
 		}
 		if err := b.Put(ctx, colName, id, encoded); err != nil {
+			return err
+		}
+		if err := runAfterSoftDeleteHooks(ctx, doc); err != nil {
 			return err
 		}
 		return runAfterDeleteHooks(ctx, doc)

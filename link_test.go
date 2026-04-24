@@ -596,6 +596,53 @@ func TestWithLinkRule_Delete_HooksOnLinked(t *testing.T) {
 	assert.True(t, hookedPartAfterDeleteCalled, "AfterDelete should fire on cascaded linked part")
 }
 
+// SoftHookedDoor is a soft-deletable cascade target that records which of
+// the soft-delete-specific hooks fire so the cascade path can be verified
+// to match the top-level delete flow.
+type SoftHookedDoor struct {
+	document.Base
+	document.SoftDelete
+	Label string `json:"label"`
+}
+
+var softHookedBeforeSoftDeleteCalled bool
+var softHookedAfterSoftDeleteCalled bool
+
+func (d *SoftHookedDoor) BeforeSoftDelete(_ context.Context) error {
+	softHookedBeforeSoftDeleteCalled = true
+	return nil
+}
+
+func (d *SoftHookedDoor) AfterSoftDelete(_ context.Context) error {
+	softHookedAfterSoftDeleteCalled = true
+	return nil
+}
+
+type SoftHookedHouse struct {
+	document.Base
+	Name string                   `json:"name"`
+	Door den.Link[SoftHookedDoor] `json:"door"`
+}
+
+func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftHookedDoor{}, &SoftHookedHouse{})
+	ctx := context.Background()
+
+	door := &SoftHookedDoor{Label: "Main"}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	house := &SoftHookedHouse{Name: "H", Door: den.NewLink(door)}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	softHookedBeforeSoftDeleteCalled = false
+	softHookedAfterSoftDeleteCalled = false
+
+	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+
+	assert.True(t, softHookedBeforeSoftDeleteCalled, "BeforeSoftDelete must fire on cascade soft-deleted linked doc")
+	assert.True(t, softHookedAfterSoftDeleteCalled, "AfterSoftDelete must fire on cascade soft-deleted linked doc")
+}
+
 func TestWithLinkRule_Write_OnUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()

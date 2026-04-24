@@ -22,8 +22,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,19 +144,11 @@ func (s *Storage) Store(_ context.Context, r io.Reader, ext, mime string) (docum
 		return document.Attachment{}, fmt.Errorf("creating storage directory: %w", err)
 	}
 
-	// Dedup: if the target already exists, assume same hash → same content
-	// and keep the existing file. Drop the temp.
-	if _, err := os.Stat(absPath); err == nil {
-		return document.Attachment{
-			StoragePath: relPath,
-			Mime:        mime,
-			Size:        size,
-			SHA256:      hashHex,
-		}, nil
-	}
-
-	if err := os.Rename(tmpPath, absPath); err != nil {
-		return document.Attachment{}, fmt.Errorf("moving %s into place: %w", absPath, err)
+	// Identical bytes → identical hash → identical path, so any existing
+	// destination is bit-identical by construction; fs.ErrExist is a
+	// successful dedup hit.
+	if err := os.Link(tmpPath, absPath); err != nil && !errors.Is(err, fs.ErrExist) {
+		return document.Attachment{}, fmt.Errorf("linking %s into place: %w", absPath, err)
 	}
 	return document.Attachment{
 		StoragePath: relPath,

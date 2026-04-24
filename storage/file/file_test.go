@@ -55,6 +55,29 @@ func TestStorage_Store_Dedupes(t *testing.T) {
 	assert.Equal(t, first.SHA256, second.SHA256)
 }
 
+func TestStorage_Store_DedupesWhenTargetPreexists(t *testing.T) {
+	// Simulates the concurrent-writer case: another process (or goroutine)
+	// raced us and created the destination file first. Store must accept
+	// the existing file as the dedup target and must not overwrite it.
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	first, err := s.Store(ctx, strings.NewReader("concurrent"), ".bin", "application/octet-stream")
+	require.NoError(t, err)
+
+	absPath := filepath.Join(s.rootPath, filepath.FromSlash(first.StoragePath))
+	infoBefore, err := os.Stat(absPath)
+	require.NoError(t, err)
+
+	second, err := s.Store(ctx, strings.NewReader("concurrent"), ".bin", "application/octet-stream")
+	require.NoError(t, err)
+	assert.Equal(t, first.StoragePath, second.StoragePath)
+
+	infoAfter, err := os.Stat(absPath)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(infoBefore, infoAfter), "pre-existing file must not be replaced (inode check)")
+}
+
 func TestStorage_Store_RejectsEmpty(t *testing.T) {
 	s := newTestStorage(t)
 	_, err := s.Store(context.Background(), strings.NewReader(""), ".txt", "text/plain")

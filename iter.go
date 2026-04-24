@@ -56,7 +56,7 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 			}
 
 			if qs.fetchLinks {
-				if err := fetchAllLinksOnDoc(ctx, qs.scope.db(), qs.scope.db().backend, doc, qs.nestDepth); err != nil {
+				if err := fetchAllLinksOnDoc(ctx, qs.scope.db(), qs.scope.readWriter(), doc, qs.nestDepth); err != nil {
 					yield(nil, fmt.Errorf("fetch links: %w", err))
 					return
 				}

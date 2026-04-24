@@ -117,6 +117,37 @@ func TestIter_WithFetchLinks(t *testing.T) {
 	assert.Equal(t, 2, count)
 }
 
+func TestIter_WithFetchLinks_InsideTxSeesUncommittedTarget(t *testing.T) {
+	// Regression guard: link resolution inside Iter must route through
+	// the iterator's scope, not db.backend — otherwise an in-tx link
+	// target is invisible to the link fetch and surfaces as ErrNotFound.
+	// Same bug pattern as the 4bba5af fix for AllWithCount.
+	db := dentest.MustOpen(t, &IterLinkedDoc{}, &IterRefItem{})
+	ctx := context.Background()
+
+	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		ref := &IterRefItem{Label: "in-tx"}
+		if err := den.Insert(ctx, tx, ref); err != nil {
+			return err
+		}
+		doc := &IterLinkedDoc{Name: "A", Ref: den.NewLink(ref)}
+		if err := den.Insert(ctx, tx, doc); err != nil {
+			return err
+		}
+
+		count := 0
+		for d, err := range den.NewQuery[IterLinkedDoc](tx).WithFetchLinks().Iter(ctx) {
+			require.NoError(t, err, "link fetch must see uncommitted target via tx scope")
+			require.True(t, d.Ref.IsLoaded())
+			assert.Equal(t, "in-tx", d.Ref.Value.Label)
+			count++
+		}
+		assert.Equal(t, 1, count)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	db := dentest.MustOpen(t, &IterLinkedDoc{}, &IterRefItem{})
 	ctx := context.Background()

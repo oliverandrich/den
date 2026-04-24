@@ -180,6 +180,37 @@ func TestSearch_Postgres_WithLimit(t *testing.T) {
 	assert.Len(t, results, 2)
 }
 
+// TestSearch_HonorsAfterCursor pins that Search respects After(id) on
+// both backends, matching the non-FTS QuerySet behavior. The rank-based
+// default order is overridden with an explicit Sort("_id") so the cursor
+// semantics are predictable across backends.
+func TestSearch_HonorsAfterCursor(t *testing.T) {
+	dbs := map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
+	}
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+				{Title: "Go One", Body: "First Go article"},
+				{Title: "Go Two", Body: "Second Go article"},
+				{Title: "Go Three", Body: "Third Go article"},
+			}))
+
+			first, err := den.NewQuery[FTSArticle](db).Sort("_id", den.Asc).Search(ctx, "Go")
+			require.NoError(t, err)
+			require.Len(t, first, 3)
+
+			rest, err := den.NewQuery[FTSArticle](db).Sort("_id", den.Asc).After(first[0].ID).Search(ctx, "Go")
+			require.NoError(t, err)
+			require.Len(t, rest, 2, "After(id) must be honored in FTS Search")
+			assert.Equal(t, first[1].ID, rest[0].ID)
+			assert.Equal(t, first[2].ID, rest[1].ID)
+		})
+	}
+}
+
 func TestSearch_Postgres_NoResults(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{})
 	ctx := context.Background()

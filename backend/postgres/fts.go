@@ -64,6 +64,16 @@ func (b *backend) Search(ctx context.Context, collection string, query string, q
 		}
 	}
 
+	if q.AfterID != "" {
+		fmt.Fprintf(&sb, " AND id > $%d", paramN)
+		args = append(args, q.AfterID)
+		paramN++
+	}
+	if q.BeforeID != "" {
+		fmt.Fprintf(&sb, " AND id < $%d", paramN)
+		args = append(args, q.BeforeID)
+	}
+
 	if len(q.SortFields) > 0 {
 		sb.WriteString(" ORDER BY ")
 		for i, s := range q.SortFields {

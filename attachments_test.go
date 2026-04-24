@@ -84,6 +84,56 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	}
 }
 
+// gallery has a LinkDelete cascade to mediaDoc, which carries an attachment.
+// The cascade must drop the linked doc's bytes from Storage, matching the
+// top-level Delete path.
+type gallery struct {
+	document.Base
+	Name string             `json:"name"`
+	Hero den.Link[mediaDoc] `json:"hero"`
+}
+
+func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
+	ctx := context.Background()
+	fs, err := file.New(t.TempDir(), "/media")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = fs.Close() })
+
+	db := dentest.MustOpenWith(t,
+		[]any{&mediaDoc{}, &gallery{}},
+		[]den.Option{den.WithStorage(fs)},
+	)
+
+	att, err := fs.Store(ctx, bytes.NewReader([]byte("hero-bytes")), ".jpg", "image/jpeg")
+	require.NoError(t, err)
+	m := &mediaDoc{Attachment: att, AltText: "hero"}
+	require.NoError(t, den.Insert(ctx, db, m))
+
+	g := &gallery{Name: "g", Hero: den.NewLink(m)}
+	require.NoError(t, den.Insert(ctx, db, g))
+
+	// Reload g fresh so Hero.Value is nil — otherwise the outer
+	// cleanupAttachments walk on the parent discovers the child's
+	// attachment through the in-memory link value and hides the cascade
+	// bug. This test is about the cascade path itself.
+	reloaded, err := den.FindByID[gallery](ctx, db, g.ID)
+	require.NoError(t, err)
+	require.False(t, reloaded.Hero.IsLoaded(), "sanity: link must be lazy")
+
+	// Sanity: bytes exist before cascade.
+	f, err := fs.Open(ctx, att)
+	require.NoError(t, err, "attachment must exist before cascade")
+	_ = f.Close()
+
+	require.NoError(t, den.Delete(ctx, db, reloaded, den.WithLinkRule(den.LinkDelete)))
+
+	_, err = den.FindByID[mediaDoc](ctx, db, m.ID)
+	require.ErrorIs(t, err, den.ErrNotFound, "linked mediaDoc must be cascade-deleted")
+
+	_, err = fs.Open(ctx, att)
+	assert.Error(t, err, "child attachment bytes must be cleaned up on cascade delete")
+}
+
 func TestHardDelete_WithoutStorage_DoesNotFail(t *testing.T) {
 	// Simulate a setup where the user forgot to install Storage. The
 	// cascade path should log a warning and still return nil — orphan

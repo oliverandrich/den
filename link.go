@@ -439,6 +439,7 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 	if err := b.Delete(ctx, colName, id); err != nil {
 		return err
 	}
+	db.cleanupAttachments(ctx, docPtr.Elem())
 	return runAfterDeleteHooks(ctx, doc)
 }
 

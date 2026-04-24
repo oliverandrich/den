@@ -17,6 +17,12 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`GroupByRow.Key string` → `GroupByRow.Keys []string`** and **`Backend.GroupBy(groupField string, ...)` → `Backend.GroupBy(groupFields []string, ...)`**. Internal interface contracts only — the public `QuerySet.GroupBy` API stays backward-compatible through variadic arguments. External backend implementers (none known) must adapt to the new signatures; `Keys` holds one entry per requested group field in call order.
 
+- **Cursor + offset pagination now rejected** — chaining `After` / `Before` with `Skip` on a QuerySet returns the new `ErrIncompatiblePagination` at every terminal (`All`, `First`, `Iter`, `Count`, `Search`, `Project`, aggregates, `GroupBy.Into`). Previously the combination ran with undefined semantics. Drop `Skip` from any chain that uses cursor pagination, or drop the cursor.
+
+- **Hard-delete with attachments now requires a configured Storage** — calling `den.Delete(ctx, db, doc, den.HardDelete())` (or a `LinkDelete` cascade that reaches such a doc) on a document carrying `document.Attachment` bytes returns `ErrValidation` when no `Storage` was installed via `WithStorage`. Previously the DB row was removed and a `slog.Warn` orphaned the bytes — now the contract matches the godoc on `WithStorage`. Install a Storage at Open, or soft-delete the document instead.
+
+- **`Backend.Begin(ctx, writable bool)` → `Backend.Begin(ctx)`** — internal backend interface signature change. Neither backend honored the `writable` hint; external backend implementers (none known) must drop the parameter. A typed option can reintroduce read-only tx mode when there's concrete demand.
+
 ### Added
 
 - **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.
@@ -43,12 +49,15 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`BeforeSoftDeleter` / `AfterSoftDeleter` hook interfaces** — fire only on the soft-delete path. Ordering: `BeforeDelete → BeforeSoftDelete → [write] → AfterSoftDelete → AfterDelete`. `BeforeDelete` / `AfterDelete` still fire for both soft and hard deletes, so existing hook code is unaffected. Use the soft-only pair for audit-log side effects that should not run on `HardDelete()`.
 - **`CollectionMeta.HasChangeTracking`** — new bool that reports whether a registered collection implements `document.Trackable` (typically via the `document.Tracked` embed). Mirrors `HasSoftDelete` and `HasRevision` so tooling walking `Meta[T]` can detect change-tracking collections without poking at the struct itself.
+- **`CollectionMeta.HasRevision`** — new bool that reports whether a registered collection opts into revision tracking via `DenSettings().UseRevision`. Rounds out the `HasSoftDelete` / `HasChangeTracking` triad.
 - **`ErrMultipleMatches`** — returned when a single-document lookup matches more than one row.
 - **`InsertMany` now accepts `...CRUDOption`** — backward-compatible signature change. Two new options ride along:
     - **`PreValidate()`** runs the full insert hook + validation chain on every document before opening the write transaction. A late-failing document fails the batch without writing anything. `BeforeInsert` / `BeforeSave` / `Validate` fire exactly once per document — the pre-pass caches the encoded bytes and the in-transaction commit only performs the Put + `AfterInsert` / `AfterSave`. Combining `PreValidate()` with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade must run inside the tx), so hooks fire twice on that specific combination.
     - **`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Trades cross-document atomicity for partial commit. Honors `ctx` cancellation between documents. Returns `ErrIncompatibleScope` when called inside a `*Tx`; returns `ErrIncompatibleOptions` when combined with `PreValidate`.
 - **`InsertManyError`** — new struct error type carrying `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error` so `errors.Is` traverses every wrapped failure.
 - **`ErrIncompatibleScope` and `ErrIncompatibleOptions`** — new sentinels for option/scope mismatches.
+- **`ErrIncompatiblePagination`** — new sentinel surfaced when cursor (`After` / `Before`) and offset (`Skip`) pagination are combined on the same QuerySet.
+- **`MaxRecordedFailures(n)` CRUDOption + `InsertManyError.Truncated` / `.TotalFailures`** — `InsertMany` with `ContinueOnError()` now caps the recorded failure list at 100 by default to bound memory on large bad batches. Override via `MaxRecordedFailures(n)` (0 = unlimited). `TotalFailures` always reports the uncapped count; `Truncated` flags a sampled list. `errors.Is` / `As` walk only the recorded entries. Combining `MaxRecordedFailures` with a non-`ContinueOnError` batch returns `ErrIncompatibleOptions`.
 - **Multi-key `GroupBy`** — `qs.GroupBy(fields ...string)` now accepts more than one field. Target structs declare positional slots with `den:"group_key:N"`:
 
     ```go
@@ -85,10 +94,16 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **Latent bug fixed**: `den.RegisterBackend("SQLITE", ...)` previously stored the backend under `"SQLITE"` while `OpenURL` looked up `"sqlite"` via its pre-existing lowercasing, so the lookup silently failed. Any caller that registered with mixed-case schemes will now see their backends resolve.
 - **Duplicate-registration panic** in `storage.Register` now triggers when the same scheme is registered under different casings (e.g. `"a"` then `"A"`), because both normalize to the same registry key.
 - **`den.RegisterBackend` now panics on duplicate, empty, or nil-opener registration** — previously it silently overwrote an existing entry, so two packages claiming the same scheme (a fork via `replace`, or a manual `RegisterBackend` call after a side-effect import) left whichever `init()` ran last in the registry. The new guards match `storage.Register` semantics and surface the mis-wiring at process start instead of at first lookup.
+- **FTS `Search` honors cursor pagination** — `NewQuery[T](db).After(id).Search(ctx, "foo")` now applies the cursor on both backends, matching the non-FTS QuerySet path. Previously `After` / `Before` were silently dropped by the FTS SQL builders. Cursor + `Skip` is rejected with `ErrIncompatiblePagination`, same as the rest of the API. Default ordering is still rank (FTS5 `rank` on SQLite, `ts_rank` on PostgreSQL) — pair cursor pagination with an explicit `Sort("_id", den.Asc)` for predictable page boundaries.
 
 ### Fixed
 
 - **Soft-delete now participates in the revision chain** — `Delete` on a document that opts into both `SoftDelete` and `UseRevision` verifies and bumps `_rev` just like `Update`. Previously the soft-delete path wrote directly without revision accounting, so a concurrent writer holding the pre-delete revision could silently clobber `DeletedAt`. Combines atomically via the same auto-wrapping write tx the update path uses; `IgnoreRevision()` opts out; `HardDelete()` is unaffected.
+- **`Iter` + `WithFetchLinks` inside a `*Tx` now reads links through the tx** — previously the per-row link fetch still routed through `db.backend`, so uncommitted link targets surfaced as `ErrNotFound` and pgx could trip `conn busy` against the iterator connection. Same bug pattern that was fixed for `AllWithCount` in 0.10; `Iter` now matches.
+- **`LinkDelete` cascade cleans up child attachment bytes** — the cascade hard-delete path ran `b.Delete` on the child without then removing its `document.Attachment` bytes, orphaning them in Storage. The top-level `Delete` always did the cleanup; cascade now matches.
+- **`LinkDelete` cascade fires `BeforeSoftDelete` / `AfterSoftDelete`** — soft-deletable cascade targets previously fired only `BeforeDelete` / `AfterDelete`, so audit-log side effects hooked into the soft-only pair silently missed cascade-triggered deletes. Flow now mirrors the top-level soft-delete.
+- **Storage dedup TOCTOU closed** — `file.Storage.Store` replaced the `Stat` + `Rename` dedup flow with a single atomic `os.Link`, treating `fs.ErrExist` as a successful dedup hit. Concurrent uploads of identical content no longer race on the rename step.
+- **Postgres `Delete` error mapping** — the backend's `Delete` returned raw pgx errors, silently bypassing `mapPGError`. Sentinel wrapping now works uniformly with the rest of the backend write paths (matters once callers add FK triggers that can fail a delete).
 
 ## 0.10.1 — 2026-04-19
 

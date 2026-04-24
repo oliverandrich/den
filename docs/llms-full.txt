@@ -1,10 +1,10 @@
 # Den
 
-> Den is an ODM (Object-Document Mapper) for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine. Part of the Burrow ecosystem.
+<p align="center"><img src="assets/cover.jpg" alt="Go gophers organizing documents in their den"></p>
 
-- Module: `github.com/oliverandrich/den`
-- Go version: 1.25+
-- License: MIT
+<p align="center"><em>"Every <a href="https://github.com/oliverandrich/burrow">burrow</a> needs a den — a place to store what matters and find it again when you need it."</em></p>
+
+An ODM for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine.
 
 ## Features
 
@@ -16,6 +16,7 @@
 - **Lifecycle hooks** — `BeforeInsert`, `AfterUpdate`, `Validate`, and more via interfaces
 - **Change tracking** — opt-in `Tracked` with `IsChanged`, `GetChanges`, `Revert`
 - **Soft delete** — embed `SoftDelete`, automatic query filtering, `HardDelete` for permanent removal
+- **Attachments & storage** — embed `Attachment`, install a `den.Storage` backend, hard-delete cascades to byte cleanup
 - **Optimistic concurrency** — revision-based conflict detection
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically
@@ -65,6 +66,14 @@ func main() {
 }
 ```
 
+## Quick Links
+
+- [**Installation**](getting-started/installation.md) — Get Den into your project
+- [**Quick Start**](getting-started/quickstart.md) — Build your first app
+- [**Documents**](guide/documents.md) — Struct embedding, tags, and base types
+- [**Attachments & Storage**](guide/attachments.md) — File uploads with content-addressed storage
+- [**API Reference**](reference/api.md) — Complete API overview
+
 ---
 
 # Installation
@@ -83,34 +92,38 @@ go get github.com/oliverandrich/den@latest
 
 Den requires at least one backend. Backends register themselves via side-effect imports — you import the package with a blank identifier (`_`) and the backend becomes available to `den.OpenURL`.
 
-**SQLite:**
+=== "SQLite"
 
-```go
-import _ "github.com/oliverandrich/den/backend/sqlite"
-```
+    ```go
+    import _ "github.com/oliverandrich/den/backend/sqlite"
+    ```
 
-The SQLite backend is pure Go (no CGO required). It compiles into your binary with zero external dependencies.
+    The SQLite backend is pure Go (no CGO required). It compiles into your binary with zero external dependencies.
 
-**PostgreSQL:**
+=== "PostgreSQL"
 
-```go
-import _ "github.com/oliverandrich/den/backend/postgres"
-```
+    ```go
+    import _ "github.com/oliverandrich/den/backend/postgres"
+    ```
 
-The PostgreSQL backend uses pgx and requires a running PostgreSQL instance.
+    The PostgreSQL backend uses [pgx](https://github.com/jackc/pgx) and requires a running PostgreSQL instance.
 
-**Both:**
+=== "Both"
 
-```go
-import (
-    _ "github.com/oliverandrich/den/backend/sqlite"
-    _ "github.com/oliverandrich/den/backend/postgres"
-)
-```
+    ```go
+    import (
+        _ "github.com/oliverandrich/den/backend/sqlite"
+        _ "github.com/oliverandrich/den/backend/postgres"
+    )
+    ```
 
-Import both when your application needs to support either backend at runtime.
+    Import both when your application needs to support either backend at runtime.
 
-Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(ctx, dsn)`, Den matches the scheme to the registered backend and opens the connection.
+!!! note "How side-effect imports work"
+    Each backend package has an `init()` function that registers its URL scheme (`sqlite://` or `postgres://`) with Den's backend registry. When you call `den.OpenURL(ctx, dsn)`, Den matches the scheme to the registered backend and opens the connection.
+
+!!! warning "PostgreSQL requires a running instance"
+    Unlike SQLite, the PostgreSQL backend connects to an external database server. Make sure PostgreSQL is running and accessible before opening a connection.
 
 ## Verify Installation
 
@@ -145,6 +158,9 @@ type Product struct {
     Price float64 `json:"price" den:"index"`
 }
 ```
+
+!!! note "Register before use"
+    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Insert`, `Update`, or query. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`.
 
 ## Full Example
 
@@ -212,6 +228,20 @@ func main() {
 }
 ```
 
+## One-Expression Setup
+
+`den.WithTypes(...)` registers document types at Open time so the whole setup reads as a single expression. Registration errors abort `OpenURL` and surface as its return value.
+
+```go
+db, err := den.OpenURL(ctx, "sqlite:///products.db", den.WithTypes(&Product{}))
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+Use explicit `den.Register(ctx, db, ...)` (as in the full example above) when you need a different context for registration than for Open, or when types become known only after Open.
+
 ## Switching to PostgreSQL
 
 Change the import and the DSN — the rest of your code stays identical.
@@ -222,7 +252,14 @@ import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
 db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
-Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
+!!! tip "Same API, different engine"
+    Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
+
+## Next Steps
+
+- [Backends](backends.md) — DSN formats, comparison, and when to use which
+- [Documents](../guide/documents.md) — Base types, struct tags, and lifecycle hooks
+- [API Reference](../reference/api.md) — Complete API overview
 
 ---
 
@@ -256,39 +293,84 @@ Den supports two storage backends behind a unified API. Both store documents as 
 - You need replication, backups, or high availability
 - You are already running PostgreSQL in your infrastructure
 
-Since both backends share the same API, you can prototype with SQLite and move to PostgreSQL when your requirements grow. The switch is a one-line change.
+!!! tip "Start with SQLite, switch later"
+    Since both backends share the same API, you can prototype with SQLite and move to PostgreSQL when your requirements grow. The switch is a one-line change.
 
 ## DSN Formats
 
-**SQLite:**
+=== "SQLite"
 
-```go
-// Relative path (three slashes — resolved against the current working directory)
-db, err := den.OpenURL(ctx, "sqlite:///local.db")
+    ```go
+    // Relative path (three slashes — resolved against the current working directory)
+    db, err := den.OpenURL(ctx, "sqlite:///local.db")
 
-// Absolute path (four slashes)
-db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
+    // Absolute path (four slashes)
+    db, err := den.OpenURL(ctx, "sqlite:////var/lib/myapp/data.db")
 
-// In-memory database
-db, err := den.OpenURL(ctx, "sqlite://:memory:")
-```
+    // In-memory database
+    db, err := den.OpenURL(ctx, "sqlite://:memory:")
+    ```
 
-Den follows the same convention as SQLAlchemy: after stripping the `sqlite://` scheme, it removes exactly one leading `/`. So `sqlite:///local.db` becomes the relative path `local.db`, while `sqlite:////var/lib/myapp/data.db` becomes the absolute `/var/lib/myapp/data.db`. Use three slashes for cwd-relative paths and four for absolute paths.
+    !!! note "Three slashes vs. four"
+        Den follows the same convention as SQLAlchemy: after stripping the `sqlite://` scheme, it removes exactly one leading `/`. So `sqlite:///local.db` becomes the relative path `local.db`, while `sqlite:////var/lib/myapp/data.db` becomes the absolute `/var/lib/myapp/data.db`. Use three slashes for cwd-relative paths and four for absolute paths.
 
-**PostgreSQL:**
+=== "PostgreSQL"
 
-```go
-// Standard connection string
-db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
+    ```go
+    // Standard connection string
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 
-// With SSL mode
-db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb?sslmode=disable")
+    // With SSL mode
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb?sslmode=disable")
 
-// Unix socket
-db, err := den.OpenURL(ctx, "postgres:///mydb?host=/var/run/postgresql")
-```
+    // Unix socket
+    db, err := den.OpenURL(ctx, "postgres:///mydb?host=/var/run/postgresql")
+    ```
 
-The DSN follows the libpq connection string format supported by pgx.
+    The DSN follows the [libpq connection string](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING) format supported by pgx.
+
+## Opening a Database
+
+Import the backend package for its side-effect registration, then call `den.OpenURL`:
+
+=== "SQLite"
+
+    ```go
+    import (
+        "context"
+
+        "github.com/oliverandrich/den"
+        _ "github.com/oliverandrich/den/backend/sqlite"
+    )
+
+    ctx := context.Background()
+    db, err := den.OpenURL(ctx, "sqlite:///data.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+    ```
+
+=== "PostgreSQL"
+
+    ```go
+    import (
+        "context"
+
+        "github.com/oliverandrich/den"
+        _ "github.com/oliverandrich/den/backend/postgres"
+    )
+
+    ctx := context.Background()
+    db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+    ```
+
+!!! warning "Unregistered backend"
+    If you call `den.OpenURL` with a scheme that has no registered backend (e.g., you forgot the blank import), you will get an error at runtime. Make sure the corresponding `_ "github.com/oliverandrich/den/backend/..."` import is present.
 
 ## Backend-Specific Behavior
 
@@ -309,13 +391,14 @@ These differences are transparent to your application code. The `where` package 
 
 ## Base Types
 
-Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The two orthogonal features (soft delete and change tracking) are available as separate composable embeds; combine whichever you need.
+Every Den document embeds `document.Base` — the required anchor that carries ID, timestamps, and the revision token. The orthogonal features (soft delete, change tracking, file attachment) are available as separate composable embeds; combine whichever you need.
 
 | Embed | Purpose |
 |---|---|
 | `document.Base` | Required. Provides `ID`, `CreatedAt`, `UpdatedAt`, `Rev` |
 | `document.SoftDelete` | Opt-in. Adds `DeletedAt *time.Time` and `IsDeleted()` so `Delete` soft-deletes instead of physically removing |
 | `document.Tracked` | Opt-in. Adds the byte-snapshot machinery so `IsChanged`, `GetChanges`, and `Revert` work |
+| `document.Attachment` | Opt-in. Adds `StoragePath`, `Mime`, `Size`, `SHA256` so the document references a file stored via `den.Storage`. See [Attachments & Storage](attachments.md) |
 
 ```go
 package document
@@ -328,11 +411,20 @@ type Base struct {
 }
 
 type SoftDelete struct {
-    DeletedAt *time.Time `json:"_deleted_at,omitempty"`
+    DeletedAt    *time.Time `json:"_deleted_at,omitempty"`
+    DeletedBy    string     `json:"_deleted_by,omitempty"`     // populated by SoftDeleteBy()
+    DeleteReason string     `json:"_delete_reason,omitempty"`  // populated by SoftDeleteReason()
 }
 
 type Tracked struct {
     snapshot []byte // not serialized
+}
+
+type Attachment struct {
+    StoragePath string `json:"storage_path"     validate:"required,max=1024"`
+    Mime        string `json:"mime"             validate:"required,max=100"`
+    Size        int64  `json:"size"             validate:"required,min=1"`
+    SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`
 }
 ```
 
@@ -362,9 +454,19 @@ type AuditLog struct {
     document.Tracked
     Action string `json:"action"`
 }
+
+type Media struct {
+    document.Base
+    document.SoftDelete
+    document.Attachment
+    OriginalName string `json:"original_name"`
+}
 ```
 
-Den detects both features structurally: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface. Any type carrying the right fields / methods participates, even without these specific embeds.
+Den detects features **structurally**: soft-delete by the presence of the `_deleted_at` JSON field, change tracking by the `Trackable` interface, attachments by reflection over `document.Attachment` fields during hard-delete. Any type that carries the right fields / methods participates, even without these specific embeds.
+
+!!! tip "Modelling relationships between documents"
+    The embeds above are Go struct composition for feature opt-in. For the separate decision of whether one document should nest another as a sub-struct or reference it by ID, see [Embed or Link?](relations.md#embed-or-link) in the Relations guide.
 
 ## Struct Tag Syntax
 
@@ -395,7 +497,11 @@ type Product struct {
 }
 ```
 
-The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries index, unique, fts, and omitempty options.
+!!! note
+    The `json` tag controls serialization -- it determines the key name in the stored JSONB document. The `den` tag never contains a field name; it only carries options.
+
+!!! warning "Field name validation"
+    `Register` rejects JSON field names that do not match `^[A-Za-z_][A-Za-z0-9_]*$` — identifiers only, no spaces, dots, quotes, or punctuation. The error wraps `den.ErrValidation`. This protects the JSONB path expressions used by Den's SQL builder against tag-sourced injection. In practice you will hit it only when migrating data from a system that used unusual field names.
 
 ## Collection Naming
 
@@ -419,7 +525,7 @@ func (p Product) DenSettings() den.Settings {
 
 ## ID Generation
 
-Den uses ULID for document IDs -- lexicographically sortable, timestamp-ordered, 26 characters.
+Den uses [ULID](https://github.com/oklog/ulid) for document IDs -- lexicographically sortable, timestamp-ordered, 26 characters.
 
 ```go
 p := &Product{Name: "Widget", Price: 9.99}
@@ -447,9 +553,11 @@ type DenSettable interface {
 }
 
 type Settings struct {
-    CollectionName string            // override auto-derived name
-    UseRevision    bool              // enable optimistic concurrency control
-    Indexes        []IndexDefinition // compound indexes
+    CollectionName       string            // override auto-derived name
+    OmitEmpty            bool              // omit zero-value fields by default
+    UseRevision          bool              // enable optimistic concurrency control
+    NestingDepthPerField map[string]int    // per-field nesting depth overrides
+    Indexes              []IndexDefinition // compound indexes
 }
 ```
 
@@ -483,19 +591,68 @@ type Product struct {
 }
 ```
 
+=== "SQLite"
+
+    ```sql
+    CREATE INDEX IF NOT EXISTS idx_product_name
+        ON product(json_extract(data, '$.name'));
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_sku
+        ON product(json_extract(data, '$.sku'));
+    ```
+
+=== "PostgreSQL"
+
+    ```sql
+    CREATE INDEX IF NOT EXISTS idx_product_name
+        ON product(((data->>'name')));
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_sku
+        ON product(((data->>'sku')));
+    ```
+
 ### Via Struct Tags (Compound Indexes)
 
-For multi-field indexes, use `unique_together` or `index_together` with a shared group name:
+For multi-field indexes, use `unique_together` or `index_together` with a shared group name. Fields with the same group name are combined into a single composite index:
 
 ```go
 type Entry struct {
     document.Base
     Feed string `json:"feed" den:"unique_together:feed_guid"`
     GUID string `json:"guid" den:"unique_together:feed_guid"`
+    Body string `json:"body"`
 }
 ```
 
-This creates a composite unique index on `(feed, guid)`. The group name becomes part of the index name: `idx_entry_feed_guid`. For non-unique composite indexes, use `index_together`.
+This creates a composite unique index on `(feed, guid)` -- the combination must be unique, but individual values can repeat. The group name (`feed_guid`) becomes part of the index name: `idx_entry_feed_guid`.
+
+For non-unique composite indexes, use `index_together`:
+
+```go
+type Event struct {
+    document.Base
+    UserID string `json:"user_id" den:"index_together:user_date"`
+    Date   string `json:"date"    den:"index_together:user_date"`
+}
+```
+
+=== "SQLite"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_feed_guid
+        ON entry(json_extract(data, '$.feed'), json_extract(data, '$.guid'))
+        WHERE json_extract(data, '$.feed') IS NOT NULL
+          AND json_extract(data, '$.guid') IS NOT NULL;
+    ```
+
+=== "PostgreSQL"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_feed_guid
+        ON entry((data->>'feed'), (data->>'guid'))
+        WHERE data->>'feed' IS NOT NULL
+          AND data->>'guid' IS NOT NULL;
+    ```
 
 ### Via Settings (Compound Indexes)
 
@@ -512,23 +669,48 @@ func (p Product) DenSettings() den.Settings {
 }
 ```
 
-Prefer `unique_together`/`index_together` struct tags for most cases. Use `DenSettings().Indexes` when you need full control over index names.
+!!! tip
+    Prefer `unique_together`/`index_together` struct tags for most cases -- they're declarative and co-located with the fields. Use `DenSettings().Indexes` when you need full control over index names or when the index definition doesn't map cleanly to struct fields.
 
 ### Index Creation Behavior
 
-**SQLite**: Indexes are created with `CREATE INDEX IF NOT EXISTS` during `Register()`.
+=== "SQLite"
 
-**PostgreSQL**: Indexes are created with `CREATE INDEX CONCURRENTLY IF NOT EXISTS` so concurrent writes are not blocked during index creation on large tables. If a previous concurrent run was interrupted, PostgreSQL leaves behind an invalid index; Den detects this via `pg_index.indisvalid` on the next `Register()` and recreates the index automatically.
+    Indexes are created with `CREATE INDEX IF NOT EXISTS` as part of `Register()`. SQLite is fast enough in-process that blocking is rarely a concern.
+
+=== "PostgreSQL"
+
+    Indexes are created with `CREATE INDEX CONCURRENTLY IF NOT EXISTS`. Concurrent writes on the collection are not blocked during index creation, which matters on large tables.
+
+    If a previous `CONCURRENTLY` run was interrupted (process killed, query cancelled), PostgreSQL may leave behind an invalid index. Den detects invalid indexes via `pg_index.indisvalid` on the next `Register()` call, drops them, and recreates them cleanly — no manual intervention required.
 
 ### Dropping Stale Indexes
 
-`Register()` is additive — it creates indexes but never removes obsolete ones. When a `den:"index"` or `den:"unique"` tag is removed or a field is renamed, the old index remains in the database.
+`Register()` is additive: it creates new indexes but never removes obsolete ones. When you remove a `den:"index"` or `den:"unique"` tag, or rename a field, the old index stays in the database.
 
-Call `den.DropStaleIndexes(ctx, db)` to remove indexes that Den previously created but are no longer part of any registered struct. Pass `den.DryRun()` to preview without mutating the database. The function returns a `DropStaleResult` with `Dropped` and `Kept` slices of `StaleIndex` entries.
+To clean up, call `den.DropStaleIndexes()`:
 
-Den tracks indexes it created in a private `_den_indexes` metadata table (created automatically on `Open()`). Managed indexes (PostgreSQL GIN, FTS triggers/tables, and anything not created through `Register()`) are never touched.
+```go
+result, err := den.DropStaleIndexes(ctx, db)
+if err != nil {
+    return err
+}
+log.Printf("dropped %d stale indexes, kept %d", len(result.Dropped), len(result.Kept))
+```
 
-Typical usage is from a migration or deployment script, not every startup — the operation is a no-op when the struct has not changed.
+To preview what would be dropped without actually dropping anything, pass `den.DryRun()`:
+
+```go
+result, _ := den.DropStaleIndexes(ctx, db, den.DryRun())
+for _, idx := range result.Dropped {
+    log.Printf("would drop: %s.%s (fields=%v)", idx.Collection, idx.Name, idx.Fields)
+}
+```
+
+Den tracks indexes it created in a private `_den_indexes` metadata table, so this operation only considers indexes Den knows about. Managed indexes (the PostgreSQL GIN index, FTS triggers and auxiliary tables, application-created indexes that Den did not create) are never touched.
+
+!!! tip
+    Typical usage is from a migration or deployment script, not on every startup. Running `DropStaleIndexes` unconditionally on every process start is safe but unnecessary — it only does work when the struct has actually changed.
 
 ## Nullable Unique Constraints
 
@@ -550,13 +732,31 @@ den.Insert(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) /
 den.Insert(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
 ```
 
-Nullable unique constraints require pointer fields (`*string`, `*int`, etc.). Value-type fields with `den:"unique"` always enforce uniqueness, including for zero values.
+=== "SQLite"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email
+        ON user(json_extract(data, '$.email'))
+        WHERE json_extract(data, '$.email') IS NOT NULL;
+    ```
+
+=== "PostgreSQL"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email
+        ON "user"(((data->>'email')))
+        WHERE (data->>'email') IS NOT NULL;
+    ```
+
+!!! warning
+    Nullable unique constraints require pointer fields (`*string`, `*int`, etc.). Value-type fields with `den:"unique"` always enforce uniqueness, including for zero values.
 
 ---
 
 # CRUD Operations
 
-All document types must be registered with `den.Register()` before any CRUD operation. Attempting to use an unregistered type returns `ErrNotRegistered`.
+!!! warning
+    All document types must be registered with `den.Register()` before any CRUD operation. Attempting to use an unregistered type returns `ErrNotRegistered`.
 
 ```go
 err := den.Register(ctx, db,
@@ -589,9 +789,9 @@ products := []*Product{
 err := den.InsertMany(ctx, db, products)
 ```
 
-By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior.
+By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior:
 
-`PreValidate()` runs the full insert hook + validation chain on every document before the write transaction opens. If any document fails validation, no writes are attempted. Hooks fire exactly once per document: `BeforeInsert` / `BeforeSave` / `Validate` run in the pre-pass, and the in-transaction commit only performs the Put and `AfterInsert` / `AfterSave`. Combining with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade has to run inside the tx), so hooks fire twice on that specific combination.
+**`PreValidate()`** runs the full insert hook + validation chain on every document *before* the write transaction opens. If any document fails validation, no writes are attempted — useful for large imports where a late-failing document would otherwise waste the work of every successful predecessor. Hooks fire exactly once per document: `BeforeInsert` / `BeforeSave` / `Validate` run in the pre-pass, and the in-transaction commit only performs the Put and `AfterInsert` / `AfterSave`. Combining with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade has to run inside the tx), so hooks fire twice on that specific combination.
 
 ```go
 err := den.InsertMany(ctx, db, products, den.PreValidate())
@@ -600,7 +800,7 @@ if errors.Is(err, den.ErrValidation) {
 }
 ```
 
-`ContinueOnError()` writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Successful inserts are committed. Cannot be combined with a `*Tx` scope.
+**`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Successful inserts are committed, so partial success is visible. Cannot be combined with a `*Tx` scope.
 
 ```go
 err := den.InsertMany(ctx, db, products, den.ContinueOnError())
@@ -665,18 +865,22 @@ count, err := den.NewQuery[Product](db,
 // count = number of documents updated
 ```
 
-Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
+!!! tip
+    Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
 
 ### Fail-fast and field validation
 
-`QuerySet.Update` is fail-fast. Any per-row error — a `BeforeUpdate` hook returning an error, validation failure, revision conflict, or backend write error — aborts the loop, rolls the transaction back, and returns `(0, err)`. There is no partial commit: either every matching document is updated, or none is.
+`QuerySet.Update` is **fail-fast**. Any per-row error — a `BeforeUpdate` hook returning an error, validation failure, revision conflict, or backend write error — aborts the loop, rolls the transaction back, and returns `(0, err)`. There is no partial commit: either every matching document is updated, or none is.
 
 When the query set is bound to an outer transaction (`*Tx`), a failure also rolls back that caller transaction — the error surfaces to the `RunInTransaction` closure.
 
-Field names in `SetFields` (the names as they appear in the `json` struct tag) are validated against the registered struct before the write transaction opens. An unknown field returns immediately without touching storage. Callers that want to surface field-name mistakes at application start can iterate `Meta[T].Fields`:
+Field names in `SetFields` (the names as they appear in the `json` struct tag) are validated against the registered struct **before** the write transaction opens. An unknown field returns immediately without touching storage. Callers that want to surface field-name mistakes at application start, rather than at the first `.Update()` call, can iterate `Meta[T].Fields`:
 
 ```go
 meta, err := den.Meta[Product](db)
+if err != nil {
+    return err
+}
 known := make(map[string]struct{}, len(meta.Fields))
 for _, f := range meta.Fields {
     known[f.Name] = struct{}{} // f.Name is the JSON name — matches SetFields keys
@@ -711,7 +915,8 @@ if errors.Is(err, den.ErrMultipleMatches) {
 
 Pass `den.IncludeSoftDeleted()` to also match soft-deleted documents.
 
-For claim-one-of-many patterns (job queues, work tickets), reach for `RunInTransaction` together with `QuerySet.ForUpdate(SkipLocked())` — that locks the row at SELECT time so a concurrent worker skips it instead of racing for the same write.
+!!! tip "Job-queue pattern"
+    For claim-one-of-many patterns (job queues, work tickets), reach for `RunInTransaction` together with `QuerySet.ForUpdate(SkipLocked())` — that locks the row at SELECT time so a concurrent worker skips it instead of racing for the same write.
 
 ## FindOneAndUpsert
 
@@ -733,7 +938,8 @@ if inserted {
 
 Like `FindOneAndUpdate`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place.
 
-Two concurrent upserts that both miss race for the insert. One wins; the other gets `ErrDuplicate` from the underlying unique constraint on the lookup column. There is no internal retry — callers that want one decide explicitly between retry and surfacing the error.
+!!! note "Concurrency"
+    Two concurrent upserts that both miss race for the insert. One wins; the other gets `ErrDuplicate` from the underlying unique constraint on the lookup column. There is no internal retry — callers that want one decide explicitly between retry and surfacing the error.
 
 ## Delete
 
@@ -743,7 +949,8 @@ Delete a specific document:
 err := den.Delete(ctx, db, &product)
 ```
 
-If the document embeds `document.SoftDelete`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
+!!! note
+    If the document embeds `document.SoftDelete`, `Delete` sets `DeletedAt` instead of removing the document from storage. Pass `den.HardDelete()` to permanently remove a soft-deleted document.
 
 ```go
 // Soft-delete (sets DeletedAt, document remains in storage)
@@ -848,7 +1055,8 @@ for doc, err := range den.NewQuery[Product](db).Iter(ctx) {
 }
 ```
 
-Use `Iter()` for large result sets or migrations where loading all documents into memory at once would be impractical.
+!!! tip
+    Use `Iter()` for large result sets or migrations where loading all documents into memory at once would be impractical.
 
 ## Where Conditions
 
@@ -932,7 +1140,8 @@ where.Or(
 where.Not(where.Field("deleted").Eq(true))
 ```
 
-Multiple conditions passed to `NewQuery` are implicitly combined with `AND`. Use `where.Or()` explicitly when you need disjunction.
+!!! note
+    Multiple conditions passed to `NewQuery` are implicitly combined with `AND`. Use `where.Or()` explicitly when you need disjunction.
 
 ### Nested Field Access
 
@@ -952,7 +1161,7 @@ den.NewQuery[Product](db).
     Sort("name", den.Desc).    // then descending by name
     Limit(20).                 // at most 20 results
     Skip(40).                  // skip the first 40
-    All()
+    All(ctx)
 ```
 
 ## Cursor-Based Pagination
@@ -978,7 +1187,8 @@ prevPage, err := den.NewQuery[Entry](db,
 ).Sort("published", den.Desc).Before(firstID).Limit(20).All(ctx)
 ```
 
-`Skip(n)` works for small offsets but degrades at high page numbers (O(n) skip cost). `After` / `Before` use row-value comparisons like `WHERE (sort_field, id) < (?, ?)`, giving O(log n) performance regardless of position. Always prefer cursor-based pagination for user-facing paginated lists.
+!!! tip
+    `Skip(n)` works for small offsets but degrades at high page numbers (O(n) skip cost). `After` / `Before` use row-value comparisons like `WHERE (sort_field, id) < (?, ?)`, giving O(log n) performance regardless of position. Always prefer cursor-based pagination for user-facing paginated lists.
 
 ## Projections
 
@@ -1020,7 +1230,7 @@ houses, err := den.NewQuery[House](db).WithFetchLinks().All(ctx)
 // houses[0].Windows[0].Value != nil
 ```
 
-`.All(ctx)` runs one batched `WHERE _id IN (…)` per target type per nesting level, deduplicates IDs across parents, and shares decoded pointers. Streaming `.Iter(ctx)` keeps its per-row resolver. See the Relations section below for the full behavior.
+`.All(ctx)` runs one batched `WHERE _id IN (…)` per target type per nesting level and deduplicates ids across parents — shared targets are fetched once and the pointer is shared. `.Iter(ctx)` keeps its per-row resolver to preserve streaming. See the [Relations guide](relations.md#eager-withfetchlinks) for the full behavior.
 
 ### WithNestingDepth
 
@@ -1049,7 +1259,13 @@ For fields tagged with `den:"fts"`, use the `Search` method:
 results, err := den.NewQuery[Article](db).Search(ctx, "golang concurrency")
 ```
 
-SQLite translates to FTS5 `MATCH` queries against a virtual table. PostgreSQL translates to `tsvector` / `tsquery` operations with GIN index acceleration.
+=== "SQLite"
+
+    Translates to FTS5 `MATCH` queries against a virtual table.
+
+=== "PostgreSQL"
+
+    Translates to `tsvector` / `tsquery` operations with GIN index acceleration.
 
 ## Aggregations
 
@@ -1107,9 +1323,9 @@ Den models relations via the generic `Link[T]` type, inspired by Beanie's `Link[
 Den uses the word *embed* in two senses — keep them apart:
 
 - **Go-level embedding** (`document.Base`, `document.SoftDelete`, ...) is struct composition, a way to mix feature fields and methods into a document type.
-- **Relational embedding** is a modelling decision: nest a sub-struct inside a parent document's JSONB, or give it its own collection and reference it by ID with `Link[T]`.
+- **Relational embedding** is a modelling decision: nest a sub-struct *inside* a parent document's JSONB, or give it its own collection and reference it by ID with `Link[T]`. This section is about the second kind.
 
-When to embed, when to link:
+### When to embed, when to link
 
 | Question | Embed (nested struct) | Link (`Link[T]`) |
 |---|---|---|
@@ -1119,7 +1335,9 @@ When to embed, when to link:
 | Does it have its own lifecycle or outlive the parent? | No | Yes |
 | Is it a small value object (address, money, flags)? | Yes | No |
 
-Rule of thumb: embed value objects (always read together with the parent, no independent identity, bound to the parent's lifecycle). Link entities (own ID, queried on their own, possibly shared, possibly outliving the parent).
+**Rule of thumb:** embed *value objects* (always read together with the parent, no independent identity, bound to the parent's lifecycle). Link *entities* (own ID, queried on their own, possibly shared, possibly outliving the parent).
+
+### Example
 
 ```go
 // Address is a value object — no identity, always read with the Order,
@@ -1179,7 +1397,8 @@ type House struct {
 }
 ```
 
-Many-to-many relations are not directly supported. Model them with an intermediary document that holds links to both sides.
+!!! note
+    Many-to-many relations are not directly supported. Model them with an intermediary document that holds links to both sides.
 
 ## Serialization
 
@@ -1243,9 +1462,17 @@ houses[0].Door.IsLoaded() // true
 houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 ```
 
-`.All(ctx)` drains the result first, then runs one batched `WHERE _id IN (…)` query per target type per nesting level. IDs are deduplicated across parents, so a hot target referenced by many rows is fetched once and the decoded pointer is shared into every matching slot — `houses[0].Door.Value == houses[1].Door.Value` when they refer to the same ID. `AllWithCount` and `Search` use the same batched path.
+`.All(ctx)` drains the result first, then runs **one batched `WHERE _id IN (…)` query per target type per nesting level**. IDs are deduplicated, so a hot target referenced by many parents is fetched once and the decoded pointer is shared across all matching slots — `houses[0].Door.Value == houses[1].Door.Value` when they point at the same ID. `AllWithCount` and `Search` use the same batched path.
 
-`.Iter(ctx).WithFetchLinks()` keeps per-row resolution because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract.
+`.WithFetchLinks().Iter(ctx)` resolves per row instead, because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract. Use `.Iter` when the result set is too large to materialize; otherwise prefer `.All` so you get the batched resolver.
+
+=== "SQLite"
+
+    Each link resolution is a direct in-process lookup -- no network overhead. Batching still cuts allocations and decode work.
+
+=== "PostgreSQL"
+
+    Each batch collapses N per-row `SELECT` round-trips into one `WHERE _id IN (…)`. On a 20-parent fixture with one shared link, this takes `WithFetchLinks` from ~1.6 ms down to ~630 µs.
 
 ### On-Demand (FetchLink / FetchAllLinks)
 
@@ -1317,14 +1544,16 @@ err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
 
 ### LinkDelete
 
-Cascades deletion to all linked documents:
+Cascades deletion to the immediate linked documents:
 
 ```go
 err := den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete))
-// Deletes the House, its Door, and all its Windows
+// Deletes the House, its Door, and its Windows.
+// If Door or Window has its own links, those are NOT touched.
 ```
 
-`LinkDelete` cascades recursively. If a Door has its own links, those are also deleted. Be mindful of the nesting depth and your document graph when using cascade delete.
+!!! note
+    `LinkDelete` is single-level: only the immediate link targets are deleted. Linked-document graphs beyond one level stay intact (orphan references point at deleted parents). If you need transitive cleanup, call `Delete(..., WithLinkRule(LinkDelete))` explicitly on each node, or walk the graph yourself — the framework does not recurse. This design keeps one mis-configured delete from wiping an unbounded subgraph.
 
 ## BackLinks -- Reverse Queries
 
@@ -1341,18 +1570,23 @@ This is useful for answering "who links to this document?" without maintaining a
 
 When documents link to documents that themselves contain links, eager fetching can cause deep recursion or infinite loops with circular references. Den limits the maximum nesting depth.
 
+### Default
+
 The default maximum nesting depth is **3 levels**.
 
 ### Per-Query Override
+
+Override the depth for a specific query:
 
 ```go
 houses, err := den.NewQuery[House](db).
     WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
 
-With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query for the `Mid` target type, then one query for the `Leaf` target type on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
+With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query per target type for `Mid`, then one query per target type for `Leaf` on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
 
-Nested resolution only descends in the batched paths (`.All`, `.AllWithCount`, `.Search`). Streaming `.Iter(ctx)` resolves only the direct level of every yielded document because it cannot coherently batch without buffering.
+!!! warning "Recursion requires `.All` (or `.AllWithCount` / `.Search`)"
+    Nested resolution only descends in the batched paths. Streaming `.Iter(ctx)` resolves the direct level of every yielded document but does not recurse into loaded targets — it would otherwise have to buffer results to run a coherent batch.
 
 ## Complete Example
 
@@ -1417,7 +1651,7 @@ func main() {
 
 # Aggregations
 
-Den supports scalar aggregations, grouped aggregations, and projections. Scalar aggregations (Avg, Sum, Min, Max, Count) are pushed down to the database engine via SQL. GroupBy and Project operate in Go memory -- they query matching documents and accumulate or map results in application code.
+Den supports scalar aggregations, grouped aggregations, and projections. Scalar aggregations (Avg, Sum, Min, Max, Count) and GroupBy are pushed down to the database engine via SQL — aggregates compute server-side and only result rows are decoded into Go. Project runs the query server-side too but then decodes every matching row into the projection struct in Go.
 
 ## Scalar Aggregations
 
@@ -1471,7 +1705,8 @@ activeCount, err := den.NewQuery[Product](db,
 ).Count(ctx)
 ```
 
-When you need both results and a total count (e.g. for pagination), use `AllWithCount()` instead of issuing separate `All()` and `Count()` calls.
+!!! tip
+    When you need both results and a total count (e.g. for pagination), use `AllWithCount()` instead of issuing separate `All()` and `Count()` calls.
 
 ## GroupBy
 
@@ -1496,18 +1731,61 @@ err := den.NewQuery[Product](db,
 
 ### GroupBy Struct Tag Reference
 
-| Tag | Meaning |
-|-----|---------|
-| `den:"group_key"` | Receives the group key value |
-| `den:"avg:field"` | Average of `field` within the group |
-| `den:"sum:field"` | Sum of `field` within the group |
-| `den:"min:field"` | Minimum of `field` within the group |
-| `den:"max:field"` | Maximum of `field` within the group |
-| `den:"count"` | Number of documents in the group |
+| Tag                  | Meaning                                                   |
+|----------------------|-----------------------------------------------------------|
+| `den:"group_key"`    | Receives the group key value (shortcut for `group_key:0`) |
+| `den:"group_key:N"`  | Receives the N-th group key value (positional)            |
+| `den:"avg:field"`    | Average of `field` within the group                       |
+| `den:"sum:field"`    | Sum of `field` within the group                           |
+| `den:"min:field"`    | Minimum of `field` within the group                       |
+| `den:"max:field"`    | Maximum of `field` within the group                       |
+| `den:"count"`        | Number of documents in the group                          |
 
 The `field` in each tag refers to the JSON field name on the source document (e.g. `price`, `quantity`). Dot notation for nested fields is supported (e.g. `sum:details.amount`).
 
-GroupBy queries all matching documents and accumulates results in memory. For large result sets, consider applying filters to reduce the number of documents processed. Scalar aggregations (Avg, Sum, Min, Max, Count) are executed as SQL queries in the database engine without loading documents into memory.
+### Grouping by Multiple Fields
+
+`GroupBy` accepts a variadic list of fields. Tag each key-carrying struct field with its positional slot `group_key:N`:
+
+```go
+type Stats struct {
+    Category string  `den:"group_key:0"`
+    Region   string  `den:"group_key:1"`
+    Count    int64   `den:"count"`
+    Total    float64 `den:"sum:price"`
+}
+
+var stats []Stats
+err := den.NewQuery[Product](db).
+    GroupBy("category", "region").
+    Into(ctx, &stats)
+```
+
+Rules:
+
+- Every slot `0..len(fields)-1` must be claimed by exactly one struct field.
+- The unindexed `den:"group_key"` is only accepted when exactly one field is requested; mixing it with `group_key:N` returns an error.
+- Two struct fields claiming the same slot, or a slot outside the requested range, also return an error before any SQL runs.
+
+### Ordering and Limiting Groups
+
+`GroupBy.Into` honors the surrounding query set's `Sort`, `Limit`, and `Skip` modifiers. For aggregate ordering, use `GroupByBuilder.OrderByAgg`.
+
+```go
+// Top-5 categories by document count.
+var top []Stats
+err := den.NewQuery[Product](db).Limit(5).
+    GroupBy("category").
+    OrderByAgg(den.OpCount, "", den.Desc).
+    Into(ctx, &top)
+```
+
+- `qs.Sort("category", den.Asc)` sorts by a group key — works for any key-carrying field listed in `GroupBy(...)`. Sorting by a non-key field returns an error: use `OrderByAgg` for aggregate sort.
+- `OrderByAgg(op, field, dir)` sorts by an aggregate expression. `op` is one of `den.OpCount`, `OpSum`, `OpAvg`, `OpMin`, `OpMax`; `field` is ignored for `OpCount`. Multiple calls define tie-breakers in the order they were added.
+- `qs.Limit(n)` / `qs.Skip(n)` cap or offset the number of group rows returned — combine with `OrderByAgg` for top-N queries.
+
+!!! note
+    GroupBy pushes the `GROUP BY` down to the database engine — aggregates are computed server-side. Only the resulting group rows travel back and are decoded into the target struct, so the cost scales with the number of groups, not the number of source documents. Use `Where(...)` conditions to shrink the working set if needed.
 
 ## Projections
 
@@ -1539,7 +1817,8 @@ var views []ProductView
 err := den.NewQuery[Product](db).Project(ctx, &views)
 ```
 
-Projections fetch full documents from the database and map the requested fields in Go memory. They reduce decode overhead for downstream code but do not reduce I/O at the SQL level.
+!!! note
+    Projections fetch full documents from the database and map the requested fields in Go memory. They reduce decode overhead for downstream code but do not reduce I/O at the SQL level.
 
 ---
 
@@ -1562,7 +1841,8 @@ type Article struct {
 
 When `den.Register()` processes this struct, it automatically creates the FTS infrastructure (virtual tables, generated columns, indexes, triggers) for every field tagged with `fts`.
 
-If no fields carry `den:"fts"`, no FTS infrastructure is created. There is zero overhead for collections that do not use full-text search.
+!!! note
+    If no fields carry `den:"fts"`, no FTS infrastructure is created. There is zero overhead for collections that do not use full-text search.
 
 ## Search API
 
@@ -1585,34 +1865,73 @@ articles, err := den.NewQuery[Article](db,
 
 The FTS filter and the where conditions are applied together -- the database engine intersects both result sets using its query planner.
 
+### Pagination
+
+`Limit`, `Skip`, and cursor pagination (`After` / `Before`) all apply to `Search`. The default sort is by rank; pair cursor pagination with an explicit `Sort("_id", den.Asc)` so page boundaries stay stable across calls.
+
+```go
+first, _ := den.NewQuery[Article](db).Sort("_id", den.Asc).Limit(20).Search(ctx, "golang")
+more, _ := den.NewQuery[Article](db).Sort("_id", den.Asc).After(first[len(first)-1].ID).
+    Limit(20).Search(ctx, "golang")
+```
+
+Cursor + offset (`After`/`Before` combined with `Skip`) is rejected with `ErrIncompatiblePagination`, matching the rest of the QuerySet API.
+
 ## Backend Implementations
 
-**SQLite** uses FTS5 virtual tables with content-sync triggers:
+=== "SQLite"
 
-```sql
--- FTS5 virtual table (external content, synced via triggers)
-CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
-    title, body, content=articles, content_rowid=rowid
-);
-```
+    SQLite uses **FTS5 virtual tables** with content-sync triggers.
 
-Den automatically creates triggers to keep the FTS index in sync on insert, update, and delete.
+    **Infrastructure created during `Register()`:**
 
-**PostgreSQL** uses a tsvector generated column with a GIN index:
+    ```sql
+    -- FTS5 virtual table (external content, synced via triggers)
+    CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+        title, body, content=articles, content_rowid=rowid
+    );
+    ```
 
-```sql
--- Generated column combining all FTS-tagged fields
-ALTER TABLE articles ADD COLUMN _fts_vector tsvector
-    GENERATED ALWAYS AS (
-        to_tsvector('english',
-            coalesce(data->>'title','') || ' ' ||
-            coalesce(data->>'body','')
-        )
-    ) STORED;
+    Den automatically creates triggers to keep the FTS index in sync on insert, update, and delete. Synchronization is fully atomic with the document write.
 
--- GIN index for fast lookups
-CREATE INDEX idx_articles_fts ON articles USING GIN(_fts_vector);
-```
+    **Generated search query:**
+
+    ```sql
+    SELECT a.data FROM articles a
+    JOIN articles_fts f ON a.rowid = f.rowid
+    WHERE articles_fts MATCH ?
+    ORDER BY rank
+    LIMIT 20;
+    ```
+
+=== "PostgreSQL"
+
+    PostgreSQL uses a **tsvector generated column** with a **GIN index**.
+
+    **Infrastructure created during `Register()`:**
+
+    ```sql
+    -- Generated column combining all FTS-tagged fields
+    ALTER TABLE articles ADD COLUMN _fts_vector tsvector
+        GENERATED ALWAYS AS (
+            to_tsvector('english',
+                coalesce(data->>'title','') || ' ' ||
+                coalesce(data->>'body','')
+            )
+        ) STORED;
+
+    -- GIN index for fast lookups
+    CREATE INDEX idx_articles_fts ON articles USING GIN(_fts_vector);
+    ```
+
+    **Generated search query:**
+
+    ```sql
+    SELECT data FROM articles
+    WHERE _fts_vector @@ plainto_tsquery('english', $1)
+    ORDER BY ts_rank(_fts_vector, plainto_tsquery('english', $1)) DESC
+    LIMIT 20;
+    ```
 
 ## Trade-offs
 
@@ -1624,7 +1943,380 @@ CREATE INDEX idx_articles_fts ON articles USING GIN(_fts_vector);
 | Index sync | Trigger-based (atomic) | Generated column (automatic) |
 | Dependencies | None (built into SQLite) | None (built into PostgreSQL) |
 
-SQLite FTS5 does not support language-aware stemming out of the box. If your application requires stemming (e.g. matching "running" when searching for "run"), use the PostgreSQL backend or supply an external tokenizer.
+!!! warning
+    SQLite FTS5 does not support language-aware stemming out of the box. If your application requires stemming (e.g. matching "running" when searching for "run"), use the PostgreSQL backend or supply an external tokenizer.
+
+---
+
+# Attachments & Storage
+
+Den includes a built-in abstraction for attaching files to documents. The
+metadata (path, mime, size, hash) lives on an embeddable struct in the
+document; the actual bytes live behind a `den.Storage` interface that the
+application configures once at `Open` time.
+
+## When to Use It
+
+- Blog engines uploading post covers and images
+- CMS attachments on pages
+- User-avatar uploads
+- Any document type that owns a file
+
+If you only need to store small inline payloads (JSON config blobs, small
+snippets), just add a `string` or `[]byte` field. Attachments earn their
+keep when the payload is bytes that belong on a CDN, a disk, or S3 — not
+inside the document JSON.
+
+## Enabling Attachments
+
+Embed `document.Attachment` alongside `document.Base`:
+
+```go
+import "github.com/oliverandrich/den/document"
+
+type Media struct {
+    document.Base
+    document.Attachment
+
+    OriginalName string `json:"original_name" validate:"required,max=255"`
+    AltText      string `json:"alt_text,omitempty"`
+}
+```
+
+`Attachment` carries four fields, all validated via struct tags:
+
+```go
+type Attachment struct {
+    StoragePath string `json:"storage_path"     validate:"required,max=1024"`
+    Mime        string `json:"mime"             validate:"required,max=100"`
+    Size        int64  `json:"size"             validate:"required,min=1"`
+    SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`
+}
+```
+
+These fields are set by the Storage when bytes are stored and are not meant
+to be edited by application code afterwards — `StoragePath`, `Size`, and
+`SHA256` are intrinsic to the stored content.
+
+!!! note "StoragePath is an object key, not a URL"
+    `StoragePath` is the path **relative to the storage backend's root** —
+    for the `storage/file` backend that is the root directory, for S3 that is the
+    object key inside the bucket. Hosts, bucket names, query strings, and
+    pre-signed URL parameters do NOT belong here; they come out of
+    `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS
+    object-key maxima.
+
+## IS-a-file vs. HAS-files
+
+There are two common shapes:
+
+**IS-a-file** — the document represents a single file. Embed the
+`Attachment`:
+
+```go
+type Media struct {
+    document.Base
+    document.Attachment
+    AltText string `json:"alt_text,omitempty"`
+}
+```
+
+**HAS-files** — the document references one or more files. Use named
+fields:
+
+```go
+type Product struct {
+    document.Base
+    Name      string              `json:"name"`
+    Hero      document.Attachment `json:"hero"`
+    Thumbnail document.Attachment `json:"thumbnail"`
+}
+```
+
+Both shapes use the same `Attachment` struct. Den's hard-delete cascade
+finds attachments in either position via reflection.
+
+## Installing a Storage Backend
+
+Storage is configured once, at `Open`, via `den.WithStorage`. Concrete
+backends live in sub-packages of `den/storage` and register themselves
+on import. Two construction styles work:
+
+**Direct constructor** — import the backend package and call its
+`New`:
+
+```go
+import (
+    "github.com/oliverandrich/den"
+    "github.com/oliverandrich/den/storage/file"
+)
+
+fs, err := file.New("./uploads", "/media")
+if err != nil {
+    return err
+}
+
+db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
+```
+
+**DSN-based dispatch** — useful for configuration-driven setups where
+the backend is chosen at runtime (for example Burrow's `--storage-dsn`
+flag). Import the backend for its side effect so it registers its
+scheme:
+
+```go
+import (
+    "github.com/oliverandrich/den"
+    "github.com/oliverandrich/den/storage"
+    _ "github.com/oliverandrich/den/storage/file" // registers "file://"
+)
+
+fs, err := storage.OpenURL("file:///uploads", "/media")
+if err != nil {
+    return err
+}
+
+db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
+```
+
+The `file://` DSN uses the same SQLAlchemy/JDBC-style convention as
+`sqlite://`:
+
+| DSN | Path handed to the filesystem |
+|---|---|
+| `file:///data/media` | `data/media` *(relative, 3 slashes)* |
+| `file:////var/media` | `/var/media` *(absolute, 4 slashes)* |
+
+One leading slash is stripped on parse so that standard URL libraries
+(Go `net/url`, Python `urllib.parse`) can tokenise the DSN with the
+authority component staying empty. Direct construction via `file.New(...)`
+takes the filesystem path literally — no stripping.
+
+One Storage serves every document type in the database. If you need
+per-type routing (public CDN for post covers, private bucket for invoices),
+that is an application concern — wrap your Storage with a dispatcher that
+picks a backend based on the call site.
+
+Without a Storage, `Store` / `Open` / `Delete` on attachments still work
+because application code holds a reference to the Storage instance
+directly. What breaks is the automatic hard-delete cascade, which only
+runs if a Storage is installed on the DB.
+
+## Uploading Bytes
+
+Use `Storage.Store` directly — attachment upload happens in your HTTP
+handler (or CLI importer), not inside Den:
+
+```go
+func uploadHandler(db *den.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        f, header, err := r.FormFile("file")
+        if err != nil { /* respond 400 */ return }
+        defer f.Close()
+
+        ext := filepath.Ext(header.Filename)
+        mime := header.Header.Get("Content-Type")
+
+        att, err := db.Storage().Store(r.Context(), f, ext, mime)
+        if err != nil { /* respond 500 */ return }
+
+        media := &Media{
+            Attachment:   att,
+            OriginalName: header.Filename,
+        }
+        if err := den.Insert(r.Context(), db, media); err != nil {
+            // Clean up the stored bytes if the DB insert fails —
+            // otherwise you have an orphan.
+            _ = db.Storage().Delete(r.Context(), att)
+            return
+        }
+
+        /* respond 201 with media */
+    }
+}
+```
+
+Two cleanup situations to keep in mind:
+
+1. **Insert fails after Store succeeds** — application code must call
+   `Storage.Delete` to avoid an orphan. Store-then-Insert is not atomic.
+2. **Hard delete cascade** — Den handles this automatically: when
+   `den.Delete(ctx, db, doc, den.HardDelete())` removes a document that
+   contains attachments, Den calls `Storage.Delete` for each.
+
+Hard-deleting an attachment-bearing document without a configured
+Storage is rejected with `ErrValidation` before the database delete
+runs — orphan bytes are worse than a clear error.
+
+Remote `Storage.Delete` failures *after* the database delete succeeds
+are logged via `slog.Warn` but do not roll the delete back. A broken
+reference (DB pointing at missing bytes) is worse than orphan bytes,
+which are recoverable via an offline sweep that cross-references
+filesystem paths with `StoragePath` values.
+
+## Reading Bytes
+
+```go
+f, err := db.Storage().Open(ctx, media.Attachment)
+if err != nil { /* 404 */ return }
+defer f.Close()
+
+// Stream to HTTP response, copy to another storage, etc.
+io.Copy(w, f)
+```
+
+## Serving URLs
+
+`Storage.URL` returns the URL path at which the file is served. For
+the filesystem backend that is the URL prefix passed at construction
+plus the storage path:
+
+```go
+fs, _ := file.New("./uploads", "/media")
+// Attachment.StoragePath = "2026/04/abc123def4567890.jpg"
+fs.URL(att) // -> "/media/2026/04/abc123def4567890.jpg"
+```
+
+Remote storage backends may return absolute URLs (`https://cdn.example.com/...`)
+or pre-signed URLs. Applications should treat the return value as opaque.
+
+Serving the files is up to the application. The
+[burrow/uploader](https://github.com/oliverandrich/burrow/tree/main/uploader)
+package provides a ready-made HTTP serving handler and multipart ingress
+helpers built on the `Storage` interface.
+
+## Hard-Delete Cascade
+
+When a document that contains attachments is hard-deleted, Den walks the
+document via reflection, collects every non-zero `Attachment` it finds
+(in embeds and in named fields), and calls `Storage.Delete` for each:
+
+```go
+// Bytes AND record are gone after this call.
+err := den.Delete(ctx, db, media, den.HardDelete())
+```
+
+The walker only descends into struct fields and pointer-to-struct fields.
+Slices and maps are not followed — if you need to clean up attachments in
+a slice, use a `BeforeDeleter` hook:
+
+```go
+type Gallery struct {
+    document.Base
+    Items []document.Attachment `json:"items"`
+}
+
+func (g *Gallery) BeforeDelete(ctx context.Context) error {
+    // Hard-delete cascade does not follow slices. Clean up by hand.
+    storage := /* access via a closure or service locator */
+    for _, a := range g.Items {
+        if err := storage.Delete(ctx, a); err != nil {
+            return err
+        }
+    }
+    return nil
+}
+```
+
+Soft-delete does NOT trigger the cascade — the bytes stay until you
+hard-delete. That matches the intent of soft delete (reversible removal).
+
+## The File Reference Implementation
+
+`den/storage/file` is the reference backend. It stores bytes on the
+local disk under a configurable root directory, addressed by the
+content hash:
+
+```go
+import "github.com/oliverandrich/den/storage/file"
+
+fs, err := file.New("./uploads", "/media")
+```
+
+Importing the package for its side effect also registers the `file://`
+scheme with [`storage.OpenURL`](#installing-a-storage-backend), so
+configuration-driven setups can use either form interchangeably.
+
+The generated path is
+`YYYY/MM/<first-16-of-sha256>.<ext>` — grouped by month, content-addressed,
+dedup-on-write. Two uploads of the same bytes in the same month resolve to
+the same path; the second `Store` returns the existing path instead of
+duplicating the file.
+
+Security-relevant behavior:
+
+- **Path traversal is refused** — `Open` and `Delete` use `os.Root` (Go
+  1.24+). A `StoragePath` that escapes the root (via `..` or symlinks)
+  cannot read anything outside the configured directory.
+- **Empty uploads are rejected** — `Store` on a zero-byte reader returns
+  `storage.ErrEmptyContent`.
+- **Delete is idempotent** — a missing path returns success, simplifying
+  cleanup orchestration against the document lifecycle.
+
+### URL-prefix accessor
+
+The filesystem backend exposes its HTTP prefix via `URLPrefix() string`:
+
+```go
+fs, _ := file.New("./uploads", "/media")
+fs.URLPrefix() // "/media"
+```
+
+HTTP-layer packages (`burrow/uploader`, custom handlers) use this to
+mount a serving handler on the same route that `URL` produces, without
+having the prefix configured twice. Remote backends (S3, GCS)
+intentionally do NOT implement this method — the absent `URLPrefix()`
+is the signal that the Storage is responsible for serving and the HTTP
+package should skip local routing.
+
+## Writing a Custom Storage Backend
+
+Implement `den.Storage`:
+
+```go
+type Storage interface {
+    Store(ctx context.Context, r io.Reader, ext, mime string) (document.Attachment, error)
+    Open(ctx context.Context, a document.Attachment) (io.ReadCloser, error)
+    Delete(ctx context.Context, a document.Attachment) error
+    URL(a document.Attachment) string
+}
+```
+
+Requirements implementations MUST honour:
+
+- **Content-addressed** — two `Store` calls with identical bytes must
+  resolve to the same `StoragePath`. Den relies on this for dedup.
+- **Idempotent Delete** — a missing path is not an error.
+- **Concurrency-safe** — `Store` / `Open` / `Delete` / `URL` must be
+  callable from multiple goroutines.
+- **Fill in SHA256** — the returned Attachment's `SHA256` should be the
+  full hex-encoded SHA-256 of the stored bytes. Several Den features rely
+  on the hash for diff detection.
+
+Optional method:
+
+- **`URLPrefix() string`** — implement only when `URL` returns a path
+  relative to the current HTTP server (i.e. the application is expected
+  to serve the bytes itself). HTTP-layer packages (`burrow/uploader`)
+  type-assert on a local `interface { URLPrefix() string }` to decide
+  whether to mount a serving handler and at what route. Backends that
+  return absolute URLs (S3, GCS, a CDN) should omit the method — its
+  absence signals "I serve myself, do not register a local handler".
+
+## Uniqueness Trade-off
+
+`document.Attachment` deliberately does NOT carry a `den:"unique"` tag on
+`StoragePath`. The reason: a `Product.Hero` attachment that references the
+same bytes as another `Product.Hero` is a legitimate case — two products
+can share a hero image via content addressing. A unique constraint on
+`storage_path` at the collection level would forbid that.
+
+For "library" collections where each file must map to one record (a media
+library: one record per file), either add your own unique constraint in
+application logic (look up by SHA256 before insert) or lean on the
+content-addressed Storage's dedup — identical bytes produce the same
+`StoragePath`, and the database insert will fail if your collection has a
+unique index on that field.
 
 ---
 
@@ -1638,6 +2330,9 @@ All transactional work is wrapped in `den.RunInTransaction`. Return `nil` to com
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    // All operations here share the same database transaction.
+    // Reads see a consistent snapshot.
+
     sender, err := den.FindByID[Account](ctx, tx, senderID)
     if err != nil {
         return err // rolls back
@@ -1667,67 +2362,113 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Insert(ctx, scope, &doc)` works outside and inside a transaction:
 
 ```go
-den.Insert(ctx, db, &product)                 // outside a transaction
+// Outside a transaction
+den.Insert(ctx, db, &product)
+
+// Inside a transaction — same function, same signature
 den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    return den.Insert(ctx, tx, &product)      // inside — same function
+    return den.Insert(ctx, tx, &product)
 })
 ```
 
-`Scope` is sealed (unexported methods): only `*DB` and `*Tx` satisfy it. Backend authors are unaffected.
+`Scope` is sealed: only `*DB` and `*Tx` satisfy it. Backend authors do not need to care — they implement `Backend` / `Transaction` as before.
 
-A small set of APIs remains transaction-only because their semantics require transaction lifetime: `LockByID`, `AdvisoryLock`, and `QuerySet.ForUpdate(...)`. These take `*den.Tx` directly rather than `Scope`; `ForUpdate` is valid on any `QuerySet` but the terminal refuses to run if the scope is a `*DB` (returns `ErrLockRequiresTransaction`).
+A handful of APIs remain transaction-only because their semantics are tied to transaction lifetime (a lock outside a transaction would release immediately; raw bytes without rollback would leak half-written state). They take `*den.Tx` directly rather than `Scope`:
 
-For rare cases where infrastructure code (for example, the migration log) needs to bypass the registry, `tx.Transaction()` returns the underlying backend `Transaction` so callers can issue raw `Get` / `Put` / `Delete`. Application code should not touch this.
+| API | Why transaction-only |
+|---|---|
+| `den.LockByID[T](ctx, tx, id, opts...)` | Row-level lock released on commit/rollback |
+| `den.AdvisoryLock(ctx, tx, key)` | Application-level lock released on commit/rollback |
+| `den.NewQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking (QuerySet refuses to run `ForUpdate` against a `*DB` scope) |
+| `tx.Transaction()` | Low-level escape hatch to the underlying backend Transaction. Only for infrastructure code like the migration log — application code should use `Insert` / `Update` / `Delete` / `FindByID` etc. |
 
 ## Row-Level Locking
 
-`den.LockByID[T](ctx, tx, id)` reads a document and acquires a row-level lock that is held until the transaction commits or rolls back. Other transactions trying to lock the same row block until the holder releases.
+`den.LockByID[T](ctx, tx, id)` reads a document and acquires a row-level lock that persists for the lifetime of the transaction. Other transactions that try to lock the same row block until this transaction commits or rolls back.
 
 ```go
-den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     item, err := den.LockByID[Inventory](ctx, tx, itemID)
-    if err != nil { return err }
-    if item.Stock < qty { return ErrOutOfStock }
+    if err != nil {
+        return err
+    }
+    if item.Stock < qty {
+        return ErrOutOfStock
+    }
     item.Stock -= qty
     return den.Update(ctx, tx, item)
 })
 ```
 
-There is no non-transaction variant — a lock outside a transaction releases immediately, so the `*den.Tx` parameter enforces correct usage at compile time.
+There is deliberately no non-transaction variant: a lock outside a transaction releases immediately and would be meaningless. The `*den.Tx` parameter enforces correct usage at compile time.
 
-**PostgreSQL**: emits `SELECT ... FOR UPDATE`. Lock held until transaction end.
-**SQLite**: no-op, delegates to `FindByID`. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing.
+=== "PostgreSQL"
 
-Prefer revision control (`den.Settings{UseRevision: true}`) for most read-modify-write scenarios — it works identically across backends and does not hold database locks. Reach for `LockByID` only when retry storms are a concern, or when the work between read and write is too expensive to repeat on conflict.
+    Emits `SELECT ... FOR UPDATE`. The lock is held until the enclosing transaction commits or rolls back. Concurrent transactions attempting to lock the same row block until the holder releases.
+
+=== "SQLite"
+
+    No-op. IMMEDIATE transactions already serialize writers at the database level, so per-row locking adds nothing. `LockByID` behaves identically to `FindByID` on SQLite.
+
+!!! tip
+    For most read-modify-write scenarios, **revision control** (`den.Settings{UseRevision: true}`) is the better choice — it works identically across both backends and does not hold database locks. Reach for `LockByID` when contention is high enough that retry storms are a concern, when the business logic between read and write is too expensive to repeat on conflict, or when you need a queue-consumer pattern.
 
 ### Lock Modifiers
 
-Pass one of the following `LockOption` values to `LockByID` to change how contention is handled on PostgreSQL (no-op on SQLite):
+Two options change how `LockByID` reacts to contention on PostgreSQL:
 
-- `den.SkipLocked()` — if another transaction holds the row, return `ErrNotFound`. Maps to `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive.
-- `den.NoWait()` — if another transaction holds the row, return `ErrLocked` immediately. Maps to `FOR UPDATE NOWAIT`.
+- `den.SkipLocked()` — if another transaction holds the row, the query returns no rows. Mapped to `FOR UPDATE SKIP LOCKED`. The canonical queue-consumer primitive: N workers can each pop a different row without blocking each other.
+- `den.NoWait()` — if another transaction holds the row, fail immediately with `den.ErrLocked`. Mapped to `FOR UPDATE NOWAIT`. Use when the caller should choose between retry, abort, or an alternative path rather than wait.
+
+`SkipLocked()` and `NoWait()` are **mutually exclusive** — PostgreSQL allows only one. Passing both to `LockByID` returns an error; passing both to `QuerySet.ForUpdate` captures the error on the query set and surfaces it when you call `All` or `First`.
+
+On SQLite both options are no-ops (writers are serialized at the database level).
 
 ```go
-job, err := den.LockByID[Job](ctx, tx, candidateID, den.SkipLocked())
-if errors.Is(err, den.ErrNotFound) {
-    return nil // another worker owns it, or the row does not exist
-}
+// Queue worker pattern: pop next unlocked job
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    job, err := den.LockByID[Job](ctx, tx, candidateID, den.SkipLocked())
+    if errors.Is(err, den.ErrNotFound) {
+        return nil // another worker owns it (or it really does not exist)
+    }
+    if err != nil {
+        return err
+    }
+    return processJob(ctx, tx, job)
+})
 ```
 
-Caveat: with `SkipLocked()`, zero rows is returned for both "locked" and "not exists". The error cannot distinguish them.
+!!! warning "SKIP LOCKED returns `ErrNotFound`"
+    PostgreSQL returns zero rows for both "locked by another tx" and "row does not exist" when `SKIP LOCKED` is active — these cases are indistinguishable through the error alone. If you need to tell them apart, do a separate non-locking read first.
 
 ### Multi-row Locking
 
-`NewQuery[T](tx)` bound to a `*Tx` gains `ForUpdate(opts ...LockOption)` — one SQL statement that locks every matching row.
+`NewQuery[T](tx)` bound to a `*Tx` supports `ForUpdate(opts ...LockOption)` — one SQL statement that locks every matching row, avoiding the N+1 round-trips you would get from looping over `LockByID`.
 
 ```go
-orders, err := den.NewQuery[Order](tx).
-    Where(where.Field("status").Eq("pending")).
-    ForUpdate(den.SkipLocked()).
-    All(ctx)
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    orders, err := den.NewQuery[Order](tx).
+        Where(where.Field("customer").Eq(custID)).
+        Where(where.Field("status").Eq("pending")).
+        ForUpdate(den.SkipLocked()).
+        All(ctx)
+    if err != nil {
+        return err
+    }
+    for _, o := range orders {
+        o.Status = "processing"
+        if err := den.Update(ctx, tx, o); err != nil {
+            return err
+        }
+    }
+    return nil
+})
 ```
 
-`ForUpdate` is legal syntactically on any QuerySet; a terminal method refuses to run (`ErrLockRequiresTransaction`) if the scope is a `*DB` because a lock outside a transaction would release immediately. Options are the same as `LockByID` (`SkipLocked`, `NoWait`). On SQLite `ForUpdate` is a no-op.
+`ForUpdate` is legal syntactically on any `QuerySet`, but a terminal method refuses to run (`ErrLockRequiresTransaction`) when the scope is a `*DB` — a lock outside a transaction releases immediately and would be meaningless. The `SkipLocked()` and `NoWait()` options work identically to `LockByID`.
+
+!!! tip "Deterministic lock order"
+    On PostgreSQL, `ForUpdate().All(ctx)` without an explicit `Sort` emits `ORDER BY id ASC` automatically. The lock-acquisition order follows the SELECT's output order, and two concurrent callers with overlapping result sets would deadlock on PG if each walked rows in a different heap order. The default guarantees every caller locks the same way. Add your own `Sort(...)` call if you want a different order — but then it is your responsibility to keep that order consistent across callers.
 
 ## Commit and Rollback
 
@@ -1735,9 +2476,12 @@ The commit/rollback behavior is controlled entirely by the return value of the c
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    // ... operations ...
+
     if somethingWentWrong {
         return fmt.Errorf("aborting: %w", err) // transaction rolls back
     }
+
     return nil // transaction commits
 })
 ```
@@ -1746,13 +2490,32 @@ If a panic occurs inside the closure, Den recovers it and rolls back the transac
 
 ## Backend Behavior
 
-**SQLite:** SQLite serializes all writers. Only one goroutine can hold a write transaction at a time; others block until the writer commits or rolls back. Readers are never blocked (WAL mode).
+=== "SQLite"
 
-**PostgreSQL:** PostgreSQL uses MVCC (Multi-Version Concurrency Control). Multiple writers can run concurrently. Conflicts are detected at commit time if rows overlap.
+    SQLite serializes all writers. Only one goroutine can hold a write transaction at a time; others block until the writer commits or rolls back. Readers are never blocked (WAL mode).
 
-Use revision control (`den.Settings{UseRevision: true}`) for application-level conflict detection that works identically across both backends.
+    ```
+    Writer 1: BEGIN ──── write ──── COMMIT
+    Writer 2:                               BEGIN ──── write ──── COMMIT
+    Reader:   ────────── read ──────────────────────── read ──────────
+    ```
+
+=== "PostgreSQL"
+
+    PostgreSQL uses MVCC (Multi-Version Concurrency Control). Multiple writers can run concurrently. Conflicts are detected at commit time if rows overlap.
+
+    ```
+    Writer 1: BEGIN ──── write ──── COMMIT
+    Writer 2:      BEGIN ──── write ──── COMMIT
+    Reader:   ────────── read ──────────── read ──────
+    ```
+
+!!! tip
+    Use revision control (`den.Settings{UseRevision: true}`) for application-level conflict detection that works identically across both backends. When two processes read and modify the same document concurrently, the second `Update` returns `den.ErrRevisionConflict` regardless of backend.
 
 ## Example: Job Queue
+
+Transactions are useful for atomic claim-and-process patterns:
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
@@ -1772,7 +2535,8 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 })
 ```
 
-For single-document atomic updates, consider `den.FindOneAndUpdate` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
+!!! note
+    For single-document atomic updates, consider `den.FindOneAndUpdate` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
 
 ---
 
@@ -1809,6 +2573,14 @@ type AfterDeleter interface {
     AfterDelete(ctx context.Context) error
 }
 
+type BeforeSoftDeleter interface {
+    BeforeSoftDelete(ctx context.Context) error
+}
+
+type AfterSoftDeleter interface {
+    AfterSoftDelete(ctx context.Context) error
+}
+
 type BeforeSaver interface {
     BeforeSave(ctx context.Context) error
 }
@@ -1822,11 +2594,12 @@ type Validator interface {
 }
 ```
 
-`BeforeSaver` and `AfterSaver` are called by both `Insert` and `Update`. Use them for logic that applies to every write, regardless of whether the document is new or existing.
+!!! note
+    `BeforeSaver` and `AfterSaver` are called by both `Insert` and `Update`. Use them for logic that applies to every write, regardless of whether the document is new or existing.
 
 ## Execution Order
 
-Mutating hooks run **before** validation so hooks can populate default values, compute derived fields, or normalize inputs before constraints are checked.
+Mutating hooks always run **before** validation so that a hook can populate default values, compute derived fields, or normalize inputs before any constraint check. Validation then sees the final document that will actually be persisted.
 
 ### Insert
 
@@ -1846,9 +2619,20 @@ BeforeUpdate() -> BeforeSave() -> <tag validation> -> Validate() -> [write to DB
 BeforeDelete() -> [delete from DB] -> AfterDelete()
 ```
 
+### Soft-Delete
+
+When a `SoftDelete`-embedding document is deleted without `HardDelete()`, the soft-only hook pair nests inside the general Delete pair:
+
+```
+BeforeDelete() -> BeforeSoftDelete() -> [write soft-delete] -> AfterSoftDelete() -> AfterDelete()
+```
+
+`BeforeSoftDelete` and `AfterSoftDelete` do not fire on `HardDelete()` — use them for audit-log side effects that should only run when the document remains in storage.
+
 If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
 
-This matches ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state.
+!!! note
+    Tag validation (configured via `validate.WithValidation()`) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
 
 ## Example: Article with Hooks
 
@@ -1862,6 +2646,7 @@ type Article struct {
 }
 
 // BeforeSave runs on both Insert and Update.
+// Derive the slug and word count from the current field values.
 func (a *Article) BeforeSave(ctx context.Context) error {
     a.Slug = slugify(a.Title)
     a.WordCount = len(strings.Fields(a.Body))
@@ -1880,6 +2665,44 @@ func (a *Article) Validate() error {
 }
 ```
 
+Usage:
+
+```go
+article := &Article{
+    Title: "Getting Started with Den",
+    Body:  "Den is an ODM for Go...",
+}
+
+err := den.Insert(ctx, db, article)
+// 1. BeforeInsert() -- not implemented, skipped
+// 2. BeforeSave() -- sets slug="getting-started-with-den", word_count=6
+// 3. Validate() -- checks title and body are non-empty (sees the final document)
+// 4. Write to database
+// 5. AfterInsert() -- not implemented, skipped
+// 6. AfterSave() -- not implemented, skipped
+```
+
+### Defaulting before validation
+
+Because mutating hooks run before validation, you can use `BeforeInsert` to populate a default value for a field that validation requires:
+
+```go
+type Page struct {
+    document.Base
+    Title string `json:"title"`
+    Slug  string `json:"slug" validate:"required"`
+}
+
+func (p *Page) BeforeInsert(ctx context.Context) error {
+    if p.Slug == "" {
+        p.Slug = slugify(p.Title)
+    }
+    return nil
+}
+```
+
+A `Page` can be inserted with only `Title` set — the hook populates `Slug`, then tag validation passes because `Slug` is now non-empty.
+
 ## Aborting an Operation
 
 Return an error from any `Before*` hook to prevent the write:
@@ -1893,6 +2716,12 @@ func (a *Article) BeforeDelete(ctx context.Context) error {
 }
 ```
 
+```go
+err := den.Delete(ctx, db, article)
+// err: "cannot delete a protected article"
+// The document remains in the database.
+```
+
 ## Hooks and Transactions
 
 All hooks run within the same database transaction as the operation. This means:
@@ -1901,7 +2730,19 @@ All hooks run within the same database transaction as the operation. This means:
 - An `AfterInserter` that fails causes the entire insert (including the document write) to roll back.
 - Inside `RunInTransaction`, hooks execute within the outer transaction.
 
-Avoid performing long-running or external operations (HTTP calls, file I/O) inside hooks. Hooks hold the database transaction open for their entire duration. On SQLite, this blocks all other writers.
+```go
+err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    // Both inserts (and their hooks) share the same transaction.
+    // If the second insert's Validate() fails, both are rolled back.
+    if err := den.Insert(ctx, tx, article1); err != nil {
+        return err
+    }
+    return den.Insert(ctx, tx, article2)
+})
+```
+
+!!! warning
+    Avoid performing long-running or external operations (HTTP calls, file I/O) inside hooks. Hooks hold the database transaction open for their entire duration. On SQLite, this blocks all other writers.
 
 ---
 
@@ -1954,15 +2795,17 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
-`IncludeDeleted()` is a QuerySet modifier and only affects reads driven by `den.NewQuery`. For `FindOneAndUpdate` and `FindOneAndUpsert`, use the `den.IncludeSoftDeleted()` CRUDOption to match soft-deleted rows during the atomic lookup step.
+!!! note "QuerySet vs. CRUDOption"
+    `IncludeDeleted()` is a **QuerySet modifier** — it only affects reads driven by `den.NewQuery`. For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, use the `den.IncludeSoftDeleted()` **CRUDOption** to match soft-deleted rows during the atomic lookup step.
 
-```go
-p, err := den.FindOneAndUpdate[Product](ctx, db,
-    den.SetFields{"_deleted_at": nil},
-    []where.Condition{where.Field("sku").Eq("abc")},
-    den.IncludeSoftDeleted(),
-)
-```
+    ```go
+    // Find a soft-deleted product and bring it back
+    p, err := den.FindOneAndUpdate[Product](ctx, db,
+        den.SetFields{"_deleted_at": nil},
+        []where.Condition{where.Field("sku").Eq("abc")},
+        den.IncludeSoftDeleted(),
+    )
+    ```
 
 ## Permanent Removal
 
@@ -1972,7 +2815,10 @@ Pass `HardDelete()` as a `CRUDOption` to `Delete` to permanently remove a docume
 err := den.Delete(ctx, db, product, den.HardDelete())
 ```
 
-`HardDelete()` composes with other CRUDOptions such as `WithLinkRule(LinkDelete)`. It is irreversible — the document is permanently removed from the backend.
+`HardDelete()` composes with other CRUDOptions, so you can combine it with things like `WithLinkRule(LinkDelete)`.
+
+!!! warning
+    `HardDelete()` is irreversible. The document is permanently removed from the backend — there is no way to recover it.
 
 ## Checking Delete Status
 
@@ -1983,6 +2829,76 @@ if product.IsDeleted() {
     fmt.Println("Product was deleted at", product.DeletedAt)
 }
 ```
+
+## Audit Fields
+
+`SoftDelete` records two optional audit fields alongside `DeletedAt`:
+
+```go
+type SoftDelete struct {
+    DeletedAt    *time.Time `json:"_deleted_at,omitempty"`
+    DeletedBy    string     `json:"_deleted_by,omitempty"`
+    DeleteReason string     `json:"_delete_reason,omitempty"`
+}
+```
+
+Both default to empty — existing data stays compatible. Populate them during `Delete` via the `SoftDeleteBy` and `SoftDeleteReason` CRUDOptions:
+
+```go
+err := den.Delete(ctx, db, product,
+    den.SoftDeleteBy("usr_42"),
+    den.SoftDeleteReason("violated terms"),
+)
+```
+
+Both options are silently no-ops on the `HardDelete()` path — the row is gone, there is nowhere to store the metadata.
+
+## Soft-Only Hooks
+
+Use `BeforeSoftDeleter` and `AfterSoftDeleter` when you need side effects that should fire only when the document remains in storage (for example, appending to an audit log). The general `BeforeDelete` / `AfterDelete` hooks still fire for both soft and hard deletions:
+
+```go
+func (p *Product) BeforeSoftDelete(ctx context.Context) error {
+    return audit.Log(ctx, "soft-delete", p.ID)
+}
+```
+
+Firing order for the soft-delete path:
+
+```
+BeforeDelete -> BeforeSoftDelete -> [write] -> AfterSoftDelete -> AfterDelete
+```
+
+`HardDelete()` bypasses the soft hooks — only `BeforeDelete` and `AfterDelete` fire.
+
+## Combining with Revision Control
+
+When a soft-delete document also opts into [revision control](revision-control.md) (`UseRevision: true`), soft-delete participates in the revision chain exactly like `Update`:
+
+- `Delete` verifies the stored `_rev` against the in-memory value, assigns a fresh `_rev`, and writes atomically.
+- A concurrent writer holding the pre-delete revision sees `ErrRevisionConflict` on its next `Update` — it cannot silently clobber `DeletedAt`.
+- `IgnoreRevision()` composes with `Delete`, so callers can deliberately bypass the check when needed.
+
+```go
+type Article struct {
+    document.Base
+    document.SoftDelete
+    Title string `json:"title"`
+}
+
+func (a Article) DenSettings() den.Settings {
+    return den.Settings{UseRevision: true}
+}
+
+// Both goroutines loaded the same _rev.
+_ = den.Delete(ctx, db, a) // bumps _rev, records DeletedAt
+
+b.Title = "stale update"
+err := den.Update(ctx, db, b)
+// err == den.ErrRevisionConflict — b held the pre-delete revision
+```
+
+`HardDelete()` physically removes the row and is not subject to revision checks.
 
 ## Combining with Change Tracking
 
@@ -2000,9 +2916,12 @@ type AuditLog struct {
 
 This gives you `IsChanged`, `GetChanges`, and `Revert` alongside soft delete behavior.
 
+!!! tip
+    See the [Documents](documents.md) guide for the full list of composable embeds and example compositions.
+
 ## How It Works
 
-When Den detects a `_deleted_at` JSON field on a registered type (via reflection — regardless of whether it comes from the `SoftDelete` embed or a hand-rolled field), it:
+When Den detects that a document type has a `_deleted_at` JSON field (via reflection at registration time — regardless of whether it comes from the `SoftDelete` embed or a hand-rolled field), it:
 
 1. Rewrites `Delete()` to set `DeletedAt = time.Now()` and update the document instead of removing the row
 2. Injects an automatic `where.Field("_deleted_at").IsNil()` condition into all queries for that collection
@@ -2075,7 +2994,8 @@ changed, _ = den.IsChanged(db, p) // false
 
 `Revert` deserializes the stored snapshot back into the struct, undoing all local modifications. The name is deliberately not `Rollback` to avoid confusion with the backend transaction's `Rollback` method — `Revert` is a pure in-memory restore that has nothing to do with transactions.
 
-`den.Revert` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
+!!! warning
+    `den.Revert` returns `den.ErrNoSnapshot` if the document was never loaded from the database (e.g., a freshly constructed struct that has not been inserted or queried).
 
 ## Combining with Soft Delete
 
@@ -2090,6 +3010,9 @@ type AuditLog struct {
     Detail string `json:"detail"`
 }
 ```
+
+!!! tip
+    See the [Documents](documents.md) guide for the full list of composable embeds and example compositions.
 
 ## How It Works
 
@@ -2149,6 +3072,7 @@ p.Price = 29.99
 
 err := den.Update(ctx, db, p)
 if errors.Is(err, den.ErrRevisionConflict) {
+    // Re-read the latest version and decide how to proceed
     latest, _ := den.FindByID[Product](ctx, db, p.ID)
     latest.Price = 29.99
     err = den.Update(ctx, db, latest)
@@ -2163,14 +3087,18 @@ Use `den.IgnoreRevision()` to bypass the revision check and force-write:
 err := den.Update(ctx, db, p, den.IgnoreRevision())
 ```
 
-`IgnoreRevision()` overwrites the document regardless of concurrent modifications. Use it only when you intentionally want to discard any changes made by other processes.
+!!! warning
+    `IgnoreRevision()` overwrites the document regardless of concurrent modifications. Use it only when you intentionally want to discard any changes made by other processes.
 
 ## Pessimistic Locking with Transactions
 
-Revision control is *optimistic* -- it detects conflicts after the fact. When you need to *prevent* conflicts entirely, combine transactions with revision control:
+Revision control is *optimistic* — it detects conflicts after the fact. When you need to *prevent* conflicts entirely, combine transactions with revision control for a pessimistic locking pattern:
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+    // Read the document within the transaction.
+    // SQLite: the IMMEDIATE transaction already holds an exclusive write lock.
+    // PostgreSQL: the transaction provides a consistent snapshot.
     p, err := den.FindByID[Product](ctx, tx, id)
     if err != nil {
         return err
@@ -2178,9 +3106,32 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
     p.Price = 29.99
 
+    // The revision check ensures no one modified the document
+    // between our read and this write.
     return den.Update(ctx, tx, p)
 })
 ```
+
+If the revision check fails, the transaction rolls back and you can retry:
+
+```go
+for range 3 {
+    err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+        p, err := den.FindByID[Product](ctx, tx, id)
+        if err != nil {
+            return err
+        }
+        p.Price = 29.99
+        return den.Update(ctx, tx, p)
+    })
+    if !errors.Is(err, den.ErrRevisionConflict) {
+        break
+    }
+}
+```
+
+!!! tip
+    On SQLite, transactions use `_txlock(immediate)`, which serializes all writers. This means the read-modify-write cycle above is already exclusive — revision conflicts are unlikely but still caught as a safety net. On PostgreSQL (READ COMMITTED), concurrent transactions can modify the same row, making the revision check essential.
 
 ## When to Use Revision Control
 
@@ -2190,7 +3141,12 @@ Revision control is useful when:
 - Silent data loss from concurrent writes is unacceptable
 - You need application-level conflict detection independent of the backend's transaction isolation
 
-Revision control is orthogonal to transactions. Transactions provide isolation at the database level. Revision control provides conflict detection at the application level, across separate request cycles.
+!!! note
+    Revision control is orthogonal to transactions. Transactions provide isolation at the database level. Revision control provides conflict detection at the application level, across separate request cycles.
+
+## Interaction with Soft Delete
+
+`Delete` on a document that opts into both `SoftDelete` and `UseRevision` participates in the revision chain: the stored `_rev` is verified, a fresh `_rev` is assigned, and the write is atomic. A concurrent writer holding the pre-delete revision therefore sees `ErrRevisionConflict` on its next `Update` instead of silently clobbering `DeletedAt`. `IgnoreRevision()` opts out; `HardDelete()` removes the row outright and is not subject to the check. See [Soft Delete](soft-delete.md#combining-with-revision-control) for the full pattern.
 
 ---
 
@@ -2224,7 +3180,7 @@ The `Validate()` hook is called automatically before every `Insert` and `Update`
 
 ## Struct Tag Validation
 
-For structural validation rules, Den integrates with go-playground/validator via the `validate` package. Enable it with `validate.WithValidation()` when opening the database:
+For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. Enable it with `validate.WithValidation()` when opening the database:
 
 ```go
 import "github.com/oliverandrich/den/validate"
@@ -2244,7 +3200,8 @@ type User struct {
 }
 ```
 
-Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag validation is opt-in for backward compatibility.
+!!! note
+    Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag validation is opt-in for backward compatibility.
 
 ## Execution Order
 
@@ -2260,7 +3217,8 @@ The full order during `Insert` and `Update`:
 
 If tag validation fails, the `Validate()` hook is not called. Either step aborts the write and rolls back the transaction.
 
-This matches ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state.
+!!! note
+    This is the same pattern used by ActiveRecord, Django ORM, and SQLAlchemy: hooks first, then validation against the final state. It lets you write things like "`BeforeInsert` generates the slug from the title; tag validation then requires the slug to be non-empty" without fighting the framework.
 
 ## Error Handling
 
@@ -2284,6 +3242,36 @@ if errors.As(err, &validationErr) {
 }
 ```
 
+## Full Example
+
+```go
+type User struct {
+    document.Base
+    Username string `json:"username" den:"unique" validate:"required,min=3"`
+    Email    string `json:"email"    den:"unique" validate:"required,email"`
+    Bio      string `json:"bio"                   validate:"max=500"`
+}
+
+func (u *User) Validate() error {
+    if strings.Contains(u.Username, " ") {
+        return errors.New("username must not contain spaces")
+    }
+    return nil
+}
+```
+
+```go
+db, _ := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
+den.Register(ctx, db, &User{})
+
+user := &User{Username: "ab", Email: "invalid"}
+err := den.Insert(ctx, db, user)
+// err wraps den.ErrValidation — "ab" is too short, "invalid" is not a valid email
+```
+
+!!! tip
+    Use `validate` tags for structural constraints (required, format, length) and the `Validate()` hook for business rules that depend on multiple fields or external state.
+
 ---
 
 # Migrations
@@ -2298,7 +3286,7 @@ Documents in Den are schema-flexible: adding new fields with zero values works w
 
 ## Running Migrations at Startup
 
-Migrations do not run automatically. Call `r.Up()` after opening the database and registering document types:
+Migrations do not run automatically. You are responsible for calling `r.Up()` at the right point in your application lifecycle — typically after opening the database and registering document types:
 
 ```go
 func main() {
@@ -2310,18 +3298,26 @@ func main() {
     }
     defer db.Close()
 
+    // Register document types first
     if err := den.Register(ctx, db, &Note{}, &User{}); err != nil {
         log.Fatal(err)
     }
 
+    // Run pending migrations
     r := setupMigrations()
     if err := r.Up(ctx, db); err != nil {
         log.Fatal(err)
     }
+
+    // Application is ready
 }
 ```
 
-`r.Up()` is idempotent -- it skips migrations that have already been applied. It is safe to call on every startup.
+!!! note
+    `r.Up()` is idempotent — it skips migrations that have already been applied. It is safe to call on every startup.
+
+!!! tip "Using Burrow?"
+    If you are using Den through [Burrow](https://burrow.readthedocs.io/), migrations are handled automatically by the framework. See the [Burrow Migrations Guide](https://burrow.readthedocs.io/en/stable/guide/migrations/) for details.
 
 ## Defining Migrations
 
@@ -2335,7 +3331,7 @@ func setupMigrations() *migrate.Registry {
 
     r.Register("20250402_001_rename_name_to_title", migrate.Migration{
         Forward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[OldNote](db).Iter(ctx) {
+            for note, err := range den.NewQuery[OldNote](tx).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -2347,7 +3343,7 @@ func setupMigrations() *migrate.Registry {
             return nil
         },
         Backward: func(ctx context.Context, tx *den.Tx) error {
-            for note, err := range den.NewQuery[Note](db).Iter(ctx) {
+            for note, err := range den.NewQuery[Note](tx).Iter(ctx) {
                 if err != nil {
                     return err
                 }
@@ -2364,7 +3360,8 @@ func setupMigrations() *migrate.Registry {
 }
 ```
 
-Use a timestamp-based naming convention like `YYYYMMDD_NNN_description` for migration versions.
+!!! tip
+    Use a timestamp-based naming convention like `YYYYMMDD_NNN_description` for migration versions. This ensures consistent ordering across environments.
 
 ## Running Migrations
 
@@ -2386,17 +3383,62 @@ err := r.Down(ctx, db)
 
 ## Migration Tracking
 
-Den stores migration state in a `_den_migrations` table. Each applied migration is recorded with its version string and timestamp. `r.Up()` compares registered migrations against this log to determine which are pending.
+Den stores migration state in a single document under the `_den_migrations` collection (key `"log"`), holding a JSON array of `{Version, AppliedAt}` entries. `r.Up()` loads this log, compares it against the registered migrations, and runs the missing ones in order.
 
 ## Transaction Safety
 
-Each migration runs within a Den transaction:
+Each migration runs within a Den transaction alongside the log update:
 
-- If the migration function returns `nil`, the transaction is committed
-- If it returns an error, the transaction is rolled back and the migration is marked as failed
-- Subsequent migrations are not executed after a failure
+- If the migration function returns `nil`, the entry is appended to the log and the whole transaction commits.
+- If it returns an error, the transaction rolls back — the log is unchanged, so the migration stays pending and the next `r.Up()` will retry it from scratch.
+- `r.Up()` stops at the first failure and returns; any remaining pending migrations stay pending until the failing one succeeds.
 
-If a migration fails, fix the issue and re-run `r.Up()`. Den will retry only the failed and pending migrations.
+## Observability
+
+The Registry emits structured `slog` events for every migration lifecycle step. By default they go through `slog.Default()`; pass `migrate.WithLogger(...)` to route them through a dedicated logger:
+
+```go
+logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+r := migrate.NewRegistry(migrate.WithLogger(logger))
+```
+
+Events:
+
+| Message                | Level   | Attributes                                           |
+|------------------------|---------|------------------------------------------------------|
+| `migration_start`      | `INFO`  | `version`, `direction` (`up` or `down`)              |
+| `migration_success`    | `INFO`  | `version`, `direction`, `duration_ms`                |
+| `migration_failure`    | `ERROR` | `version`, `direction`, `duration_ms`, `error`       |
+| `ensure_table_failure` | `ERROR` | `error` — fires at most once per Registry (sticky)   |
+
+The `error` field is attached as a string for structured-log pipelines. The original error value still bubbles up the call chain — logging it here does not swallow it.
+
+!!! note
+    Passing a nil logger via `WithLogger` falls back to `slog.Default()` — keeps configs honest when a logger field is optional.
+
+!!! warning
+    If a migration fails, fix the issue and re-run `r.Up()`. Den will retry only the failed and pending migrations.
+
+## Streaming with Iter()
+
+For migrations that touch many documents, use `Iter()` to stream documents without loading them all into memory:
+
+```go
+r.Register("20250410_001_normalize_prices", migrate.Migration{
+    Forward: func(ctx context.Context, tx *den.Tx) error {
+        for product, err := range den.NewQuery[Product](tx).Iter(ctx) {
+            if err != nil {
+                return err
+            }
+            product.Price = math.Round(product.Price*100) / 100
+            if err := den.Update(ctx, tx, product); err != nil {
+                return err
+            }
+        }
+        return nil
+    },
+})
+```
 
 ## Error Handling
 
@@ -2444,7 +3486,7 @@ func TestProductInsert(t *testing.T) {
 }
 ```
 
-`dentest.MustOpen` creates a real SQLite database file inside `t.TempDir()` and registers `t.Cleanup` to close it automatically.
+`dentest.MustOpen` creates a real SQLite database file inside `t.TempDir()` and registers `t.Cleanup` to close it automatically. No manual teardown needed.
 
 ## PostgreSQL Test Helper
 
@@ -2466,11 +3508,14 @@ func TestProductInsertPG(t *testing.T) {
 }
 ```
 
-`MustOpenPostgres` does not create a fresh schema — it connects to the database you supply. On `t.Cleanup`, every collection registered through the helper is dropped and the connection is closed. Data in unrelated collections is untouched.
+!!! note "Cleanup behavior"
+    `MustOpenPostgres` does not create a fresh schema — it connects to the database you supply. On `t.Cleanup`, it drops every collection that was registered through the helper (by name) and then closes the connection. Data in unrelated collections is untouched.
 
-Use `dentest.PostgresURL()` to pull the DSN from the `DEN_POSTGRES_URL` environment variable (default `postgres://localhost/den_test`) to keep tests portable between developer machines and CI.
+!!! tip "Picking a connection string"
+    Use `dentest.PostgresURL()` to pull the DSN from the `DEN_POSTGRES_URL` environment variable (default `postgres://localhost/den_test`). This keeps tests portable between developer machines and CI.
 
-Parallel tests against the same database must register disjoint document types, or each test must use its own database — the helper does not sandbox collections.
+!!! warning "Parallel tests and collection names"
+    Tests that run in parallel against the same database must register disjoint document types, or each test must use its own database. Two tests registering `Product` against the same database will race on the shared collection; the helper does not sandbox them.
 
 ## Complete Test Example
 
@@ -2510,7 +3555,8 @@ func TestProductLifecycle(t *testing.T) {
 }
 ```
 
-Use testify for assertions. `require` aborts the test on failure (use for setup steps), `assert` records the failure and continues (use for verification steps).
+!!! tip
+    Use [testify](https://github.com/stretchr/testify) for assertions. `require` aborts the test on failure (use for setup steps), `assert` records the failure and continues (use for verification steps).
 
 ---
 
@@ -2520,25 +3566,31 @@ Complete reference of all public functions in the `den` package, organized by ca
 
 Module: `github.com/oliverandrich/den`
 
+---
+
 ## Database
 
 | Function | Signature | Description |
 |---|---|---|
-| `Open` | `Open(ctx context.Context, b Backend, opts ...Option) (*DB, error)` | Open a database around an existing `Backend`. The context governs setup work triggered by options |
-| `OpenURL` | `OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import). The context governs connection dialing and any option-driven setup |
+| `Open` | `Open(ctx context.Context, b Backend, opts ...Option) (*DB, error)` | Open a database around an existing `Backend`. The context governs any setup work triggered by options (for example `WithTypes`) |
+| `OpenURL` | `OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import). The context governs connection dialing and any setup work triggered by options |
 | `Register` | `Register(ctx context.Context, db *DB, docs ...any) error` | Register document types; creates collections and indexes |
-| `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Registration errors abort Open and are returned as its error |
+| `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
 
+---
+
 ## CRUD
+
+Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interface satisfied by both `*DB` (operating outside a transaction) and `*Tx` (operating inside `RunInTransaction`). Pass whichever you have.
 
 ### Insert
 
 | Function | Signature | Description |
 |---|---|---|
 | `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Insert multiple documents in a single batch. Honors `PreValidate()` and `ContinueOnError()` |
+| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction. Honors `PreValidate()` and `ContinueOnError()` |
 
 ### Read
 
@@ -2561,21 +3613,31 @@ Module: `github.com/oliverandrich/den`
 | Function | Signature | Description |
 |---|---|---|
 | `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
-| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions |
-| `HardDelete` | `HardDelete() CRUDOption` | `Delete` option that permanently removes a soft-deleteable document. Use as `Delete(ctx, scope, doc, den.HardDelete())` |
+| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
+| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
 | `IncludeSoftDeleted` | `IncludeSoftDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match |
+| `SoftDeleteBy` | `SoftDeleteBy(actor string) CRUDOption` | CRUDOption for `Delete` that records an actor on the document's `DeletedBy` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
+| `SoftDeleteReason` | `SoftDeleteReason(reason string) CRUDOption` | CRUDOption for `Delete` that records a free-form reason on the document's `DeleteReason` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
 | `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire once per document (pre-pass only); combining with `WithLinkRule(LinkWrite)` disables the optimization and hooks fire twice |
 | `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
+
+---
 
 ## Query
 
 ### Creating a Query
 
 ```go
-q := den.NewQuery[T](db, conditions...)
+q := den.NewQuery[T](scope, conditions...) // scope is *DB or *Tx
 ```
 
+| Function | Signature | Description |
+|---|---|---|
+| `NewQuery[T]` | `NewQuery[T](scope Scope, conditions ...where.Condition) QuerySet[T]` | Create a new chainable query for type T. Scope is `*DB` (outside a transaction) or `*Tx` (inside one). The context is supplied later by the terminal method, so one `QuerySet` can be reused across contexts |
+
 ### Chainable Methods
+
+All chainable methods return `QuerySet[T]` and can be composed in any order.
 
 | Method | Signature | Description |
 |---|---|---|
@@ -2588,10 +3650,13 @@ q := den.NewQuery[T](db, conditions...)
 | `WithFetchLinks` | `WithFetchLinks() QuerySet[T]` | Eagerly resolve all `Link[T]` fields on results |
 | `WithNestingDepth` | `WithNestingDepth(n int) QuerySet[T]` | Override max link-fetching depth for this query |
 | `IncludeDeleted` | `IncludeDeleted() QuerySet[T]` | Include soft-deleted documents in results |
+| `ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquire row-level locks on every matching row. Requires `*Tx` scope — terminal methods return `ErrLockRequiresTransaction` otherwise |
 
 ### Terminal Methods
 
-Every terminal takes `ctx context.Context` as its first argument so the same `QuerySet` can be executed against different contexts.
+Terminal methods execute the query and return results.
+
+Every terminal takes `ctx context.Context` as its first argument, so the same `QuerySet` can be executed against different contexts (different timeouts, different cancellation scopes).
 
 | Method | Signature | Description |
 |---|---|---|
@@ -2604,7 +3669,11 @@ Every terminal takes `ctx context.Context` as its first argument so the same `Qu
 | `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update every matching document and return the count. Fail-fast: any per-row error rolls back the transaction and returns `(0, err)`. Field names are validated before the tx opens |
 | `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
+---
+
 ## Aggregation
+
+Aggregation methods are chained onto a `QuerySet[T]`.
 
 ### Scalar Aggregations
 
@@ -2619,9 +3688,22 @@ Every terminal takes `ctx context.Context` as its first argument so the same `Qu
 
 | Method | Signature | Description |
 |---|---|---|
-| `GroupBy` | `GroupBy(field string) *GroupByBuilder[T]` | Group results by a field |
+| `GroupBy` | `GroupBy(fields ...string) GroupByBuilder[T]` | Group results by one or more fields |
 | `Into` | `Into(ctx context.Context, dest any) error` | Execute grouped aggregation into a target slice of structs |
 | `Project` | `Project(ctx context.Context, dest any) error` | Project query results into a struct with a subset of fields |
+
+```go
+// GroupBy example
+type Stats struct {
+    Category string  `den:"group_key"`
+    AvgPrice float64 `den:"avg:price"`
+    Count    int64   `den:"count"`
+}
+
+err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
+```
+
+---
 
 ## Relations
 
@@ -2641,6 +3723,8 @@ Every terminal takes `ctx context.Context` as its first argument so the same `Qu
 | `LinkWrite` | `1` | Cascade writes to all linked documents (insert new, update existing) |
 | `LinkDelete` | `2` | Cascade deletion to all linked documents |
 
+---
+
 ## Change Tracking
 
 Requires embedding `document.Tracked` alongside `document.Base`.
@@ -2649,21 +3733,27 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 |---|---|---|
 | `IsChanged[T]` | `IsChanged[T](db *DB, doc *T) (bool, error)` | Check whether the document has been modified since last load/save |
 | `GetChanges[T]` | `GetChanges[T](db *DB, doc *T) (map[string]FieldChange, error)` | Get a map of changed fields with before/after values |
-| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if no snapshot exists. Named `Revert` (not `Rollback`) to avoid collision with the backend transaction's Rollback method |
+| `Revert` | `Revert[T](db *DB, doc *T) error` | Restore the document to its last-saved state by decoding the stored snapshot over its fields. Returns `ErrNoSnapshot` if the document was never loaded or does not embed `Tracked`. Named `Revert` (not `Rollback`) to avoid name collision with the backend transaction's `Rollback` method |
+
+---
 
 ## Transactions
 
-Standard CRUD (`Insert`, `Update`, `Delete`, `FindByID`, `FindByIDs`, `FindOneAndUpdate`, `Refresh`, `InsertMany`, `DeleteMany`, `FetchLink`, `FetchAllLinks`, `BackLinks`) accept a `Scope` parameter satisfied by both `*DB` and `*Tx` — pass whichever you have. The APIs below are the transaction-only ones because their semantics are tied to transaction lifetime.
+`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Insert`/`Update`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
 
 | Function | Signature | Description |
 |---|---|---|
 | `RunInTransaction` | `RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error` | Execute a function within a transaction. Commits on nil return, rolls back on error |
-| `LockByID[T]` | `LockByID[T](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (PostgreSQL `FOR UPDATE`; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
-| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` / `QuerySet.ForUpdate` modifier: skip rows locked by other transactions (PostgreSQL `FOR UPDATE SKIP LOCKED`). Queue-consumer primitive |
-| `NoWait` | `NoWait() LockOption` | `LockByID` / `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately on contention (PostgreSQL `FOR UPDATE NOWAIT`). Mutually exclusive with `SkipLocked` |
-| `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquire row-level locks on every matching row in a single statement. Requires `*Tx` scope — terminal methods return `ErrLockRequiresTransaction` otherwise |
-| `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
-| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log). Application code should not use this |
+| `LockByID[T]` | `LockByID[T](ctx context.Context, tx *Tx, id string, opts ...LockOption) (*T, error)` | Find a document by ID and acquire a row-level lock (`SELECT ... FOR UPDATE` on PostgreSQL; no-op on SQLite). Held until the transaction commits or rolls back. Optional `SkipLocked()` / `NoWait()` modifiers |
+| `SkipLocked` | `SkipLocked() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrNotFound` (or skip locked rows in multi-row queries) instead of blocking. PostgreSQL `FOR UPDATE SKIP LOCKED`. Queue-consumer primitive |
+| `NoWait` | `NoWait() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
+| `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquires a row-level lock on every matching row in one statement. Only valid when the QuerySet is bound to a `*Tx`; terminal methods return `ErrLockRequiresTransaction` if the scope is a `*DB` |
+| `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
+| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Insert` / `Update` / `Delete` / `FindByID` / `NewQuery` |
+
+> **Note:** Standard CRUD operations (`Insert`, `Update`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
+
+---
 
 ## Metadata
 
@@ -2671,6 +3761,102 @@ Standard CRUD (`Insert`, `Update`, `Delete`, `FindByID`, `FindByIDs`, `FindOneAn
 |---|---|---|
 | `Meta[T]` | `Meta[T](db *DB) (CollectionMeta, error)` | Get metadata for a registered collection (fields, indexes, links, settings) |
 | `Collections` | `Collections(db *DB) []string` | List all registered collection names |
+
+---
+
+## Attachments & Storage
+
+Types and functions for embedding file references in documents and
+swapping the byte-storage backend. See the [Attachments & Storage
+guide](../guide/attachments.md) for the full walkthrough.
+
+### Option and Accessor
+
+| Function | Signature | Description |
+|---|---|---|
+| `WithStorage` | `WithStorage(s Storage) Option` | `Open`/`OpenURL` option that installs a Storage on the DB. Required for the hard-delete attachment cascade to actually drop bytes |
+| `db.Storage` | `(db *DB) Storage() Storage` | Accessor for the configured Storage, or `nil` if none was installed |
+
+### Storage Interface
+
+```go
+type Storage interface {
+    Store(ctx context.Context, r io.Reader, ext, mime string) (document.Attachment, error)
+    Open(ctx context.Context, a document.Attachment) (io.ReadCloser, error)
+    Delete(ctx context.Context, a document.Attachment) error
+    URL(a document.Attachment) string
+}
+```
+
+Implementations must be content-addressed enough that two calls with
+identical bytes resolve to the same `StoragePath`. Delete must be
+idempotent on missing paths.
+
+### Storage Registry
+
+Located in `github.com/oliverandrich/den/storage`. The root package
+holds the interface + a scheme-based opener registry; concrete
+backends live in sub-packages that self-register on import.
+
+| Function | Signature | Description |
+|---|---|---|
+| `OpenURL` | `OpenURL(dsn, urlPrefix string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
+| `Register` | `Register(scheme string, opener OpenerFunc)` | Registers an opener for a scheme. Typically called from a backend sub-package's `init()`. Panics on duplicate registration |
+| `OpenerFunc` | `type OpenerFunc func(location, urlPrefix string) (den.Storage, error)` | Factory signature for backend openers |
+| `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Storage.Store` on a zero-byte reader |
+
+### Filesystem Backend (`storage/file`)
+
+Located in `github.com/oliverandrich/den/storage/file`. Reference
+backend that stores bytes on the local filesystem. Importing the
+package for its side effect registers the `file://` scheme with
+`storage.OpenURL`.
+
+| Function | Signature | Description |
+|---|---|---|
+| `New` | `New(rootPath, urlPrefix string) (*Storage, error)` | Constructs a filesystem-backed `den.Storage`. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
+| `fs.Close` | `(fs *Storage) Close() error` | Release the underlying file descriptor held for the storage root |
+| `fs.URLPrefix` | `(fs *Storage) URLPrefix() string` | Returns the HTTP path prefix the storage serves its files under. HTTP-layer packages type-assert on a local `interface{ URLPrefix() string }` to decide whether to register a serving handler; remote backends (S3/GCS) deliberately do not implement this |
+
+### Attachment Document Embed
+
+Located in the `document` sub-package (`github.com/oliverandrich/den/document`).
+
+```go
+type Attachment struct {
+    StoragePath string `json:"storage_path"     validate:"required,max=1024"`
+    Mime        string `json:"mime"             validate:"required,max=100"`
+    Size        int64  `json:"size"             validate:"required,min=1"`
+    SHA256      string `json:"sha256,omitempty" validate:"omitempty,len=64"`
+}
+```
+
+| Method | Signature | Description |
+|---|---|---|
+| `IsZero` | `(a Attachment) IsZero() bool` | Reports whether the attachment is empty (no `StoragePath` and no `Size`) |
+
+Embed alongside `document.Base` for IS-a-file documents, or declare as
+named fields for HAS-files documents. `den.Delete(..., den.HardDelete())`
+walks the document via reflection and asks the configured Storage to
+delete every non-zero Attachment it finds.
+
+---
+
+## Index Lifecycle
+
+| Function | Signature | Description |
+|---|---|---|
+| `DropStaleIndexes` | `DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (DropStaleResult, error)` | Drop indexes previously created by `Register()` that no longer correspond to any `IndexDefinition`. Managed indexes (GIN, FTS) are never touched |
+| `DryRun` | `DryRun() DropStaleOption` | Option for `DropStaleIndexes`; reports the plan without mutating the database |
+
+`DropStaleResult` contains two slices:
+
+- `Dropped []StaleIndex` — indexes that were (or would be, under DryRun) removed
+- `Kept []StaleIndex` — recorded indexes that are still referenced by a current `IndexDefinition`
+
+`StaleIndex` has fields `Collection`, `Name`, `Fields []string`, `Unique bool`.
+
+---
 
 ## Migrations
 
@@ -2685,6 +3871,8 @@ Located in the `migrate` sub-package (`github.com/oliverandrich/den/migrate`).
 | `Down` | `(r *Registry) Down(ctx context.Context, db *den.DB) error` | Roll back all migrations |
 | `DownOne` | `(r *Registry) DownOne(ctx context.Context, db *den.DB) error` | Roll back one migration |
 
+---
+
 ## Testing Helpers
 
 Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
@@ -2694,12 +3882,15 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 | `MustOpen` | `MustOpen(t testing.TB, docs ...any) *den.DB` | Open a file-backed SQLite database in a temp directory; auto-registers docs and cleans up after test |
 | `MustOpenPostgres` | `MustOpenPostgres(t testing.TB, connStr string, docs ...any) *den.DB` | Open a PostgreSQL database for testing; auto-registers docs |
 
+---
+
 ## Key Types
 
 | Type | Description |
 |---|---|
-| `DB` | Database handle; holds the backend and collection registry |
-| `Tx` | Transaction handle; wraps a backend transaction |
+| `DB` | Database handle; holds the backend and collection registry. Satisfies `Scope` |
+| `Tx` | Transaction handle; wraps a backend transaction. Satisfies `Scope` |
+| `Scope` | Sealed interface satisfied by `*DB` and `*Tx`. Parameter type for all CRUD entry points so the same function works inside and outside a transaction |
 | `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
 | `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate`, `FindOneAndUpsert`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
 | `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |
@@ -2719,6 +3910,8 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 Complete reference of all query operators in the `where` sub-package.
 
 Import: `github.com/oliverandrich/den/where`
+
+---
 
 ## Usage
 
@@ -2742,62 +3935,68 @@ results, err := den.NewQuery[Product](db,
 ).All(ctx)
 ```
 
+---
+
 ## Comparison Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `Eq` | `Field("name").Eq("Widget")` | Equal to value |
-| `Ne` | `Field("status").Ne("deleted")` | Not equal to value |
-| `Gt` | `Field("price").Gt(10)` | Greater than value |
-| `Gte` | `Field("price").Gte(10)` | Greater than or equal |
-| `Lt` | `Field("price").Lt(100)` | Less than value |
-| `Lte` | `Field("price").Lte(100)` | Less than or equal |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `Eq` | `Field("name").Eq("Widget")` | Equal to value | `json_extract(data, '$.name') = ?` | `data->>'name' = $1` |
+| `Ne` | `Field("status").Ne("deleted")` | Not equal to value | `json_extract(data, '$.status') != ?` | `data->>'status' != $1` |
+| `Gt` | `Field("price").Gt(10)` | Greater than value | `json_extract(data, '$.price') > ?` | `(data->>'price')::float > $1` |
+| `Gte` | `Field("price").Gte(10)` | Greater than or equal | `json_extract(data, '$.price') >= ?` | `(data->>'price')::float >= $1` |
+| `Lt` | `Field("price").Lt(100)` | Less than value | `json_extract(data, '$.price') < ?` | `(data->>'price')::float < $1` |
+| `Lte` | `Field("price").Lte(100)` | Less than or equal | `json_extract(data, '$.price') <= ?` | `(data->>'price')::float <= $1` |
 
 ## Null Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `IsNil` | `Field("read_at").IsNil()` | Field is null / not set |
-| `IsNotNil` | `Field("read_at").IsNotNil()` | Field is not null |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `IsNil` | `Field("read_at").IsNil()` | Field is null / not set | `json_extract(data, '$.read_at') IS NULL` | `data->>'read_at' IS NULL` |
+| `IsNotNil` | `Field("read_at").IsNotNil()` | Field is not null | `json_extract(data, '$.read_at') IS NOT NULL` | `data->>'read_at' IS NOT NULL` |
 
 ## Set Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `In` | `Field("status").In("active", "pending")` | Value is one of the given values |
-| `NotIn` | `Field("status").NotIn("deleted", "banned")` | Value is not one of the given values |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `In` | `Field("status").In("active", "pending")` | Value is one of the given values | `json_extract(data, '$.status') IN (?, ?)` | `data->>'status' = ANY($1)` |
+| `NotIn` | `Field("status").NotIn("deleted", "banned")` | Value is not one of the given values | `json_extract(data, '$.status') NOT IN (?, ?)` | `data->>'status' != ALL($1)` |
 
 ## Array Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `Contains` | `Field("tags").Contains("golang")` | Array contains the value |
-| `ContainsAny` | `Field("tags").ContainsAny("go", "rust")` | Array contains any of the values |
-| `ContainsAll` | `Field("tags").ContainsAll("go", "web")` | Array contains all of the values |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `Contains` | `Field("tags").Contains("golang")` | Array contains the value | `EXISTS (SELECT 1 FROM json_each(...) WHERE value = ?)` | `data->'tags' @> '["golang"]'::jsonb` |
+| `ContainsAny` | `Field("tags").ContainsAny("go", "rust")` | Array contains any of the values | Multiple `EXISTS` with `OR` | `data->'tags' ?| array[...]` |
+| `ContainsAll` | `Field("tags").ContainsAll("go", "web")` | Array contains all of the values | Multiple `EXISTS` with `AND` | `data->'tags' @> '[...]'::jsonb` |
 
 ## Map / Object Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `HasKey` | `Field("metadata").HasKey("color")` | Map/object contains the given key |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `HasKey` | `Field("metadata").HasKey("color")` | Map/object contains the given key | `json_extract(data, '$.metadata.color') IS NOT NULL` | `data->'metadata' ? 'color'` |
 
 ## String Operators
 
-| Operator | Example | Description |
-|---|---|---|
-| `StringContains` | `Field("name").StringContains("alpha")` | Field contains the substring |
-| `StartsWith` | `Field("name").StartsWith("Al")` | Field starts with the prefix |
-| `EndsWith` | `Field("name").EndsWith("ta")` | Field ends with the suffix |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `StringContains` | `Field("name").StringContains("alpha")` | Field contains the substring | `json_extract(data, '$.name') LIKE '%alpha%' ESCAPE '\'` | `data->>'name' ILIKE '%alpha%'` |
+| `StartsWith` | `Field("name").StartsWith("Al")` | Field starts with the prefix | `json_extract(data, '$.name') LIKE 'Al%' ESCAPE '\'` | `data->>'name' ILIKE 'Al%'` |
+| `EndsWith` | `Field("name").EndsWith("ta")` | Field ends with the suffix | `json_extract(data, '$.name') LIKE '%ta' ESCAPE '\'` | `data->>'name' ILIKE '%ta'` |
 
-String operators automatically escape special SQL characters (`%`, `_`, `\`) in the search term.
+> **Note:** String operators automatically escape special SQL characters (`%`, `_`, `\`) in the search term.
 
 ## Pattern Matching
 
-| Operator | Example | Description |
-|---|---|---|
-| `RegExp` | `Field("name").RegExp("^W.+t$")` | Match field against a regular expression |
+| Operator | Example | Description | SQLite | PostgreSQL |
+|---|---|---|---|---|
+| `RegExp` | `Field("name").RegExp("^W.+t$")` | Match field against a regular expression | `json_extract(data, '$.name') REGEXP ?` | `data->>'name' ~ $1` |
+
+---
 
 ## Logical Operators
+
+Logical operators compose multiple conditions.
 
 | Operator | Example | Description |
 |---|---|---|
@@ -2805,15 +4004,56 @@ String operators automatically escape special SQL characters (`%`, `_`, `\`) in 
 | `Or` | `where.Or(cond1, cond2, ...)` | At least one condition must match |
 | `Not` | `where.Not(cond)` | Negate a condition |
 
-Multiple conditions passed to `NewQuery` are implicitly combined with `AND`. Use `where.Or()` explicitly when you need disjunction.
+### Examples
+
+```go
+// AND: price between 10 and 100
+results, err := den.NewQuery[Product](db,
+    where.And(
+        where.Field("price").Gt(10),
+        where.Field("price").Lt(100),
+    ),
+).All(ctx)
+
+// OR: active or featured
+results, err := den.NewQuery[Product](db,
+    where.Or(
+        where.Field("status").Eq("active"),
+        where.Field("featured").Eq(true),
+    ),
+).All(ctx)
+
+// NOT: exclude deleted
+results, err := den.NewQuery[Product](db,
+    where.Not(where.Field("deleted").Eq(true)),
+).All(ctx)
+
+// Combined
+results, err := den.NewQuery[Product](db,
+    where.And(
+        where.Field("price").Gte(10),
+        where.Or(
+            where.Field("category").Eq("Electronics"),
+            where.Field("featured").Eq(true),
+        ),
+    ),
+).All(ctx)
+```
+
+---
 
 ## Nested Fields
 
 Use dot notation to access nested fields in embedded objects:
 
 ```go
+// Object field
 where.Field("address.city").Eq("Berlin")
+
+// Deeply nested
 where.Field("category.parent.name").Eq("Root")
+
+// Array index
 where.Field("tags.0").Eq("featured")
 ```
 
@@ -2825,32 +4065,39 @@ All Den errors are typed sentinel values that support `errors.Is()` and `errors.
 
 Import: `github.com/oliverandrich/den`
 
+---
+
 ## Error Reference
 
 | Error | Description | When Returned |
 |---|---|---|
-| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh` when no matching document exists |
+| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh`, `Update`, `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
 | `ErrMultipleMatches` | A single-document lookup matched more than one row | `FindOneAndUpdate`, `FindOneAndUpsert` when conditions match more than one document. The conditions must identify the document uniquely |
 | `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
-| `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision |
+| `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision (another process modified it) |
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
-| `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when `Validate()` or struct tag validation fails |
+| `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when the document's `Validate()` method or struct tag validation fails |
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
-| `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails |
-| `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only) |
-| `ErrDeadlock` | PostgreSQL reported a deadlock (SQLSTATE 40P01) | Any operation when the server cancels the query with a deadlock. Callers retry the transaction |
-| `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized (SQLSTATE 40001) | PostgreSQL under stricter isolation |
-| `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend has no `FTSProvider` |
-| `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` against a `*Tx` |
-| `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
-| `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel |
+| `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
+| `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
+| `ErrDeadlock` | PostgreSQL reported a deadlock between transactions | Any operation on PostgreSQL when the server cancels the query with SQLSTATE `40P01`. Callers can `errors.Is(err, den.ErrDeadlock)` and retry the transaction. SQLite never returns this |
+| `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized | PostgreSQL SQLSTATE `40001`. Becomes relevant once callers opt into stricter isolation levels; standard Den operations using the default isolation level rarely see this |
+| `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend does not provide an `FTSProvider` implementation |
+| `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
+| `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` called against a `*Tx` (the caller's transaction cannot be split into per-document transactions) |
+| `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions were combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
+| `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
+| `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel. Returned only when at least one document failed; nil otherwise |
+
+---
 
 ## Usage with errors.Is
 
 ```go
 product, err := den.FindByID[Product](ctx, db, "nonexistent-id")
 if errors.Is(err, den.ErrNotFound) {
+    // handle missing document
     log.Println("product not found")
 }
 ```
@@ -2858,6 +4105,7 @@ if errors.Is(err, den.ErrNotFound) {
 ```go
 err := den.Insert(ctx, db, &product)
 if errors.Is(err, den.ErrDuplicate) {
+    // handle unique constraint violation
     log.Println("a product with that SKU already exists")
 }
 ```
@@ -2865,13 +4113,16 @@ if errors.Is(err, den.ErrDuplicate) {
 ```go
 err := den.Update(ctx, db, &product)
 if errors.Is(err, den.ErrRevisionConflict) {
+    // re-read and retry, or inform the user
     log.Println("document was modified by another process")
 }
 ```
 
+---
+
 ## Validation Errors
 
-When using the `validate` sub-package, validation errors can be unwrapped to access per-field details:
+When using the `validate` sub-package (`github.com/oliverandrich/den/validate`), validation errors can be unwrapped to access per-field details:
 
 ```go
 err := den.Insert(ctx, db, &user)
@@ -2885,13 +4136,17 @@ if errors.Is(err, den.ErrValidation) {
 }
 ```
 
+---
+
 ## Error Wrapping
 
 All Den errors can be wrapped with additional context. The original sentinel remains matchable via `errors.Is()`:
 
 ```go
+// Inside Den, errors are wrapped like this:
 return fmt.Errorf("insert into %s: %w", collection, den.ErrDuplicate)
 
+// Your code can still match:
 errors.Is(err, den.ErrDuplicate) // true
 ```
 
@@ -2901,6 +4156,8 @@ errors.Is(err, den.ErrDuplicate) // true
 
 Den uses two struct tags: `json` for serialization and `den` for index and metadata options. An optional `validate` tag integrates with `go-playground/validator`.
 
+---
+
 ## Tag Overview
 
 | Tag | Purpose | Example |
@@ -2909,40 +4166,133 @@ Den uses two struct tags: `json` for serialization and `den` for index and metad
 | `den` | Den-specific options: indexing, uniqueness, FTS, omitempty | `den:"index"` |
 | `validate` | Struct tag validation rules (requires `validate.WithValidation()`) | `validate:"required,email"` |
 
+---
+
 ## The `json` Tag
 
-The `json` tag controls how a field is serialized to JSON. Standard Go `encoding/json` tag.
+The `json` tag controls how a field is serialized to JSON. This is the standard Go `encoding/json` tag.
 
-- The value becomes the field's key in the stored JSONB document
-- Use `json:"field,omitempty"` to omit zero-value fields
-- Use `json:"-"` to exclude a field from serialization
+```go
+type Product struct {
+    document.Base
+    Name  string  `json:"name"`
+    Price float64 `json:"price"`
+    SKU   string  `json:"sku"`
+}
+```
+
+- The `json` tag value becomes the field's key in the stored JSONB document
+- Use `json:"field,omitempty"` to omit zero-value fields from JSON (standard Go behavior)
+- Use `json:"-"` to exclude a field from serialization entirely
+
+---
 
 ## The `den` Tag
 
-The `den` tag carries Den-specific metadata. It does not set the field name.
+The `den` tag carries Den-specific metadata. It does **not** set the field name -- that is always the `json` tag's job.
 
-| Option | Description |
-|---|---|
-| `index` | Create a secondary index on this field |
-| `unique` | Create a unique index on this field |
-| `fts` | Include this field in full-text search |
-| `omitempty` | Omit this field from storage when zero-valued |
+### Options
 
-Options can be combined: `den:"index,omitempty"`
+| Option | Description | Example |
+|---|---|---|
+| `index` | Create a secondary index on this field | `den:"index"` |
+| `unique` | Create a unique index on this field | `den:"unique"` |
+| `fts` | Include this field in full-text search | `den:"fts"` |
+| `omitempty` | Omit this field from storage when zero-valued | `den:"omitempty"` |
+| `unique_together:group` | Composite unique index — fields with the same group name | `den:"unique_together:feed_guid"` |
+| `index_together:group` | Composite index (non-unique) — fields with the same group name | `den:"index_together:user_date"` |
 
-A unique index is itself a usable lookup index, so `den:"unique"` alone is enough for equality queries. `den:"index,unique"` is accepted but redundant — Den creates only the unique index and silently drops the plain one.
+Options can be combined with commas:
+
+```go
+Tags []string `json:"tags" den:"index,omitempty"`
+```
+
+!!! note "`unique` already implies a lookup index"
+    A unique index is itself a usable lookup index, so `den:"unique"` alone is enough for equality queries — you do not need to combine it with `index`. `den:"index,unique"` is accepted but redundant: Den creates only the unique index and silently drops the plain one.
+
+### Complete Example
+
+```go
+type Product struct {
+    document.Base
+    Name  string   `json:"name"  den:"index"`
+    SKU   string   `json:"sku"   den:"unique"`
+    Price float64  `json:"price" den:"index"`
+    Body  string   `json:"body"  den:"fts"`
+    Tags  []string `json:"tags"  den:"index,omitempty"`
+}
+```
 
 ### Nullable Unique Fields
 
-Pointer fields with `unique` create a nullable unique constraint. Multiple documents can have `nil` without violating the constraint. Both backends implement this as a partial unique index (`WHERE ... IS NOT NULL`).
+Pointer fields with `unique` create a nullable unique constraint. Multiple documents can have `nil` for the field without violating the constraint:
+
+```go
+type User struct {
+    document.Base
+    Username string  `json:"username" den:"unique"`        // always required, always unique
+    Email    *string `json:"email,omitempty" den:"unique"`  // optional, unique when set
+}
+```
+
+Both backends implement this as a partial unique index (`WHERE ... IS NOT NULL`).
+
+### Composite Unique Constraints
+
+Use `unique_together` to enforce uniqueness across multiple fields. Fields sharing the same group name form a single composite unique index:
+
+```go
+type Entry struct {
+    document.Base
+    Feed string `json:"feed" den:"unique_together:feed_guid"`
+    GUID string `json:"guid" den:"unique_together:feed_guid"`
+    Body string `json:"body"`
+}
+```
+
+The combination `(feed, guid)` must be unique, but individual values can repeat. The group name (`feed_guid`) becomes part of the index name: `idx_entry_feed_guid`.
+
+For non-unique composite indexes, use `index_together`:
+
+```go
+type Event struct {
+    document.Base
+    UserID string `json:"user_id" den:"index_together:user_date"`
+    Date   string `json:"date"    den:"index_together:user_date"`
+}
+```
+
+Composite unique indexes include a `WHERE ... IS NOT NULL` clause for all participating fields, matching the behavior of single-field nullable unique constraints.
+
+---
 
 ## The `validate` Tag
 
-When `validate.WithValidation()` is passed as an option to `den.OpenURL`, Den validates documents using `go-playground/validator` struct tags before insert and update.
+When `validate.WithValidation()` is passed as an option to `den.OpenURL` or `den.Open`, Den validates documents using `go-playground/validator` struct tags before insert and update operations.
+
+```go
+import "github.com/oliverandrich/den/validate"
+
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
+```
+
+```go
+type User struct {
+    document.Base
+    Name  string `json:"name"  validate:"required,min=3,max=50"`
+    Email string `json:"email" validate:"required,email"`
+    Age   int    `json:"age"   validate:"gte=0,lte=130"`
+}
+```
+
+Validation errors are returned as `den.ErrValidation` and can be unwrapped for per-field details.
+
+---
 
 ## Aggregation Struct Tags
 
-Used with `GroupBy().Into()`:
+Used with `GroupBy().Into()` to define the shape of aggregation results.
 
 | Tag | Description |
 |---|---|
@@ -2953,21 +4303,69 @@ Used with `GroupBy().Into()`:
 | `den:"max:fieldname"` | Maximum of `fieldname` within the group |
 | `den:"count"` | Number of documents in the group |
 
+### Example
+
+```go
+type CategoryStats struct {
+    Category string  `den:"group_key"`
+    AvgPrice float64 `den:"avg:price"`
+    Total    float64 `den:"sum:price"`
+    Count    int64   `den:"count"`
+    MinPrice float64 `den:"min:price"`
+    MaxPrice float64 `den:"max:price"`
+}
+
+var results []CategoryStats
+err := den.NewQuery[Product](db,
+    where.Field("status").Eq("active"),
+).GroupBy("category.name").Into(ctx, &results)
+```
+
+---
+
 ## Projection Struct Tags
 
-Used with `Project()`:
+Used with `Project()` to select a subset of fields from query results.
+
+Simple projections use `json` tags for field name resolution. For nested field extraction, use the `den:"from:"` tag.
 
 | Tag | Description |
 |---|---|
-| `json:"fieldname"` | Map to a top-level document field |
+| `json:"fieldname"` | Map to a top-level document field by its JSON key |
 | `den:"from:nested.field"` | Extract a value from a nested field path |
 
+### Example
+
+```go
+// Simple projection -- uses json tags
+type ProductSummary struct {
+    Name  string  `json:"name"`
+    Price float64 `json:"price"`
+}
+
+// Nested field extraction -- uses den:"from:" tag
+type ProductView struct {
+    Name         string `json:"name"`
+    CategoryName string `den:"from:category.name"`
+}
+
+var summaries []ProductSummary
+err := den.NewQuery[Product](db).Project(ctx, &summaries)
+
+var views []ProductView
+err := den.NewQuery[Product](db).Project(ctx, &views)
+```
+
+---
+
 ## Document Base Types
+
+Composable embeds for feature opt-in:
 
 | Embed | Purpose |
 |---|---|
 | `document.Base` | Required. ID, CreatedAt, UpdatedAt, Rev |
-| `document.SoftDelete` | Opt-in. DeletedAt + IsDeleted() — lets `Delete` soft-delete |
+| `document.SoftDelete` | Opt-in. DeletedAt, IsDeleted |
 | `document.Tracked` | Opt-in. Snapshot machinery for IsChanged, GetChanges, Revert |
 
 Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; ... }`.
@@ -2978,18 +4376,24 @@ Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; 
 
 How to open a Den database, configure backends, and customize document behavior.
 
+---
+
 ## Opening a Database
 
 ### OpenURL (recommended)
 
-`OpenURL` accepts a URL-style DSN. Backend packages must be imported for side-effect registration.
+`OpenURL` takes a `context.Context` as its first argument and a URL-style DSN as the second. Backend packages must be imported for side-effect registration.
 
 ```go
 import (
+    "context"
+
     "github.com/oliverandrich/den"
     _ "github.com/oliverandrich/den/backend/sqlite"
     _ "github.com/oliverandrich/den/backend/postgres"
 )
+
+ctx := context.Background()
 
 // SQLite: relative path (three slashes)
 db, err := den.OpenURL(ctx, "sqlite:///data.db")
@@ -3007,7 +4411,11 @@ db, err := den.OpenURL(ctx, "postgres://user:pass@localhost:5432/mydb")
 db, err := den.OpenURL(ctx, "postgresql://user:pass@localhost/mydb")
 ```
 
+> **Important:** Backend packages register themselves via `init()`. You must import the backend package even if you don't reference it directly -- use the blank identifier `_`.
+
 ### Options
+
+`OpenURL` accepts functional options:
 
 ```go
 import "github.com/oliverandrich/den/validate"
@@ -3017,7 +4425,11 @@ db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 
 | Option | Package | Description |
 |---|---|---|
+| `den.WithTypes(types...)` | `den` | Register the listed document types during `Open` instead of a separate `Register` call. Zero-value struct pointers, e.g. `den.WithTypes(&Product{}, &Order{})` |
+| `den.WithStorage(s)` | `den` | Install a [`Storage`](../guide/attachments.md) for documents carrying `document.Attachment` fields |
 | `validate.WithValidation()` | `den/validate` | Enable struct tag validation using `go-playground/validator` |
+
+---
 
 ## DSN Formats
 
@@ -3028,6 +4440,8 @@ db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 | SQLite (memory) | `sqlite` | `sqlite://:memory:` | `sqlite://:memory:` |
 | PostgreSQL | `postgres` | `postgres://user:pass@host:port/dbname` | `postgres://admin:secret@localhost:5432/myapp` |
 | PostgreSQL | `postgresql` | `postgresql://user:pass@host:port/dbname` | `postgresql://admin:secret@db.example.com/myapp` |
+
+---
 
 ## Registering Document Types
 
@@ -3045,7 +4459,9 @@ Registration performs:
 
 1. Reflection-based analysis of the struct (fields, types, tags)
 2. Collection table creation (or verification if it already exists)
-3. Index creation based on `den` struct tags (additive)
+3. Index creation based on `den` struct tags (additive -- new indexes are created, existing ones are kept)
+
+---
 
 ## DenSettings
 
@@ -3062,14 +4478,61 @@ type DenSettable interface {
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `CollectionName` | `string` | lowercase struct name | Override the auto-derived collection name |
+| `OmitEmpty` | `bool` | `false` | When true, zero-value fields are omitted from storage by default |
 | `UseRevision` | `bool` | `false` | Enable optimistic concurrency control via `_rev` field |
-| `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes) |
+| `NestingDepthPerField` | `map[string]int` | `nil` | Per-field override for link nesting depth |
+| `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes not expressible via struct tags) |
+
+### Example
+
+```go
+type Product struct {
+    document.Base
+    Name     string  `json:"name"  den:"index"`
+    Category string  `json:"category" den:"index"`
+    Price    float64 `json:"price" den:"index"`
+}
+
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{
+        CollectionName: "products",       // override: default would be "product"
+        UseRevision:    true,             // enable optimistic concurrency
+        NestingDepthPerField: map[string]int{
+            "category": 1,                // shallow fetch for category links
+        },
+        Indexes: []den.IndexDefinition{
+            {
+                Name:   "idx_category_price",
+                Fields: []string{"category", "price"},  // compound index
+            },
+        },
+    }
+}
+```
+
+---
 
 ## Collection Naming
 
-By default: lowercase, no pluralization. `Product` becomes `product`. Override via `DenSettings().CollectionName`.
+By default, Den derives the collection name from the struct name:
+
+- Lowercase, no pluralization
+- `Product` becomes `product`
+- `BlogPost` becomes `blogpost`
+
+Override via `DenSettings().CollectionName`:
+
+```go
+func (p Product) DenSettings() den.Settings {
+    return den.Settings{CollectionName: "products"}
+}
+```
+
+---
 
 ## Index Definition
+
+Indexes can be defined in two ways:
 
 ### Via Struct Tags
 
@@ -3082,18 +4545,6 @@ type Product struct {
 }
 ```
 
-### Via Struct Tags (compound indexes)
-
-```go
-type Entry struct {
-    document.Base
-    Feed string `json:"feed" den:"unique_together:feed_guid"`
-    GUID string `json:"guid" den:"unique_together:feed_guid"`
-}
-```
-
-Fields sharing a group name are combined into one composite index. Use `index_together:group` for non-unique composites.
-
 ### Via Settings (compound indexes)
 
 ```go
@@ -3101,10 +4552,9 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
-            {Name: "idx_tenant_sku", Fields: []string{"tenant_id", "sku"}, Unique: true},
         },
     }
 }
 ```
 
-All approaches are additive. Struct tag indexes, composite tag indexes, and Settings indexes are created together during registration.
+Both approaches are additive. Struct tag indexes and Settings indexes are created together during registration.

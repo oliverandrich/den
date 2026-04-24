@@ -65,6 +65,10 @@ docs-build:
     cp THIRD_PARTY_LICENSES.md docs/third-party-licenses.md
     uv run --with zensical zensical build
 
+# Regenerate docs/llms-full.txt from the individual doc pages
+llms:
+    ./scripts/build-llms-full.sh
+
 # Regenerate THIRD_PARTY_LICENSES.md from go-licenses
 licenses:
     ./scripts/generate-licenses.sh

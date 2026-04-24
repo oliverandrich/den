@@ -122,6 +122,37 @@ func TestOpenURL_UnregisteredScheme(t *testing.T) {
 		"error should nudge callers toward the side-effect import")
 }
 
+func TestRegisterBackend_PanicsOnEmptyScheme(t *testing.T) {
+	require.PanicsWithValue(t, "den: RegisterBackend with empty scheme", func() {
+		den.RegisterBackend("", stubOpener("ignored"))
+	})
+}
+
+func TestRegisterBackend_PanicsOnNilOpener(t *testing.T) {
+	scheme := regTestPrefix(t) + "_nilopener"
+	require.PanicsWithValue(t, "den: RegisterBackend with nil opener for scheme "+scheme, func() {
+		den.RegisterBackend(scheme, nil)
+	})
+}
+
+func TestRegisterBackend_PanicsOnDuplicate(t *testing.T) {
+	scheme := regTestPrefix(t) + "_dup"
+	den.RegisterBackend(scheme, stubOpener(scheme))
+
+	require.PanicsWithValue(t, "den: duplicate registration for scheme "+scheme, func() {
+		den.RegisterBackend(scheme, stubOpener(scheme))
+	})
+}
+
+func TestRegisterBackend_CaseInsensitiveDuplicatePanics(t *testing.T) {
+	base := regTestPrefix(t) + "_casedup"
+	den.RegisterBackend(base, stubOpener(strings.ToLower(base)))
+
+	require.PanicsWithValue(t, "den: duplicate registration for scheme "+strings.ToLower(base), func() {
+		den.RegisterBackend(strings.ToUpper(base), stubOpener(strings.ToUpper(base)))
+	})
+}
+
 func TestRegisterBackend_IsCaseInsensitive(t *testing.T) {
 	scheme := regTestPrefix(t) + "_MixedCase"
 	den.RegisterBackend(scheme, stubOpener(strings.ToLower(scheme)))

@@ -49,9 +49,11 @@ var (
 // and lookup stay case-insensitive, matching URL-scheme semantics:
 // "file", "File", and "FILE" all address the same backend.
 //
-// Panics if a different opener is already registered for scheme — mirrors
-// Den's database-backend registration semantics and catches accidental
-// double-imports at process startup instead of at first use.
+// Panics if a different opener is already registered for scheme —
+// mirrors Den's database-backend registration semantics. Duplicate
+// registrations surface mis-wiring (two backend packages claiming the
+// same scheme, a replace-directive fork, or a manual call after a
+// side-effect import) at process startup instead of at first lookup.
 func Register(scheme string, opener OpenerFunc) {
 	scheme = strings.ToLower(scheme)
 	if scheme == "" {

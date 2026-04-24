@@ -20,10 +20,26 @@ var (
 // The scheme is normalized to lowercase so registration and lookup stay
 // case-insensitive, matching URL-scheme semantics: "sqlite", "SQLite",
 // and "SQLITE" all address the same backend.
+//
+// Panics if scheme is empty, opener is nil, or a different opener is
+// already registered for scheme — mirrors storage.Register semantics.
+// Duplicate registrations surface mis-wiring (two backend packages
+// claiming the same scheme, a replace-directive fork, or a manual call
+// after a side-effect import) at process startup instead of at first
+// lookup.
 func RegisterBackend(scheme string, opener func(ctx context.Context, dsn string) (Backend, error)) {
 	scheme = strings.ToLower(scheme)
+	if scheme == "" {
+		panic("den: RegisterBackend with empty scheme")
+	}
+	if opener == nil {
+		panic("den: RegisterBackend with nil opener for scheme " + scheme)
+	}
 	urlOpenersMu.Lock()
 	defer urlOpenersMu.Unlock()
+	if _, exists := urlOpeners[scheme]; exists {
+		panic("den: duplicate registration for scheme " + scheme)
+	}
 	urlOpeners[scheme] = opener
 }
 

@@ -84,6 +84,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **URL-scheme registration and lookup are now case-insensitive** in both `den.RegisterBackend` / `den.OpenURL` and `storage.Register` / `storage.OpenURL`. Both sides normalize schemes to lowercase, matching standard URL semantics: `"file"`, `"File"`, and `"FILE"` all address the same backend.
 - **Latent bug fixed**: `den.RegisterBackend("SQLITE", ...)` previously stored the backend under `"SQLITE"` while `OpenURL` looked up `"sqlite"` via its pre-existing lowercasing, so the lookup silently failed. Any caller that registered with mixed-case schemes will now see their backends resolve.
 - **Duplicate-registration panic** in `storage.Register` now triggers when the same scheme is registered under different casings (e.g. `"a"` then `"A"`), because both normalize to the same registry key.
+- **`den.RegisterBackend` now panics on duplicate, empty, or nil-opener registration** — previously it silently overwrote an existing entry, so two packages claiming the same scheme (a fork via `replace`, or a manual `RegisterBackend` call after a side-effect import) left whichever `init()` ran last in the registry. The new guards match `storage.Register` semantics and surface the mis-wiring at process start instead of at first lookup.
 
 ### Fixed
 

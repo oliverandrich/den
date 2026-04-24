@@ -166,7 +166,7 @@ func (b *backend) DropCollection(ctx context.Context, name string) error {
 	return err
 }
 
-func (b *backend) Begin(ctx context.Context, _ bool) (den.Transaction, error) {
+func (b *backend) Begin(ctx context.Context) (den.Transaction, error) {
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return nil, err

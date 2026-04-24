@@ -316,7 +316,7 @@ func (b *backend) DropCollection(ctx context.Context, name string) error {
 	return err
 }
 
-func (b *backend) Begin(ctx context.Context, _ bool) (den.Transaction, error) {
+func (b *backend) Begin(ctx context.Context) (den.Transaction, error) {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err

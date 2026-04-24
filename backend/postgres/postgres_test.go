@@ -535,7 +535,7 @@ func TestTransactionGet(t *testing.T) {
 
 	require.NoError(t, b.Put(ctx, "test_txget", "p1", []byte(`{"name":"Widget"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -553,7 +553,7 @@ func TestTransactionCount(t *testing.T) {
 	require.NoError(t, b.Put(ctx, "test_txcnt", "p1", []byte(`{"name":"A"}`)))
 	require.NoError(t, b.Put(ctx, "test_txcnt", "p2", []byte(`{"name":"B"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -570,7 +570,7 @@ func TestTransactionExists(t *testing.T) {
 
 	require.NoError(t, b.Put(ctx, "test_txex", "p1", []byte(`{"name":"Alpha"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -598,7 +598,7 @@ func TestTransactionAggregate(t *testing.T) {
 	require.NoError(t, b.Put(ctx, "test_txagg", "p1", []byte(`{"price":10}`)))
 	require.NoError(t, b.Put(ctx, "test_txagg", "p2", []byte(`{"price":20}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -616,7 +616,7 @@ func TestTransactionQuery(t *testing.T) {
 
 	require.NoError(t, b.Put(ctx, "test_txq", "p1", []byte(`{"name":"Widget"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -638,7 +638,7 @@ func TestTransactionDelete(t *testing.T) {
 
 	require.NoError(t, b.Put(ctx, "test_txdel", "p1", []byte(`{"name":"Del"}`)))
 
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	require.NoError(t, tx.Delete(ctx, "test_txdel", "p1"))
 	require.NoError(t, tx.Commit())
@@ -653,7 +653,7 @@ func TestTransactionGetNotFound(t *testing.T) {
 	require.NoError(t, b.EnsureCollection(ctx, "test_txnf", den.CollectionMeta{}))
 	t.Cleanup(func() { b.DropCollection(ctx, "test_txnf") })
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -669,7 +669,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 	t.Cleanup(func() { b.DropCollection(ctx, "test_tx") })
 
 	// Commit
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	require.NoError(t, tx.Put(ctx, "test_tx", "p1", []byte(`{"name":"Committed"}`)))
 	require.NoError(t, tx.Commit())
@@ -679,7 +679,7 @@ func TestTransactionCommitRollback(t *testing.T) {
 	assert.Contains(t, string(data), "Committed")
 
 	// Rollback
-	tx, err = b.Begin(ctx, true)
+	tx, err = b.Begin(ctx)
 	require.NoError(t, err)
 	require.NoError(t, tx.Put(ctx, "test_tx", "p2", []byte(`{"name":"Rolled"}`)))
 	require.NoError(t, tx.Rollback())

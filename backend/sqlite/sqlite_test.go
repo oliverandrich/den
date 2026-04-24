@@ -308,7 +308,7 @@ func TestTransactionCommit(t *testing.T) {
 
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 
 	require.NoError(t, tx.Put(ctx, "products", "p1", []byte(`{"name":"InTx"}`)))
@@ -325,7 +325,7 @@ func TestTransactionRollback(t *testing.T) {
 
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 
 	require.NoError(t, tx.Put(ctx, "products", "p1", []byte(`{"name":"Rollback"}`)))
@@ -400,7 +400,7 @@ func TestTransactionGet(t *testing.T) {
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 	require.NoError(t, b.Put(ctx, "products", "p1", []byte(`{"name":"Widget"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -414,7 +414,7 @@ func TestTransactionGetNotFound(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -428,7 +428,7 @@ func TestTransactionDelete(t *testing.T) {
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 	require.NoError(t, b.Put(ctx, "products", "p1", []byte(`{"name":"Widget"}`)))
 
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	require.NoError(t, tx.Delete(ctx, "products", "p1"))
 	require.NoError(t, tx.Commit())
@@ -443,7 +443,7 @@ func TestTransactionQuery(t *testing.T) {
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{}))
 	require.NoError(t, b.Put(ctx, "products", "p1", []byte(`{"name":"Widget"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -544,7 +544,7 @@ func TestTransactionCount(t *testing.T) {
 	require.NoError(t, b.Put(ctx, "products", "p1", []byte(`{"name":"Alpha"}`)))
 	require.NoError(t, b.Put(ctx, "products", "p2", []byte(`{"name":"Beta"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -567,7 +567,7 @@ func TestTransactionExists(t *testing.T) {
 	require.NoError(t, b.EnsureCollection(ctx, "products", den.CollectionMeta{Name: "products"}))
 	require.NoError(t, b.Put(ctx, "products", "p1", []byte(`{"name":"Alpha"}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -595,7 +595,7 @@ func TestTransactionAggregate(t *testing.T) {
 	require.NoError(t, b.Put(ctx, "products", "p2", []byte(`{"name":"Beta","price":20}`)))
 	require.NoError(t, b.Put(ctx, "products", "p3", []byte(`{"name":"Gamma","price":30}`)))
 
-	tx, err := b.Begin(ctx, false)
+	tx, err := b.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 

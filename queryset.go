@@ -359,7 +359,7 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 	}
 
 	// DB path: open a read tx so count+query see a consistent snapshot.
-	tx, err := db.backend.Begin(ctx, false)
+	tx, err := db.backend.Begin(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("begin read tx: %w", err)
 	}

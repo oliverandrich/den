@@ -27,7 +27,7 @@ func (t *Tx) db() *DB                { return t.parent }
 // The *Tx passed to fn does not itself carry the context; entry points
 // inside fn take ctx explicitly. Use the ctx closed over from the caller.
 func RunInTransaction(ctx context.Context, db *DB, fn func(tx *Tx) error) error {
-	btx, err := db.backend.Begin(ctx, true)
+	btx, err := db.backend.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -89,7 +89,7 @@ func runOnScopeVoid(ctx context.Context, s Scope, body func(*Tx) error) error {
 // runInWriteTx is an internal helper that executes fn in a write transaction.
 // Used by updateCore to wrap revision-checking updates atomically.
 func runInWriteTx(ctx context.Context, b Backend, fn func(tx Transaction) error) error {
-	tx, err := b.Begin(ctx, true)
+	tx, err := b.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}

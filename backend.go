@@ -25,7 +25,7 @@ type Backend interface {
 	EnsureCollection(ctx context.Context, name string, meta CollectionMeta) error
 	DropCollection(ctx context.Context, name string) error
 
-	Begin(ctx context.Context, writable bool) (Transaction, error)
+	Begin(ctx context.Context) (Transaction, error)
 
 	Encoder() Encoder
 

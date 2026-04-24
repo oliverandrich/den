@@ -51,6 +51,8 @@ db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 
 | Option | Package | Description |
 |---|---|---|
+| `den.WithTypes(types...)` | `den` | Register the listed document types during `Open` instead of a separate `Register` call. Zero-value struct pointers, e.g. `den.WithTypes(&Product{}, &Order{})` |
+| `den.WithStorage(s)` | `den` | Install a [`Storage`](../guide/attachments.md) for documents carrying `document.Attachment` fields |
 | `validate.WithValidation()` | `den/validate` | Enable struct tag validation using `go-playground/validator` |
 
 ---

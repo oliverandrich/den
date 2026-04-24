@@ -10,7 +10,7 @@ Import: `github.com/oliverandrich/den`
 
 | Error | Description | When Returned |
 |---|---|---|
-| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh` when no matching document exists |
+| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh`, `Update`, `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
 | `ErrMultipleMatches` | A single-document lookup matched more than one row | `FindOneAndUpdate`, `FindOneAndUpsert` when conditions match more than one document. The conditions must identify the document uniquely |
 | `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
 | `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision (another process modified it) |
@@ -26,6 +26,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
 | `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` called against a `*Tx` (the caller's transaction cannot be split into per-document transactions) |
 | `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions were combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
+| `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
 | `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel. Returned only when at least one document failed; nil otherwise |
 
 ---

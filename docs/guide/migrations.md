@@ -107,15 +107,15 @@ err := r.Down(ctx, db)
 
 ## Migration Tracking
 
-Den stores migration state in a `_den_migrations` table. Each applied migration is recorded with its version string and timestamp. `r.Up()` compares registered migrations against this log to determine which are pending.
+Den stores migration state in a single document under the `_den_migrations` collection (key `"log"`), holding a JSON array of `{Version, AppliedAt}` entries. `r.Up()` loads this log, compares it against the registered migrations, and runs the missing ones in order.
 
 ## Transaction Safety
 
-Each migration runs within a Den transaction:
+Each migration runs within a Den transaction alongside the log update:
 
-- If the migration function returns `nil`, the transaction is committed
-- If it returns an error, the transaction is rolled back and the migration is marked as failed
-- Subsequent migrations are not executed after a failure
+- If the migration function returns `nil`, the entry is appended to the log and the whole transaction commits.
+- If it returns an error, the transaction rolls back — the log is unchanged, so the migration stays pending and the next `r.Up()` will retry it from scratch.
+- `r.Up()` stops at the first failure and returns; any remaining pending migrations stay pending until the failing one succeeds.
 
 ## Observability
 

@@ -163,7 +163,7 @@ den.NewQuery[Product](db).
     Sort("name", den.Desc).    // then descending by name
     Limit(20).                 // at most 20 results
     Skip(40).                  // skip the first 40
-    All()
+    All(ctx)
 ```
 
 ## Cursor-Based Pagination

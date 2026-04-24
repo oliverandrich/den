@@ -22,6 +22,9 @@ type Product struct {
 }
 ```
 
+!!! note "Register before use"
+    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Insert`, `Update`, or query. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`.
+
 ## Full Example
 
 ```go

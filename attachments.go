@@ -2,6 +2,7 @@ package den
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"reflect"
 
@@ -61,23 +62,35 @@ func walkAttachments(v reflect.Value, out *[]document.Attachment) {
 	}
 }
 
-// cleanupAttachments is called immediately after a successful hard-delete
-// to remove the bytes behind any document.Attachment fields on the doc.
+// preflightAttachments enforces the storage.go contract that Den refuses
+// to hard-delete attachment-bearing documents without a configured
+// Storage. Returns ErrValidation when the doc has attachments and no
+// Storage is installed; returns nil otherwise so callers can chain
+// straight into the DB delete.
+func (db *DB) preflightAttachments(rv reflect.Value) error {
+	if db.storage != nil {
+		return nil
+	}
+	attachments := collectAttachments(rv)
+	if len(attachments) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: cannot hard-delete document with %d attachment(s) and no Storage configured",
+		ErrValidation, len(attachments))
+}
+
+// cleanupAttachments removes the bytes behind a hard-deleted document.
+// Assumes preflightAttachments already ran, so a missing Storage is a
+// programmer error (caught via the preflight above) rather than a silent
+// orphan.
 //
-// Failures are logged and swallowed — a missing Storage or a remote
-// failure should not undo a successful database delete. Orphan bytes are
-// recoverable via an offline sweep that cross-references filesystem paths
-// against the remaining StoragePath values in the DB; an orphaned database
-// reference to already-deleted bytes would be worse (broken link on the
-// public site).
+// Remote Storage failures are logged and swallowed — the database delete
+// has already succeeded and orphan bytes are recoverable via an offline
+// sweep, whereas rolling back the DB delete would leave a broken
+// document that references non-existent storage.
 func (db *DB) cleanupAttachments(ctx context.Context, rv reflect.Value) {
 	attachments := collectAttachments(rv)
 	if len(attachments) == 0 {
-		return
-	}
-	if db.storage == nil {
-		slog.Warn("den: hard-deleting document with attachments but no Storage is configured; bytes are orphaned",
-			"count", len(attachments))
 		return
 	}
 	for _, a := range attachments {

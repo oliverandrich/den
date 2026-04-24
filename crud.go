@@ -274,12 +274,16 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		return runAfterDeleteHooks(ctx, document)
 	}
 
+	if err := db.preflightAttachments(rv); err != nil {
+		return err
+	}
+
 	if err := b.Delete(ctx, col.meta.Name, id); err != nil {
 		return err
 	}
 
 	// Hard-delete cascade: drop the bytes behind any document.Attachment
-	// fields. Best-effort — orphan bytes are logged, not returned.
+	// fields. Best-effort — remote Storage failures are logged, not returned.
 	db.cleanupAttachments(ctx, rv)
 
 	return runAfterDeleteHooks(ctx, document)

@@ -443,6 +443,9 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 		return runAfterDeleteHooks(ctx, doc)
 	}
 
+	if err := db.preflightAttachments(docPtr.Elem()); err != nil {
+		return err
+	}
 	if err := b.Delete(ctx, colName, id); err != nil {
 		return err
 	}

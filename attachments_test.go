@@ -134,10 +134,10 @@ func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
 	assert.Error(t, err, "child attachment bytes must be cleaned up on cascade delete")
 }
 
-func TestHardDelete_WithoutStorage_DoesNotFail(t *testing.T) {
-	// Simulate a setup where the user forgot to install Storage. The
-	// cascade path should log a warning and still return nil — orphan
-	// bytes are preferred over a failed delete that breaks callers.
+func TestHardDelete_WithoutStorage_Rejects(t *testing.T) {
+	// Without a Storage configured, Den must refuse to hard-delete a
+	// document carrying Attachment bytes — orphan bytes are worse than a
+	// clear error (storage.go godoc contract).
 	ctx := context.Background()
 	db := dentest.MustOpen(t, &mediaDoc{})
 
@@ -150,5 +150,37 @@ func TestHardDelete_WithoutStorage_DoesNotFail(t *testing.T) {
 		},
 	}
 	require.NoError(t, den.Insert(ctx, db, m))
-	require.NoError(t, den.Delete(ctx, db, m, den.HardDelete()))
+
+	err := den.Delete(ctx, db, m, den.HardDelete())
+	require.ErrorIs(t, err, den.ErrValidation)
+
+	// Doc must still exist — the DB delete should not run when preflight rejects.
+	_, err = den.FindByID[mediaDoc](ctx, db, m.ID)
+	require.NoError(t, err, "preflight must reject before the DB delete")
+}
+
+func TestHardDelete_Cascade_WithoutStorage_Rejects(t *testing.T) {
+	// Same contract on the cascade path: a LinkDelete that reaches an
+	// attachment-bearing child with no Storage must error, not orphan.
+	ctx := context.Background()
+	db := dentest.MustOpen(t, &mediaDoc{}, &gallery{})
+
+	m := &mediaDoc{
+		Attachment: document.Attachment{
+			StoragePath: "fake/path.bin",
+			Mime:        "application/octet-stream",
+			Size:        7,
+			SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
+		},
+	}
+	require.NoError(t, den.Insert(ctx, db, m))
+
+	g := &gallery{Name: "g", Hero: den.NewLink(m)}
+	require.NoError(t, den.Insert(ctx, db, g))
+
+	reloaded, err := den.FindByID[gallery](ctx, db, g.ID)
+	require.NoError(t, err)
+
+	err = den.Delete(ctx, db, reloaded, den.WithLinkRule(den.LinkDelete))
+	require.ErrorIs(t, err, den.ErrValidation)
 }

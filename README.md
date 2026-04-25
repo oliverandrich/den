@@ -117,7 +117,7 @@ To use PostgreSQL instead, change the DSN and the import:
 ```go
 import _ "github.com/oliverandrich/den/backend/postgres" // instead of sqlite
 
-db, err := den.OpenURL("postgres://user:pass@localhost/mydb")
+db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
 ## Architecture
@@ -197,7 +197,7 @@ Den supports automatic struct tag validation via [`go-playground/validator`](htt
 ```go
 import "github.com/oliverandrich/den/validate"
 
-db, err := den.OpenURL("sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
 ```
 
 Then add `validate` tags to your document structs:

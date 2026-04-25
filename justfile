@@ -40,30 +40,30 @@ fmt:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Single run with -coverpkg=./... so coverage is credited to every
-    # package, including code reached only via cross-package tests
-    # (parity_test.go → backend/*). go test prints a misleading
-    # per-package "coverage: X%" suffix under -coverpkg (it's the
-    # current test set's contribution to total instrumented coverage,
-    # not the package's own coverage); strip it so the honest
-    # per-package table at the end is the only coverage signal.
+    # tparse for visual consistency with `just test`. Note: the Cover
+    # column shows each test set's contribution to the total
+    # instrumented coverage under -coverpkg=./... (an artifact of the
+    # cross-package attribution we need so backend code reached only
+    # via parity_test.go is counted). The honest per-package numbers
+    # live in coverage.out and are surfaced by `just coverage-check`
+    # and `scripts/coverage-summary.sh`; the HTML report below also
+    # shows the truth file by file.
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
         echo "==> $mod"
-        (cd "$mod" && go test -race -coverpkg=./... -coverprofile=cover.out ./...) \
-            | sed -E 's/[[:space:]]+coverage: [0-9.]+% of statements( in \.\/\.\.\.)?$//'
+        (
+            cd "$mod"
+            go test -race -json -coverpkg=./... -coverprofile=cover.out ./... > test.json
+            tparse -file=test.json
+            rm -f test.json
+        )
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
             rm -f "$mod/cover.out"
         fi
     done
-    echo
-    echo "Per-package coverage:"
-    ./scripts/coverage-summary.sh | awk '{ printf "  %-55s %5.1f%%\n", $1, $2 }'
-    echo
-    go tool cover -func=coverage.out | tail -n 1
     go tool cover -html=coverage.out -o coverage.html
-    echo "HTML report: coverage.html"
+    echo "HTML report: coverage.html  (run \`just coverage-check\` for honest per-package numbers)"
 
 # Enforce the per-package coverage threshold ({{coverage_threshold}}%).
 # Runs `coverage` first (so coverage.out is fresh) and fails if any

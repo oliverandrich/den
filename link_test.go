@@ -643,6 +643,117 @@ func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
 	assert.True(t, softHookedAfterSoftDeleteCalled, "AfterSoftDelete must fire on cascade soft-deleted linked doc")
 }
 
+// TestParity_WithLinkRule_HardDelete_CascadeHardDeletesSoftLinked covers the
+// regression where cascadeDeleteLinks ignored the caller's HardDelete()
+// option: parents were physically removed but linked targets that embed
+// document.SoftDelete remained as soft-deleted ghost rows. Both backends
+// share the cascade code, so a single parity test pins both ends.
+func TestParity_WithLinkRule_HardDelete_CascadeHardDeletesSoftLinked(t *testing.T) {
+	dbs := map[string]*den.DB{
+		"sqlite":   dentest.MustOpen(t, &SoftDoor{}, &SoftHouse{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &SoftDoor{}, &SoftHouse{}),
+	}
+
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+
+			door := &SoftDoor{Height: 200, Width: 80}
+			require.NoError(t, den.Insert(ctx, db, door))
+
+			house := &SoftHouse{Name: "HardCascade", Door: den.NewLink(door)}
+			require.NoError(t, den.Insert(ctx, db, house))
+
+			require.NoError(t, den.Delete(ctx, db, house,
+				den.HardDelete(),
+				den.WithLinkRule(den.LinkDelete),
+			))
+
+			// House gone (it has no SoftDelete embed, hard always anyway).
+			_, err := den.FindByID[SoftHouse](ctx, db, house.ID)
+			require.ErrorIs(t, err, den.ErrNotFound)
+
+			// Door must be physically gone — not findable even with IncludeDeleted.
+			results, err := den.NewQuery[SoftDoor](db).IncludeDeleted().All(ctx)
+			require.NoError(t, err)
+			assert.Empty(t, results,
+				"linked SoftDoor should be hard-deleted; IncludeDeleted must not return it")
+		})
+	}
+}
+
+// SoftSkipHookedDoor mirrors SoftHookedDoor but with its own hook counters,
+// so the hard-cascade test can assert "soft-delete hooks did NOT fire"
+// without racing against TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked.
+type SoftSkipHookedDoor struct {
+	document.Base
+	document.SoftDelete
+	Label string `json:"label"`
+}
+
+var (
+	softSkipBeforeSoftDeleteCalled bool
+	softSkipAfterSoftDeleteCalled  bool
+	softSkipBeforeDeleteCalled     bool
+	softSkipAfterDeleteCalled      bool
+)
+
+func (d *SoftSkipHookedDoor) BeforeSoftDelete(_ context.Context) error {
+	softSkipBeforeSoftDeleteCalled = true
+	return nil
+}
+
+func (d *SoftSkipHookedDoor) AfterSoftDelete(_ context.Context) error {
+	softSkipAfterSoftDeleteCalled = true
+	return nil
+}
+
+func (d *SoftSkipHookedDoor) BeforeDelete(_ context.Context) error {
+	softSkipBeforeDeleteCalled = true
+	return nil
+}
+
+func (d *SoftSkipHookedDoor) AfterDelete(_ context.Context) error {
+	softSkipAfterDeleteCalled = true
+	return nil
+}
+
+type SoftSkipHouse struct {
+	document.Base
+	Name string                       `json:"name"`
+	Door den.Link[SoftSkipHookedDoor] `json:"door"`
+}
+
+// TestWithLinkRule_HardDelete_SkipsSoftDeleteHooksOnLinked pins the contract
+// that on a hard-delete cascade against a SoftDelete-embedding linked target,
+// only BeforeDelete + AfterDelete fire — the soft-delete-only hooks are
+// skipped, matching deleteCore's behaviour for direct hard-deletes.
+func TestWithLinkRule_HardDelete_SkipsSoftDeleteHooksOnLinked(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftSkipHookedDoor{}, &SoftSkipHouse{})
+	ctx := context.Background()
+
+	door := &SoftSkipHookedDoor{Label: "Main"}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	house := &SoftSkipHouse{Name: "H", Door: den.NewLink(door)}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	softSkipBeforeSoftDeleteCalled = false
+	softSkipAfterSoftDeleteCalled = false
+	softSkipBeforeDeleteCalled = false
+	softSkipAfterDeleteCalled = false
+
+	require.NoError(t, den.Delete(ctx, db, house,
+		den.HardDelete(),
+		den.WithLinkRule(den.LinkDelete),
+	))
+
+	assert.True(t, softSkipBeforeDeleteCalled, "BeforeDelete must fire on hard-cascade target")
+	assert.True(t, softSkipAfterDeleteCalled, "AfterDelete must fire on hard-cascade target")
+	assert.False(t, softSkipBeforeSoftDeleteCalled, "BeforeSoftDelete must NOT fire on hard-cascade")
+	assert.False(t, softSkipAfterSoftDeleteCalled, "AfterSoftDelete must NOT fire on hard-cascade")
+}
+
 func TestWithLinkRule_Write_OnUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()

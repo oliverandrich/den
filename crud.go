@@ -256,7 +256,7 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	}
 
 	if o.linkRule == LinkDelete {
-		if err := cascadeDeleteLinks(ctx, db, b, document); err != nil {
+		if err := cascadeDeleteLinks(ctx, db, b, document, o); err != nil {
 			return err
 		}
 	}

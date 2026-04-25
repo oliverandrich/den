@@ -321,9 +321,15 @@ func cascadeWriteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error
 // without re-entering Delete() / deleteCore() / cascadeDeleteLinks, so the
 // targets' own links are left intact. Callers that need transitive deletion
 // must drive it themselves.
-func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error {
+//
+// The crudOpts are forwarded so HardDelete() propagates: a hard-delete on
+// the parent must hard-delete the linked targets too, even when they embed
+// document.SoftDelete. Soft-delete-only audit options (SoftDeleteBy,
+// SoftDeleteReason) are not yet threaded into the cascade soft path; that
+// is tracked separately.
+func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any, o crudOpts) error {
 	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
-		return deleteSingleLinkedValue(ctx, db, b, elem, lf)
+		return deleteSingleLinkedValue(ctx, db, b, elem, lf, o)
 	})
 }
 
@@ -386,7 +392,13 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 // fires BeforeDelete / AfterDelete hooks, and writes the backend delete
 // (or the soft-delete flip). The backend call is terminal for this target —
 // no cascade re-enters from here, so the target's own links stay untouched.
-func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
+//
+// The hard/soft branch mirrors deleteCore: a SoftDelete-embedding target
+// goes the soft path UNLESS the caller passed HardDelete(), in which case
+// the row is physically removed and only BeforeDelete / AfterDelete fire
+// (the soft-only hook pair is skipped, matching the direct-delete
+// semantics).
+func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal reflect.Value, lf linkFieldInfo, o crudOpts) error {
 	idField := linkVal.FieldByIndex(lf.idIdx)
 	if idField.String() == "" {
 		return nil
@@ -422,7 +434,7 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 		return err
 	}
 
-	if col.meta.HasSoftDelete {
+	if col.meta.HasSoftDelete && !o.hardDelete {
 		if err := runBeforeSoftDeleteHooks(ctx, doc); err != nil {
 			return err
 		}

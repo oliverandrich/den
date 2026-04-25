@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -248,15 +249,31 @@ func TestNew_RequiresBucket(t *testing.T) {
 	assert.Contains(t, err.Error(), "bucket name required")
 }
 
-// --- opener-side tests (still stubbed; full DSN parsing is bite 2) ---
+// --- opener + DSN-parsing tests ---
+
+// applyOpts replays the [Option] slice into a config so tests can
+// inspect what parseDSN actually wired up without round-tripping
+// through New + an opaque *Storage.
+func applyOpts(opts []Option) config {
+	var cfg config
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
 
 func TestInit_RegistersS3Scheme(t *testing.T) {
-	_, err := storage.OpenURL("s3://my-bucket", "/media/")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "storage/s3")
-	assert.Contains(t, err.Error(), "not yet implemented")
-	assert.Contains(t, err.Error(), "my-bucket",
-		"error should echo the bucket so misconfig is visible")
+	// Side-effect import + valid DSN now constructs a *Storage end-to-end
+	// (no network round-trip — minio-go lazy-loads creds on first call).
+	s, err := storage.OpenURL("s3://my-bucket", "/media/")
+	require.NoError(t, err)
+	require.NotNil(t, s)
+
+	st, ok := s.(*Storage)
+	require.True(t, ok)
+	assert.Equal(t, "my-bucket", st.bucket)
+	assert.Empty(t, st.prefix)
+	assert.Equal(t, DefaultPresignTTL, st.presignTTL)
 }
 
 func TestOpener_RequiresBucket(t *testing.T) {
@@ -265,18 +282,86 @@ func TestOpener_RequiresBucket(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires a bucket")
 }
 
-func TestOpener_ExtractsBucketFromLocation(t *testing.T) {
-	cases := []string{
-		"s3://my-bucket/prefix",
-		"s3://my-bucket?region=eu-central-1",
-		"s3://my-bucket/prefix?region=eu-central-1",
-	}
-	for _, dsn := range cases {
-		t.Run(dsn, func(t *testing.T) {
-			_, err := storage.OpenURL(dsn, "/media/")
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), `bucket="my-bucket"`,
-				"bucket extraction must stop at the first '/' or '?'")
-		})
-	}
+func TestParseDSN_BucketOnly(t *testing.T) {
+	bucket, opts, err := parseDSN("my-bucket")
+	require.NoError(t, err)
+	assert.Equal(t, "my-bucket", bucket)
+	assert.Empty(t, opts)
+}
+
+func TestParseDSN_PathPrefix(t *testing.T) {
+	bucket, opts, err := parseDSN("my-bucket/some/prefix")
+	require.NoError(t, err)
+	assert.Equal(t, "my-bucket", bucket)
+	cfg := applyOpts(opts)
+	assert.Equal(t, "some/prefix", cfg.prefix)
+}
+
+func TestParseDSN_PathPrefix_TrimSlashes(t *testing.T) {
+	_, opts, err := parseDSN("b/uploads/")
+	require.NoError(t, err)
+	assert.Equal(t, "uploads", applyOpts(opts).prefix,
+		"trailing slash on the prefix should be trimmed")
+}
+
+func TestParseDSN_PathPrefix_EmptyAfterSlash(t *testing.T) {
+	_, opts, err := parseDSN("b/")
+	require.NoError(t, err)
+	assert.Empty(t, opts, `"bucket/" with no prefix should produce no PathPrefix option`)
+}
+
+func TestParseDSN_QueryParams(t *testing.T) {
+	bucket, opts, err := parseDSN("b?region=eu-central-1&endpoint=minio.local:9000&secure=false&presign_ttl=30m")
+	require.NoError(t, err)
+	assert.Equal(t, "b", bucket)
+
+	cfg := applyOpts(opts)
+	assert.Equal(t, "eu-central-1", cfg.region)
+	assert.Equal(t, "minio.local:9000", cfg.endpoint)
+	assert.False(t, cfg.secure)
+	assert.Equal(t, 30*time.Minute, cfg.presignTTL)
+}
+
+func TestParseDSN_PathPrefixWithQueryParams(t *testing.T) {
+	bucket, opts, err := parseDSN("b/uploads?region=eu-west-1")
+	require.NoError(t, err)
+	assert.Equal(t, "b", bucket)
+
+	cfg := applyOpts(opts)
+	assert.Equal(t, "uploads", cfg.prefix)
+	assert.Equal(t, "eu-west-1", cfg.region)
+}
+
+func TestParseDSN_InvalidSecure(t *testing.T) {
+	_, _, err := parseDSN("b?secure=maybe")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid secure="maybe"`)
+}
+
+func TestParseDSN_InvalidPresignTTL(t *testing.T) {
+	_, _, err := parseDSN("b?presign_ttl=tomorrow")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid presign_ttl="tomorrow"`)
+}
+
+func TestParseDSN_InvalidQueryString(t *testing.T) {
+	// `;` is rejected by net/url.ParseQuery as of Go 1.17+.
+	_, _, err := parseDSN("b?region=us;invalid")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid query string")
+}
+
+func TestOpener_AppliesDSNOptions(t *testing.T) {
+	// End-to-end: OpenURL → parseDSN → New, with the parsed options
+	// observable on the resulting *Storage.
+	s, err := storage.OpenURL(
+		"s3://my-bucket/uploads?endpoint=minio.local:9000&secure=false&presign_ttl=2h",
+		"/media/",
+	)
+	require.NoError(t, err)
+	st, ok := s.(*Storage)
+	require.True(t, ok)
+	assert.Equal(t, "my-bucket", st.bucket)
+	assert.Equal(t, "uploads", st.prefix)
+	assert.Equal(t, 2*time.Hour, st.presignTTL)
 }

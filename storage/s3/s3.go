@@ -6,9 +6,15 @@
 // core stays free of any S3-specific transitive deps.
 //
 // Importing this package for its side effect registers the "s3://"
-// scheme with [storage.OpenURL]; the registry-side opener that turns
-// the DSN into options lands in a follow-up. Direct construction works
-// today via [New]:
+// scheme with [storage.OpenURL]:
+//
+//	import _ "github.com/oliverandrich/den/storage/s3"
+//
+//	st, err := storage.OpenURL(
+//	    "s3://my-bucket/uploads?region=eu-central-1&presign_ttl=15m",
+//	    "/media/")
+//
+// Or construct directly when an explicit configuration is preferable:
 //
 //	import s3 "github.com/oliverandrich/den/storage/s3"
 //
@@ -16,6 +22,11 @@
 //	    s3.WithRegion("eu-central-1"),
 //	    s3.WithCredentials(accessKey, secretKey),
 //	)
+//
+// DSN form: `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`.
+// Credentials are intentionally NOT parsed from the DSN — they come
+// from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars or the
+// IAM instance profile.
 //
 // Object keys are content-addressed (`YYYY/MM/<sha256[:16]><ext>`)
 // under an optional path prefix; identical bytes resolve to the same
@@ -39,8 +50,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,27 +70,60 @@ func init() {
 }
 
 // openerFunc is the [storage.OpenerFunc] dispatched by [storage.OpenURL]
-// for "s3://...". DSN parsing for region / endpoint / presign-TTL /
-// prefix lands in the next bean step; until then the opener validates
-// the bucket and returns a labelled "not yet implemented" error so the
-// dispatch is observable.
+// for "s3://...". The full DSN form is
+// `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`.
+// Credentials are intentionally NOT parsed from the DSN — they come
+// from AWS_* env vars or the IAM instance profile via the default
+// chain in [New].
 func openerFunc(location, _ string) (den.Storage, error) {
-	bucket := bucketFromLocation(location)
-	if bucket == "" {
-		return nil, fmt.Errorf("storage/s3: s3:// requires a bucket (got %q)", location)
+	bucket, opts, err := parseDSN(location)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("storage/s3: not yet implemented (bucket=%q)", bucket)
+	return New(bucket, opts...)
 }
 
-// bucketFromLocation extracts the bucket name from the location portion
-// of the DSN — everything before the first '/' (path) or '?' (query).
-func bucketFromLocation(location string) string {
-	for i := range len(location) {
-		if c := location[i]; c == '/' || c == '?' {
-			return location[:i]
-		}
+// parseDSN splits the location portion of "s3://<location>" into a
+// bucket and the [Option] slice that mirrors its query parameters.
+// Returns a labelled error for missing bucket, malformed query string,
+// or invalid `secure` / `presign_ttl` values.
+func parseDSN(location string) (string, []Option, error) {
+	location, rawQuery, _ := strings.Cut(location, "?")
+	bucket, prefixRaw, _ := strings.Cut(location, "/")
+	if bucket == "" {
+		return "", nil, errors.New("storage/s3: s3:// requires a bucket")
 	}
-	return location
+
+	var opts []Option
+	if prefix := strings.Trim(prefixRaw, "/"); prefix != "" {
+		opts = append(opts, WithPathPrefix(prefix))
+	}
+
+	qs, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "", nil, fmt.Errorf("storage/s3: invalid query string %q: %w", rawQuery, err)
+	}
+	if v := qs.Get("region"); v != "" {
+		opts = append(opts, WithRegion(v))
+	}
+	if v := qs.Get("endpoint"); v != "" {
+		opts = append(opts, WithEndpoint(v))
+	}
+	if v := qs.Get("secure"); v != "" {
+		secure, err := strconv.ParseBool(v)
+		if err != nil {
+			return "", nil, fmt.Errorf("storage/s3: invalid secure=%q (want true/false): %w", v, err)
+		}
+		opts = append(opts, WithSecure(secure))
+	}
+	if v := qs.Get("presign_ttl"); v != "" {
+		ttl, err := time.ParseDuration(v)
+		if err != nil {
+			return "", nil, fmt.Errorf("storage/s3: invalid presign_ttl=%q (want a Go duration like 15m): %w", v, err)
+		}
+		opts = append(opts, WithPresignTTL(ttl))
+	}
+	return bucket, opts, nil
 }
 
 // DefaultPresignTTL is the lifetime of URLs returned by [Storage.URL]

@@ -40,26 +40,32 @@ fmt:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Two runs per module:
+    #   1. Plain `-cover` for the tparse table — its Cover column shows
+    #      each package's self-coverage from its own _test.go files.
+    #   2. `-coverpkg=./...` for the merged coverage.out — credits
+    #      coverage to every package, including code reached only via
+    #      cross-package tests (parity_test.go → backend/*).
+    # Combining both into a single run forces tparse to show the
+    # cross-attributed numbers, which look broken to the eye (15% for
+    # backend/postgres). Two runs trades ~30s for honesty in both views.
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
         echo "==> $mod"
         (
             cd "$mod"
-            go test -race -json -coverpkg=./... -coverprofile=cover.out ./... > test.json
+            go test -race -json -cover ./... > test.json
             tparse -file=test.json
             rm -f test.json
+            go test -race -coverpkg=./... -coverprofile=cover.out ./... > /dev/null
         )
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
             rm -f "$mod/cover.out"
         fi
     done
-    # tparse's Cover column above shows each test set's contribution to
-    # total instrumented coverage (an artifact of -coverpkg=./...), not
-    # the per-package self-coverage you'd expect. Read the honest
-    # per-source-package numbers from the table below.
     echo
-    echo "Per-package coverage:"
+    echo "Per-package coverage (with cross-package attribution):"
     ./scripts/coverage-summary.sh | awk '{ printf "  %-55s %5.1f%%\n", $1, $2 }'
     echo
     go tool cover -func=coverage.out | tail -n 1

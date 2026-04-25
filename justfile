@@ -2,13 +2,26 @@
 default:
     @just --list
 
-# Run all tests (SQLite + PostgreSQL)
-test *args:
-    go test -race -json {{args}} ./... | tparse
+# Modules tracked by go.work. Extend when adding new storage/* submodules.
+mods := ". ./storage/s3"
 
-# Run linter
+# Run all tests across all modules (SQLite + PostgreSQL)
+test *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in {{mods}}; do
+        echo "==> tests: $mod"
+        (cd "$mod" && go test -race -json {{args}} ./...) | tparse
+    done
+
+# Run linter across all modules
 lint:
-    golangci-lint run ./...
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in {{mods}}; do
+        echo "==> lint: $mod"
+        (cd "$mod" && golangci-lint run ./...)
+    done
 
 # Format all Go files
 fmt:
@@ -41,13 +54,23 @@ bench-readme:
     go run ./scripts/bench_report.go -readme=README.md < "$out"
     echo "README.md benchmark tables updated."
 
-# Tidy module dependencies
+# Tidy module dependencies across all modules and sync the workspace
 tidy:
-    go mod tidy
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in {{mods}}; do
+        (cd "$mod" && go mod tidy)
+    done
+    go work sync
 
-# Run vulnerability check
+# Run vulnerability check across all modules
 vuln:
-    govulncheck ./...
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for mod in {{mods}}; do
+        echo "==> vuln: $mod"
+        (cd "$mod" && govulncheck ./...)
+    done
 
 # List active beans (excludes completed and scrapped)
 beans:

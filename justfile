@@ -28,13 +28,25 @@ fmt:
     gofmt -w .
     goimports -w .
 
-# Run tests with coverage (SQLite + PostgreSQL)
+# Run tests with coverage across all modules and merge into one report
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    go test -race -json -coverprofile=coverage.out ./... > test.json
-    tparse -file=test.json
-    rm -f test.json
+    echo "mode: atomic" > coverage.out
+    for mod in {{mods}}; do
+        echo "==> coverage: $mod"
+        (
+            cd "$mod"
+            go test -race -json -coverprofile=cover.out ./... > test.json
+            tparse -file=test.json
+            rm -f test.json
+        )
+        # Append per-module coverage lines, dropping the duplicate mode header.
+        if [ -f "$mod/cover.out" ]; then
+            tail -n +2 "$mod/cover.out" >> coverage.out
+            rm -f "$mod/cover.out"
+        fi
+    done
     go tool cover -html=coverage.out -o coverage.html
     echo "Coverage report: coverage.html"
 

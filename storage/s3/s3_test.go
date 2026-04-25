@@ -91,14 +91,19 @@ func newRawClient(t *testing.T) *miniogo.Client {
 
 // newTestStorage spins up a fresh bucket on the shared MinIO and
 // returns a *Storage targeting it. Skips the test if Docker isn't
-// reachable (CI without docker-in-docker, dev box with daemon down).
+// reachable on a developer machine; in CI (CI=true is set by GHA and
+// most CI providers) a missing Docker fails the test instead, so we
+// don't lose s3-backend coverage to a silent skip.
 // Extra options are appended after the connection options so callers
 // can add WithPathPrefix etc. without losing the test wiring.
 func newTestStorage(t *testing.T, extra ...Option) *Storage {
 	t.Helper()
 	ctx := t.Context()
 	if err := startShared(ctx); err != nil {
-		t.Skipf("MinIO testcontainer unavailable: %v", err)
+		if os.Getenv("CI") == "true" {
+			t.Fatalf("MinIO testcontainer required in CI but failed to start: %v", err)
+		}
+		t.Skipf("MinIO testcontainer unavailable (set Docker up to run S3 tests): %v", err)
 	}
 
 	bucket := fmt.Sprintf("den-test-%d", bucketCounter.Add(1))

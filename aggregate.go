@@ -245,7 +245,10 @@ func (gb GroupByBuilder[T]) Into(ctx context.Context, target any) error {
 	}
 
 	// Build the list of aggregate expressions from the target struct's den tags.
-	aggs, aggIndices := buildAggsFromMappings(mappings)
+	aggs, aggIndices, err := buildAggsFromMappings(mappings)
+	if err != nil {
+		return err
+	}
 
 	q := gb.qs.buildBackendQuery(col)
 
@@ -376,33 +379,47 @@ func resolveGroupKeySlots(mappings []groupField, numFields int) ([]int, error) {
 
 // buildAggsFromMappings converts den struct tags into GroupByAgg descriptors.
 // Returns the aggs and a map from tag → index in the Values slice.
-func buildAggsFromMappings(mappings []groupField) ([]GroupByAgg, map[string]int) {
+//
+// Duplicate aggregate tags (two struct fields carrying the same `den:"sum:x"`
+// or similar) are rejected with an error. The previous behaviour silently
+// overwrote the indices entry, leaving the SQL with a redundant column and
+// masking copy-paste typos like "I meant sum:x but typed avg:x twice."
+// Mirrors the duplicate-slot rejection that already protects `group_key:N`.
+func buildAggsFromMappings(mappings []groupField) ([]GroupByAgg, map[string]int, error) {
 	var aggs []GroupByAgg
 	indices := make(map[string]int)
 
+	register := func(m groupField, op AggregateOp, field string) error {
+		if _, exists := indices[m.tag]; exists {
+			return fmt.Errorf("den: GroupBy: duplicate aggregate tag %q on target struct", m.tag)
+		}
+		indices[m.tag] = len(aggs)
+		aggs = append(aggs, GroupByAgg{Op: op, Field: field})
+		return nil
+	}
+
 	for _, m := range mappings {
+		var err error
 		switch {
 		case isGroupKeyTag(m.tag):
 			continue
 		case m.tag == "count":
-			indices[m.tag] = len(aggs)
-			aggs = append(aggs, GroupByAgg{Op: OpCount})
+			err = register(m, OpCount, "")
 		case strings.HasPrefix(m.tag, "avg:"):
-			indices[m.tag] = len(aggs)
-			aggs = append(aggs, GroupByAgg{Op: OpAvg, Field: strings.TrimPrefix(m.tag, "avg:")})
+			err = register(m, OpAvg, strings.TrimPrefix(m.tag, "avg:"))
 		case strings.HasPrefix(m.tag, "sum:"):
-			indices[m.tag] = len(aggs)
-			aggs = append(aggs, GroupByAgg{Op: OpSum, Field: strings.TrimPrefix(m.tag, "sum:")})
+			err = register(m, OpSum, strings.TrimPrefix(m.tag, "sum:"))
 		case strings.HasPrefix(m.tag, "min:"):
-			indices[m.tag] = len(aggs)
-			aggs = append(aggs, GroupByAgg{Op: OpMin, Field: strings.TrimPrefix(m.tag, "min:")})
+			err = register(m, OpMin, strings.TrimPrefix(m.tag, "min:"))
 		case strings.HasPrefix(m.tag, "max:"):
-			indices[m.tag] = len(aggs)
-			aggs = append(aggs, GroupByAgg{Op: OpMax, Field: strings.TrimPrefix(m.tag, "max:")})
+			err = register(m, OpMax, strings.TrimPrefix(m.tag, "max:"))
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 
-	return aggs, indices
+	return aggs, indices, nil
 }
 
 func resolveMapFieldParts(doc map[string]any, parts []string) any {

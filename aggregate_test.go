@@ -286,6 +286,29 @@ func TestGroupBy_DuplicateSlot(t *testing.T) {
 	assert.Contains(t, err.Error(), "group_key")
 }
 
+// TestGroupBy_DuplicateAggregateTag rejects targets with two fields carrying
+// the same aggregate tag. Without this guard, a typo (e.g. two `den:"avg:x"`
+// when one was meant to be `sum:x`) silently produces two copies of the same
+// value and masks the programmer's intent. Mirrors TestGroupBy_DuplicateSlot
+// for the `group_key:N` side of the tag space.
+func TestGroupBy_DuplicateAggregateTag(t *testing.T) {
+	db := dentest.MustOpen(t, &AggProduct{})
+	ctx := context.Background()
+
+	type Stats struct {
+		Category string  `den:"group_key"`
+		Total1   float64 `den:"sum:price"`
+		Total2   float64 `den:"sum:price"`
+	}
+
+	var stats []Stats
+	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "sum:price",
+		"error must name the duplicate tag so the user can find it")
+	assert.Contains(t, err.Error(), "duplicate")
+}
+
 // TestGroupBy_SortByKey orders grouped results by a group key.
 func TestGroupBy_SortByKey(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})

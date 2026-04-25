@@ -4,26 +4,34 @@ import (
 	"context"
 )
 
-// FTSProvider is an optional interface backends implement
-// to support full-text search.
-type FTSProvider interface {
+// FTSSearcher is the read-side full-text search contract. Both backends and
+// transactions implement it so [QuerySet.Search] honors the caller's scope:
+// `NewQuery[T](db).Search(...)` reads committed state, while
+// `NewQuery[T](tx).Search(...)` sees the tx's uncommitted writes (the FTS
+// index is updated in-tx by triggers on SQLite and by tsvector + GIN under
+// MVCC on PostgreSQL).
+type FTSSearcher interface {
 	Search(ctx context.Context, collection string, query string, q *Query) (Iterator, error)
+}
+
+// FTSProvider extends [FTSSearcher] with the registration-time setup hook.
+// Backends implement the full interface; transactions implement only
+// [FTSSearcher] because index/trigger creation is a one-time setup
+// operation that does not belong on a transactional path.
+type FTSProvider interface {
+	FTSSearcher
 	EnsureFTS(ctx context.Context, collection string, fields []string) error
 }
 
-// Search performs a full-text search on the QuerySet.
+// Search performs a full-text search on the QuerySet, honoring the
+// QuerySet's scope: a tx-bound QuerySet sees the tx's uncommitted writes
+// and rolls them back together with the rest of the tx, just like every
+// other Den read. A *DB-bound QuerySet reads committed state.
 //
-// Search always runs against the DB backend — full-text indexes are a
-// backend-level concern and den does not proxy FTS through the caller's
-// transaction.
-//
-// Tx-visibility caveat: because the caller's uncommitted writes live only
-// on the tx connection, docs inserted or updated inside the caller's tx
-// are not visible to Search until the tx commits. Non-FTS predicates
-// (Where, Sort, etc.) on a Tx-bound QuerySet DO honor the tx. If tx-local
-// visibility matters, run Search after commit, or fall back to
-// Where(Field("body").Contains(q)) — accepting that Contains is a literal
-// substring match without FTS stemming or ranking.
+// Returns [ErrFTSNotSupported] when the underlying scope does not implement
+// [FTSSearcher] — either the backend has no FTS support, or the scope is a
+// transaction on a backend whose tx side does not (no current backend has
+// this asymmetry, but the contract leaves room for one).
 func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error) {
 	if err := qs.preflight(); err != nil {
 		return nil, err
@@ -34,7 +42,7 @@ func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error
 		return nil, err
 	}
 
-	fts, ok := db.backend.(FTSProvider)
+	fts, ok := qs.scope.readWriter().(FTSSearcher)
 	if !ok {
 		return nil, ErrFTSNotSupported
 	}

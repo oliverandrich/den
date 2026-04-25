@@ -79,20 +79,20 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 	return nil
 }
 
-// Search performs a full-text search using FTS5 MATCH.
-func (b *backend) Search(ctx context.Context, collection string, query string, q *den.Query) (den.Iterator, error) {
+// buildFTSSearchSQL constructs the FTS5 MATCH query for the collection.
+// Shared by the *DB and *Tx Search implementations so the SQL stays in
+// one place; only the executor differs.
+func buildFTSSearchSQL(collection, query string, q *den.Query) (string, []any) {
 	ftsTable := collection + "_fts"
 
 	var sb strings.Builder
-	var args []any
+	args := []any{query}
 
 	fmt.Fprintf(&sb,
 		"SELECT t.id, json(t.data) FROM %q t JOIN %q f ON t.rowid = f.rowid WHERE %q MATCH ?",
 		collection, ftsTable, ftsTable,
 	)
-	args = append(args, query)
 
-	// Add where conditions
 	if len(q.Conditions) > 0 {
 		for _, cond := range q.Conditions {
 			clause, clauseArgs := conditionToSQL(cond)
@@ -140,7 +140,15 @@ func (b *backend) Search(ctx context.Context, collection string, query string, q
 		fmt.Fprintf(&sb, " OFFSET %d", q.SkipN)
 	}
 
-	rows, err := b.db.QueryContext(ctx, sb.String(), args...)
+	return sb.String(), args
+}
+
+// Search performs a full-text search using FTS5 MATCH against the *DB
+// connection. Reads committed state; for tx-local visibility see the
+// transaction's Search method.
+func (b *backend) Search(ctx context.Context, collection string, query string, q *den.Query) (den.Iterator, error) {
+	sqlStr, args := buildFTSSearchSQL(collection, query, q)
+	rows, err := b.db.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}

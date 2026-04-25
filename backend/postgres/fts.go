@@ -38,20 +38,19 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 	return nil
 }
 
-// Search performs a full-text search using tsquery.
-func (b *backend) Search(ctx context.Context, collection string, query string, q *den.Query) (den.Iterator, error) {
+// buildFTSSearchSQL constructs the tsquery FTS query for the collection.
+// Shared by the *DB and *Tx Search implementations so the SQL stays in
+// one place; only the executor differs.
+func buildFTSSearchSQL(collection, query string, q *den.Query) (string, []any) {
 	var sb strings.Builder
-	var args []any
-	paramN := 1
+	args := []any{query}
+	paramN := 2
 
 	fmt.Fprintf(&sb,
-		"SELECT id, data::text FROM %s WHERE _fts_vector @@ plainto_tsquery('english', $%d)",
-		quoteIdent(collection), paramN,
+		"SELECT id, data::text FROM %s WHERE _fts_vector @@ plainto_tsquery('english', $1)",
+		quoteIdent(collection),
 	)
-	args = append(args, query)
-	paramN++
 
-	// Add where conditions
 	if len(q.Conditions) > 0 {
 		for _, cond := range q.Conditions {
 			clause, clauseArgs, nextN := conditionToSQL(cond, paramN)
@@ -97,7 +96,15 @@ func (b *backend) Search(ctx context.Context, collection string, query string, q
 		fmt.Fprintf(&sb, " OFFSET %d", q.SkipN)
 	}
 
-	rows, err := b.pool.Query(ctx, sb.String(), args...)
+	return sb.String(), args
+}
+
+// Search performs a full-text search using tsquery against the *DB pool.
+// Reads committed state; for tx-local visibility see the transaction's
+// Search method.
+func (b *backend) Search(ctx context.Context, collection string, query string, q *den.Query) (den.Iterator, error) {
+	sqlStr, args := buildFTSSearchSQL(collection, query, q)
+	rows, err := b.pool.Query(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}

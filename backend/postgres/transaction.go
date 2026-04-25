@@ -107,6 +107,18 @@ func (t *transaction) GroupBy(ctx context.Context, collection string, groupField
 	return scanGroupByRowsPG(ctx, t.tx, sqlStr, args, len(groupFields), len(aggs))
 }
 
+// Search performs a full-text search through the tx connection so the
+// caller's uncommitted writes are visible via PostgreSQL MVCC. Mirrors
+// the *DB Search via the shared buildFTSSearchSQL helper.
+func (t *transaction) Search(ctx context.Context, collection string, query string, q *den.Query) (den.Iterator, error) {
+	sqlStr, args := buildFTSSearchSQL(collection, query, q)
+	rows, err := t.tx.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	return &rowsIterator{rows: rows}, nil
+}
+
 func (t *transaction) Commit() error {
 	return t.tx.Commit(t.ctx)
 }

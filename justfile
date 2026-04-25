@@ -40,22 +40,23 @@ fmt:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # tparse for visual consistency with `just test`. Note: the Cover
-    # column shows each test set's contribution to the total
-    # instrumented coverage under -coverpkg=./... (an artifact of the
-    # cross-package attribution we need so backend code reached only
-    # via parity_test.go is counted). The honest per-package numbers
-    # live in coverage.out and are surfaced by `just coverage-check`
-    # and `scripts/coverage-summary.sh`; the HTML report below also
-    # shows the truth file by file.
+    # Two runs per module so both views are meaningful:
+    #   1. Plain `-cover` for tparse — its Cover column shows each
+    #      package's self-coverage (its own _test.go files vs its own
+    #      statements). Legitimate, just not the whole story.
+    #   2. `-coverpkg=./...` for the merged coverage.out — credits
+    #      coverage to every package, including code reached only via
+    #      cross-package tests (parity_test.go → backend/*). This is
+    #      what `just coverage-check` and the HTML report consume.
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
         echo "==> $mod"
         (
             cd "$mod"
-            go test -race -json -coverpkg=./... -coverprofile=cover.out ./... > test.json
+            go test -race -json -cover ./... > test.json
             tparse -file=test.json
             rm -f test.json
+            go test -race -coverpkg=./... -coverprofile=cover.out ./... > /dev/null
         )
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
@@ -63,7 +64,7 @@ coverage:
         fi
     done
     go tool cover -html=coverage.out -o coverage.html
-    echo "HTML report: coverage.html  (run \`just coverage-check\` for honest per-package numbers)"
+    echo "HTML report: coverage.html  (run \`just coverage-check\` for cross-package per-package numbers)"
 
 # Enforce the per-package coverage threshold ({{coverage_threshold}}%).
 # Runs `coverage` first (so coverage.out is fresh) and fails if any

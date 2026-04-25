@@ -319,6 +319,101 @@ intentionally do NOT implement this method — the absent `URLPrefix()`
 is the signal that the Storage is responsible for serving and the HTTP
 package should skip local routing.
 
+## The S3 Backend
+
+`den/storage/s3` is an S3 (and S3-compatible, e.g. MinIO) backend
+backed by [`minio-go`](https://github.com/minio/minio-go). It lives
+in its own Go module so the `minio-go` dependency only enters the
+build of applications that actually need S3 — Den core stays free of
+any S3-specific transitive deps.
+
+```bash
+go get github.com/oliverandrich/den/storage/s3
+```
+
+The submodule is versioned independently of Den core; release tags
+follow the `storage/s3/vX.Y.Z` convention.
+
+### Construction
+
+**Direct constructor**:
+
+```go
+import s3 "github.com/oliverandrich/den/storage/s3"
+
+st, err := s3.New("my-bucket",
+    s3.WithRegion("eu-central-1"),
+    s3.WithPresignTTL(15*time.Minute),
+)
+```
+
+**DSN-based dispatch** — same pattern as the file backend, with the
+side-effect import registering the `s3://` scheme:
+
+```go
+import (
+    "github.com/oliverandrich/den/storage"
+    _ "github.com/oliverandrich/den/storage/s3" // registers "s3://"
+)
+
+st, err := storage.OpenURL(
+    "s3://my-bucket/uploads?region=eu-central-1&presign_ttl=15m",
+    "/media/", // unused by S3 — URLs are absolute
+)
+```
+
+The DSN form is `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`:
+
+| Query param | Meaning | Default |
+|---|---|---|
+| `region` | AWS region, e.g. `eu-central-1` | empty (required by real S3) |
+| `endpoint` | S3-compatible endpoint without scheme, e.g. `minio.local:9000` | `s3.amazonaws.com` |
+| `secure` | TLS to the endpoint (`true` / `false`) | `true` |
+| `presign_ttl` | Lifetime of pre-signed URLs (Go duration) | `15m` |
+
+Credentials are intentionally **NOT** parsed from the DSN. They come
+from the standard AWS chain: `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` env vars, or the IAM instance profile when
+running on EC2 / ECS / EKS. For tests or one-off setups, pass them
+explicitly via `s3.WithCredentials(accessKey, secretKey)`.
+
+### MinIO / localstack
+
+Override the endpoint and disable TLS:
+
+```go
+st, err := s3.New("local",
+    s3.WithEndpoint("minio.local:9000"),
+    s3.WithSecure(false),
+    s3.WithCredentials("minioadmin", "minioadmin"),
+)
+```
+
+Or via DSN: `s3://local?endpoint=minio.local:9000&secure=false`.
+
+### Object layout and dedup
+
+Generated keys mirror the file backend:
+`<prefix>/YYYY/MM/<first-16-of-sha256><ext>` — content-addressed,
+month-bucketed. Two `Store` calls with identical bytes produce the
+same key; the second call short-circuits via a `HeadObject` check
+instead of re-uploading.
+
+The optional path prefix (DSN path component or `s3.WithPathPrefix`)
+nests every object under one folder inside the bucket — useful when
+sharing a bucket across applications.
+
+### Pre-signed URLs
+
+`Storage.URL` returns a SigV4-pre-signed GET URL valid for the
+configured TTL (`s3.DefaultPresignTTL` is 15 minutes; override with
+`s3.WithPresignTTL` or the `presign_ttl` DSN param). Signing is local
+computation — no network round-trip per call.
+
+S3 URLs are absolute, so the S3 backend deliberately omits the
+`URLPrefix() string` method. HTTP-layer packages should treat the
+returned URL as opaque and not register a local serving handler.
+
 ## Writing a Custom Storage Backend
 
 Implement `den.Storage`:

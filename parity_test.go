@@ -870,3 +870,44 @@ func TestParity_NumericEqConsistency(t *testing.T) {
 		})
 	}
 }
+
+// TestParity_GroupBy_InTransaction exercises both backends'
+// transaction-scoped GroupBy path. The non-tx GroupBy is well covered
+// by aggregate_test.go but every GroupBy there runs against a *DB —
+// the *Tx code path on both backends had no coverage at all.
+func TestParity_GroupBy_InTransaction(t *testing.T) {
+	type CatStats struct {
+		Category string  `den:"group_key"`
+		Count    int64   `den:"count"`
+		Total    float64 `den:"sum:price"`
+	}
+
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+				{Name: "A", Price: 10, Category: "X"},
+				{Name: "B", Price: 20, Category: "X"},
+				{Name: "C", Price: 30, Category: "Y"},
+				{Name: "D", Price: 40, Category: "Y"},
+				{Name: "E", Price: 50, Category: "Y"},
+			}))
+
+			var stats []CatStats
+			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+				return den.NewQuery[ParityProduct](tx).GroupBy("category").Into(ctx, &stats)
+			})
+			require.NoError(t, err)
+			require.Len(t, stats, 2)
+
+			byCat := make(map[string]CatStats, len(stats))
+			for _, s := range stats {
+				byCat[s.Category] = s
+			}
+			assert.Equal(t, int64(2), byCat["X"].Count)
+			assert.InDelta(t, 30.0, byCat["X"].Total, 0.001)
+			assert.Equal(t, int64(3), byCat["Y"].Count)
+			assert.InDelta(t, 120.0, byCat["Y"].Total, 0.001)
+		})
+	}
+}

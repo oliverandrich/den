@@ -28,27 +28,49 @@ fmt:
     gofmt -w .
     goimports -w .
 
-# Run tests with coverage across all modules and merge into one report
+# Run tests with coverage across all modules, merge per-module
+# profiles into one coverage.out, and report per-source-package
+# coverage with cross-package attribution (`-coverpkg=./...` so code
+# reached only via cross-package tests like parity_test.go → backend/*
+# is credited correctly). For the test-runner view with timings, use
+# `just test`; this recipe is dedicated to the coverage signal.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
-        echo "==> coverage: $mod"
-        (
-            cd "$mod"
-            go test -race -json -coverprofile=cover.out ./... > test.json
-            tparse -file=test.json
-            rm -f test.json
-        )
-        # Append per-module coverage lines, dropping the duplicate mode header.
+        echo "==> $mod"
+        (cd "$mod" && go test -race -coverpkg=./... -coverprofile=cover.out ./...)
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
             rm -f "$mod/cover.out"
         fi
     done
+    echo
+    echo "Per-package coverage:"
+    # Concatenated profiles from per-module `go test -coverpkg=./...`
+    # repeat each statement range once per test package that instrumented
+    # it (most with count=0). Dedup by range key, taking max count, before
+    # aggregating — otherwise totals are inflated and percentages tank.
+    awk 'NR > 1 {
+        key = $1
+        if (!(key in stmts)) { stmts[key] = $2 }
+        if ($3 > maxc[key]) { maxc[key] = $3 }
+    } END {
+        for (key in stmts) {
+            split(key, a, ":")
+            n = split(a[1], parts, "/")
+            pkg = parts[1]
+            for (i = 2; i < n; i++) pkg = pkg "/" parts[i]
+            total[pkg] += stmts[key]
+            if (maxc[key] > 0) covered[pkg] += stmts[key]
+        }
+        for (p in total) printf "  %-55s %5.1f%%\n", p, (covered[p] / total[p]) * 100
+    }' coverage.out | sort
+    echo
+    go tool cover -func=coverage.out | tail -n 1
     go tool cover -html=coverage.out -o coverage.html
-    echo "Coverage report: coverage.html"
+    echo "HTML report: coverage.html"
 
 # Run benchmarks (use count=N for statistical significance)
 bench count="1":

@@ -119,6 +119,9 @@ jobs:
 
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
+      - name: Install tparse
+        run: go install github.com/mfridman/tparse@latest
+
       - name: Coverage gate (per-package ≥80%)
         env:
           DEN_POSTGRES_URL: postgres://den:den@localhost:5432/den_test?sslmode=disable

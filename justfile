@@ -43,12 +43,21 @@ coverage:
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
         echo "==> $mod"
-        (cd "$mod" && go test -race -coverpkg=./... -coverprofile=cover.out ./...)
+        (
+            cd "$mod"
+            go test -race -json -coverpkg=./... -coverprofile=cover.out ./... > test.json
+            tparse -file=test.json
+            rm -f test.json
+        )
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
             rm -f "$mod/cover.out"
         fi
     done
+    # tparse's Cover column above shows each test set's contribution to
+    # total instrumented coverage (an artifact of -coverpkg=./...), not
+    # the per-package self-coverage you'd expect. Read the honest
+    # per-source-package numbers from the table below.
     echo
     echo "Per-package coverage:"
     ./scripts/coverage-summary.sh | awk '{ printf "  %-55s %5.1f%%\n", $1, $2 }'

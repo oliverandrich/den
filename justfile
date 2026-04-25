@@ -40,32 +40,25 @@ fmt:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Two runs per module:
-    #   1. Plain `-cover` for the tparse table — its Cover column shows
-    #      each package's self-coverage from its own _test.go files.
-    #   2. `-coverpkg=./...` for the merged coverage.out — credits
-    #      coverage to every package, including code reached only via
-    #      cross-package tests (parity_test.go → backend/*).
-    # Combining both into a single run forces tparse to show the
-    # cross-attributed numbers, which look broken to the eye (15% for
-    # backend/postgres). Two runs trades ~30s for honesty in both views.
+    # Single run with -coverpkg=./... so coverage is credited to every
+    # package, including code reached only via cross-package tests
+    # (parity_test.go → backend/*). go test prints a misleading
+    # per-package "coverage: X%" suffix under -coverpkg (it's the
+    # current test set's contribution to total instrumented coverage,
+    # not the package's own coverage); strip it so the honest
+    # per-package table at the end is the only coverage signal.
     echo "mode: atomic" > coverage.out
     for mod in {{mods}}; do
         echo "==> $mod"
-        (
-            cd "$mod"
-            go test -race -json -cover ./... > test.json
-            tparse -file=test.json
-            rm -f test.json
-            go test -race -coverpkg=./... -coverprofile=cover.out ./... > /dev/null
-        )
+        (cd "$mod" && go test -race -coverpkg=./... -coverprofile=cover.out ./...) \
+            | sed -E 's/[[:space:]]+coverage: [0-9.]+% of statements( in \.\/\.\.\.)?$//'
         if [ -f "$mod/cover.out" ]; then
             tail -n +2 "$mod/cover.out" >> coverage.out
             rm -f "$mod/cover.out"
         fi
     done
     echo
-    echo "Per-package coverage (with cross-package attribution):"
+    echo "Per-package coverage:"
     ./scripts/coverage-summary.sh | awk '{ printf "  %-55s %5.1f%%\n", $1, $2 }'
     echo
     go tool cover -func=coverage.out | tail -n 1

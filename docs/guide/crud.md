@@ -158,7 +158,7 @@ if errors.Is(err, den.ErrMultipleMatches) {
 }
 ```
 
-Pass `den.IncludeSoftDeleted()` to also match soft-deleted documents.
+Pass `den.IncludeDeleted()` to also match soft-deleted documents.
 
 !!! tip "Job-queue pattern"
     For claim-one-of-many patterns (job queues, work tickets), reach for `RunInTransaction` together with `QuerySet.ForUpdate(SkipLocked())` — that locks the row at SELECT time so a concurrent worker skips it instead of racing for the same write.
@@ -181,7 +181,7 @@ if inserted {
 }
 ```
 
-Like `FindOneAndUpdate`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place.
+Like `FindOneAndUpdate`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; pass `IncludeDeleted()` to update them in place.
 
 !!! note "Concurrency"
     Two concurrent upserts that both miss race for the insert. One wins; the other gets `ErrDuplicate` from the underlying unique constraint on the lookup column. There is no internal retry — callers that want one decide explicitly between retry and surfacing the error.

@@ -35,7 +35,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     st, err := storage.OpenURL("s3://my-bucket?region=eu-central-1", "/media/")
     ```
 
-- **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeSoftDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.
+- **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.
 
     ```go
     user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
@@ -45,7 +45,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     )
     ```
 
-- **`IncludeSoftDeleted()` CRUDOption** — opts lookup-style operations into considering soft-deleted documents. Honored by `FindOneAndUpdate` and `FindOneAndUpsert`.
+- **`IncludeDeleted()` CRUDOption** — opts lookup-style operations into considering soft-deleted documents. Honored by `FindOneAndUpdate` and `FindOneAndUpsert`. Mirrors the existing `QuerySet.IncludeDeleted()` modifier so the same name works for both query-driven reads and CRUD-style lookups; the two are separate identifiers (a method on QuerySet vs a top-level function), but they share the name on purpose.
 - **Soft-delete audit fields** — `document.SoftDelete` gained optional `DeletedBy` and `DeleteReason` strings. Populate them via two new CRUDOptions:
 
     ```go

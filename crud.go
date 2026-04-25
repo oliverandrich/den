@@ -339,7 +339,7 @@ type SetFields map[string]any
 // When scope is a *DB, a new transaction is opened; when scope is a *Tx,
 // the operation runs inline in the caller's transaction.
 //
-// Pass IncludeSoftDeleted to consider soft-deleted documents in the match.
+// Pass IncludeDeleted to consider soft-deleted documents in the match.
 func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error) {
 	db := s.db()
 	col, err := collectionFor[T](db)
@@ -353,7 +353,7 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 	o := applyCRUDOpts(opts)
 
 	body := func(tx *Tx) (*T, error) {
-		doc, err := findOneStrict[T](ctx, tx, conditions, o.includeSoftDeleted)
+		doc, err := findOneStrict[T](ctx, tx, conditions, o.includeDeleted)
 		if err != nil {
 			return nil, err
 		}
@@ -394,7 +394,7 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 //   - Hit:  BeforeUpdate → BeforeSave → tag-validation → Validate → write → AfterUpdate → AfterSave
 //   - Miss: BeforeInsert → BeforeSave → tag-validation → Validate → write → AfterInsert → AfterSave
 //
-// Soft-deleted matches are ignored by default — pass IncludeSoftDeleted to
+// Soft-deleted matches are ignored by default — pass IncludeDeleted to
 // have them satisfy the lookup. DeletedAt is left as-is when an existing
 // soft-deleted document is updated; clear it explicitly via fields if the
 // caller wants to resurrect.
@@ -425,7 +425,7 @@ func FindOneAndUpsert[T any](
 	o := applyCRUDOpts(opts)
 
 	body := func(tx *Tx) (upsertResult[T], error) {
-		existing, err := findOneStrict[T](ctx, tx, conditions, o.includeSoftDeleted)
+		existing, err := findOneStrict[T](ctx, tx, conditions, o.includeDeleted)
 		switch {
 		case err == nil:
 			rv := reflect.ValueOf(existing).Elem()
@@ -707,10 +707,10 @@ func findOneStrict[T any](
 	ctx context.Context,
 	s Scope,
 	conditions []where.Condition,
-	includeSoftDeleted bool,
+	includeDeleted bool,
 ) (*T, error) {
 	qs := NewQuery[T](s, conditions...).Limit(2)
-	if includeSoftDeleted {
+	if includeDeleted {
 		qs = qs.IncludeDeleted()
 	}
 	results, err := qs.All(ctx)

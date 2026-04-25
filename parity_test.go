@@ -731,7 +731,7 @@ func TestParity_SoftDelete_ConcurrentUpdateConflicts(t *testing.T) {
 	}
 }
 
-func TestParity_FindOneAndUpsert_IncludeSoftDeleted(t *testing.T) {
+func TestParity_FindOneAndUpsert_IncludeDeleted(t *testing.T) {
 	for name, db := range paritySoftDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -743,7 +743,7 @@ func TestParity_FindOneAndUpsert_IncludeSoftDeleted(t *testing.T) {
 				&ParitySoftProduct{Name: "Widget", Price: 10.0},
 				den.SetFields{"price": 20.0},
 				[]where.Condition{where.Field("name").Eq("Widget")},
-				den.IncludeSoftDeleted(),
+				den.IncludeDeleted(),
 			)
 			require.NoError(t, err)
 			assert.False(t, inserted)

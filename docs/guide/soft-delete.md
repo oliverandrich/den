@@ -47,17 +47,18 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
-!!! note "QuerySet vs. CRUDOption"
-    `IncludeDeleted()` is a **QuerySet modifier** — it only affects reads driven by `den.NewQuery`. For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, use the `den.IncludeSoftDeleted()` **CRUDOption** to match soft-deleted rows during the atomic lookup step.
+For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, the same name is also available as a **CRUDOption** (`den.IncludeDeleted()`) that opts the atomic lookup step into matching soft-deleted rows:
 
-    ```go
-    // Find a soft-deleted product and bring it back
-    p, err := den.FindOneAndUpdate[Product](ctx, db,
-        den.SetFields{"_deleted_at": nil},
-        []where.Condition{where.Field("sku").Eq("abc")},
-        den.IncludeSoftDeleted(),
-    )
-    ```
+```go
+// Find a soft-deleted product and bring it back
+p, err := den.FindOneAndUpdate[Product](ctx, db,
+    den.SetFields{"_deleted_at": nil},
+    []where.Condition{where.Field("sku").Eq("abc")},
+    den.IncludeDeleted(),
+)
+```
+
+The QuerySet method (`qs.IncludeDeleted()`) and the CRUDOption (`den.IncludeDeleted()`) are different identifiers in different namespaces, but they share the name on purpose — both mean "consider soft-deleted documents as well."
 
 ## Permanent Removal
 

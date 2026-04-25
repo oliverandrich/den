@@ -21,14 +21,17 @@ func HardDelete() CRUDOption {
 	}
 }
 
-// IncludeSoftDeleted returns a CRUDOption that makes lookup-style operations
+// IncludeDeleted returns a CRUDOption that makes lookup-style operations
 // consider soft-deleted documents. Currently honored by FindOneAndUpdate and
 // FindOneAndUpsert: without it, soft-deleted matches are skipped (Upsert then
 // inserts a fresh document); with it, the soft-deleted document is updated in
 // place and DeletedAt is left untouched.
-func IncludeSoftDeleted() CRUDOption {
+//
+// Mirrors the [QuerySet.IncludeDeleted] modifier so the same name covers
+// both query-driven reads and CRUD-style lookups.
+func IncludeDeleted() CRUDOption {
 	return func(o *crudOpts) {
-		o.includeSoftDeleted = true
+		o.includeDeleted = true
 	}
 }
 

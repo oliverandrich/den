@@ -892,7 +892,7 @@ func TestFindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
 	assert.InDelta(t, 20.0, doc.Price, 0.001)
 }
 
-func TestFindOneAndUpsert_IncludeSoftDeletedUpdates(t *testing.T) {
+func TestFindOneAndUpsert_IncludeDeletedUpdates(t *testing.T) {
 	db := dentest.MustOpen(t, &SoftProduct{})
 	ctx := context.Background()
 
@@ -904,7 +904,7 @@ func TestFindOneAndUpsert_IncludeSoftDeletedUpdates(t *testing.T) {
 		&SoftProduct{Name: "Widget", Price: 10.0},
 		den.SetFields{"price": 20.0},
 		[]where.Condition{where.Field("name").Eq("Widget")},
-		den.IncludeSoftDeleted(),
+		den.IncludeDeleted(),
 	)
 	require.NoError(t, err)
 	assert.False(t, inserted, "soft-deleted match should be updated")

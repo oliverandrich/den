@@ -80,7 +80,7 @@ type crudOpts struct {
 	linkRule               LinkRule
 	ignoreRevision         bool
 	hardDelete             bool
-	includeSoftDeleted     bool
+	includeDeleted         bool
 	softDeleteBy           string
 	softDeleteReason       string
 	preValidate            bool

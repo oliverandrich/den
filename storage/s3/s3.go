@@ -1,30 +1,54 @@
 // SPDX-License-Identifier: MIT
 
 // Package s3 is the S3 (and S3-compatible, e.g. MinIO) Storage backend
-// for Den. It lives in its own Go module so that the minio-go dependency
+// for Den. It lives in its own Go module so the minio-go dependency
 // only enters the build of applications that actually import it — Den
 // core stays free of any S3-specific transitive deps.
 //
 // Importing this package for its side effect registers the "s3://"
-// scheme with [storage.OpenURL]:
+// scheme with [storage.OpenURL]; the registry-side opener that turns
+// the DSN into options lands in a follow-up. Direct construction works
+// today via [New]:
 //
-//	import _ "github.com/oliverandrich/den/storage/s3"
+//	import s3 "github.com/oliverandrich/den/storage/s3"
 //
-//	s, err := storage.OpenURL("s3://my-bucket?region=eu-central-1", "/media/")
+//	st, err := s3.New("my-bucket",
+//	    s3.WithRegion("eu-central-1"),
+//	    s3.WithCredentials(accessKey, secretKey),
+//	)
 //
-// The implementation lands incrementally: this revision wires the scheme
-// into the registry and parses the DSN, but constructing a Storage
-// returns a "not yet implemented" error. The minio-go-backed Store /
-// Open / Delete / URL implementation follows in the next bean step.
+// Object keys are content-addressed (`YYYY/MM/<sha256[:16]><ext>`)
+// under an optional path prefix; identical bytes resolve to the same
+// key, so two writers uploading the same file produce a single object.
+//
+// [Storage.URL] returns a SigV4-presigned GET URL valid for the
+// configured TTL ([DefaultPresignTTL] by default). Because S3 URLs are
+// absolute, [Storage] deliberately omits a `URLPrefix() string` method
+// — HTTP-layer code can type-assert on that interface to decide
+// whether to mount a local serving handler.
 //
 // Versioned independently of Den core; release tags use the
 // `storage/s3/vX.Y.Z` form per Go-submodule convention.
 package s3
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path"
+	"strings"
+	"time"
+
+	miniogo "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/oliverandrich/den"
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/storage"
 )
 
@@ -33,9 +57,10 @@ func init() {
 }
 
 // openerFunc is the [storage.OpenerFunc] dispatched by [storage.OpenURL]
-// for "s3://...". The DSN follows
-// `s3://<bucket>[/<prefix>][?region=…&endpoint=…]`. Currently only the
-// bucket is extracted; the rest is reserved for the implementation step.
+// for "s3://...". DSN parsing for region / endpoint / presign-TTL /
+// prefix lands in the next bean step; until then the opener validates
+// the bucket and returns a labelled "not yet implemented" error so the
+// dispatch is observable.
 func openerFunc(location, _ string) (den.Storage, error) {
 	bucket := bucketFromLocation(location)
 	if bucket == "" {
@@ -44,7 +69,7 @@ func openerFunc(location, _ string) (den.Storage, error) {
 	return nil, fmt.Errorf("storage/s3: not yet implemented (bucket=%q)", bucket)
 }
 
-// bucketFromLocation returns the bucket name from the location portion
+// bucketFromLocation extracts the bucket name from the location portion
 // of the DSN — everything before the first '/' (path) or '?' (query).
 func bucketFromLocation(location string) string {
 	for i := range len(location) {
@@ -53,4 +78,227 @@ func bucketFromLocation(location string) string {
 		}
 	}
 	return location
+}
+
+// DefaultPresignTTL is the lifetime of URLs returned by [Storage.URL]
+// when [WithPresignTTL] is not used.
+const DefaultPresignTTL = 15 * time.Minute
+
+// defaultEndpoint is the AWS S3 endpoint used when [WithEndpoint] is
+// not supplied. Override for MinIO, localstack, or any S3-compatible
+// service.
+const defaultEndpoint = "s3.amazonaws.com"
+
+// Option configures a [Storage] at construction. Pass to [New].
+type Option func(*config)
+
+type config struct {
+	endpoint   string
+	region     string
+	secure     bool
+	creds      *credentials.Credentials
+	prefix     string
+	presignTTL time.Duration
+}
+
+// WithEndpoint overrides the S3 endpoint. Format is "host" or
+// "host:port" without a scheme; use [WithSecure] to toggle TLS.
+// Default is AWS S3 ("s3.amazonaws.com").
+func WithEndpoint(endpoint string) Option {
+	return func(c *config) { c.endpoint = endpoint }
+}
+
+// WithRegion sets the AWS region (e.g. "eu-central-1"). Required by
+// real S3; ignored by some S3-compatible services.
+func WithRegion(region string) Option {
+	return func(c *config) { c.region = region }
+}
+
+// WithSecure toggles HTTPS to the endpoint. Default is true.
+func WithSecure(secure bool) Option {
+	return func(c *config) { c.secure = secure }
+}
+
+// WithCredentials sets static AWS credentials. When omitted, the
+// default chain "AWS_* env vars → IAM instance profile" is used,
+// matching the standard AWS SDK behaviour.
+func WithCredentials(accessKey, secretKey string) Option {
+	return func(c *config) {
+		c.creds = credentials.NewStaticV4(accessKey, secretKey, "")
+	}
+}
+
+// WithPathPrefix nests all object keys under prefix inside the bucket.
+// Useful for sharing one bucket across multiple applications. The
+// prefix is applied transparently — [Storage.Store] still returns the
+// bare relative path in the [document.Attachment.StoragePath].
+func WithPathPrefix(prefix string) Option {
+	return func(c *config) { c.prefix = prefix }
+}
+
+// WithPresignTTL sets the lifetime of URLs returned by [Storage.URL].
+// Default is [DefaultPresignTTL].
+func WithPresignTTL(ttl time.Duration) Option {
+	return func(c *config) { c.presignTTL = ttl }
+}
+
+// Storage stores attachment bytes in an S3-compatible bucket. Object
+// keys are content-addressed (`YYYY/MM/<sha256[:16]><ext>`) under an
+// optional path prefix; identical bytes resolve to the same key.
+type Storage struct {
+	client     *miniogo.Client
+	bucket     string
+	prefix     string
+	presignTTL time.Duration
+}
+
+// New constructs a [Storage] bound to bucket. Bucket existence is NOT
+// probed — production buckets are typically created by IaC, and a
+// per-Open round-trip is undesirable. Lookup errors surface lazily on
+// the first Store / Open / Delete.
+func New(bucket string, opts ...Option) (*Storage, error) {
+	if bucket == "" {
+		return nil, errors.New("storage/s3: bucket name required")
+	}
+	cfg := config{
+		endpoint:   defaultEndpoint,
+		secure:     true,
+		presignTTL: DefaultPresignTTL,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.creds == nil {
+		cfg.creds = credentials.NewChainCredentials([]credentials.Provider{
+			&credentials.EnvAWS{},
+			&credentials.IAM{},
+		})
+	}
+	client, err := miniogo.New(cfg.endpoint, &miniogo.Options{
+		Creds:  cfg.creds,
+		Secure: cfg.secure,
+		Region: cfg.region,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage/s3: client init: %w", err)
+	}
+	return &Storage{
+		client:     client,
+		bucket:     bucket,
+		prefix:     strings.Trim(cfg.prefix, "/"),
+		presignTTL: cfg.presignTTL,
+	}, nil
+}
+
+// Store implements [den.Storage]. Streams r into a temp file (to know
+// size and hash before uploading), then PutObjects the temp file under
+// `<prefix>/YYYY/MM/<sha256[:16]><ext>`. Skips the upload if a
+// HeadObject sees the key already exists — identical bytes produce the
+// same key, so a racing concurrent upload would write the same object.
+func (s *Storage) Store(ctx context.Context, r io.Reader, ext, mime string) (document.Attachment, error) {
+	tmp, err := os.CreateTemp("", "den-s3-upload-*")
+	if err != nil {
+		return document.Attachment{}, fmt.Errorf("storage/s3: creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	hasher := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(tmp, hasher), r)
+	if closeErr := tmp.Close(); closeErr != nil && copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		return document.Attachment{}, fmt.Errorf("storage/s3: writing temp file: %w", copyErr)
+	}
+	if size == 0 {
+		return document.Attachment{}, storage.ErrEmptyContent
+	}
+
+	hashHex := hex.EncodeToString(hasher.Sum(nil))
+	now := time.Now().UTC()
+	relPath := path.Join(now.Format("2006"), now.Format("01"), hashHex[:16]+ext)
+	key := s.objectKey(relPath)
+
+	att := document.Attachment{
+		StoragePath: relPath,
+		Mime:        mime,
+		Size:        size,
+		SHA256:      hashHex,
+	}
+
+	if _, err := s.client.StatObject(ctx, s.bucket, key, miniogo.StatObjectOptions{}); err == nil {
+		return att, nil
+	} else if !isNotFound(err) {
+		return document.Attachment{}, fmt.Errorf("storage/s3: head object %s: %w", key, err)
+	}
+
+	f, err := os.Open(tmpPath) //nolint:gosec // tmpPath comes from os.CreateTemp above — not user input
+	if err != nil {
+		return document.Attachment{}, fmt.Errorf("storage/s3: reopening temp file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := s.client.PutObject(ctx, s.bucket, key, f, size, miniogo.PutObjectOptions{
+		ContentType: mime,
+	}); err != nil {
+		return document.Attachment{}, fmt.Errorf("storage/s3: put object %s: %w", key, err)
+	}
+	return att, nil
+}
+
+// Open implements [den.Storage]. The returned [io.ReadCloser] surfaces
+// missing-key errors on first Read, not on Open — that's how
+// minio-go's GetObject is wired.
+func (s *Storage) Open(ctx context.Context, a document.Attachment) (io.ReadCloser, error) {
+	key := s.objectKey(a.StoragePath)
+	obj, err := s.client.GetObject(ctx, s.bucket, key, miniogo.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("storage/s3: get object %s: %w", key, err)
+	}
+	return obj, nil
+}
+
+// Delete implements [den.Storage]. Missing keys are treated as success
+// — explicit NoSuchKey check covers S3-compatibles whose RemoveObject
+// is not as forgiving as standard S3.
+func (s *Storage) Delete(ctx context.Context, a document.Attachment) error {
+	key := s.objectKey(a.StoragePath)
+	err := s.client.RemoveObject(ctx, s.bucket, key, miniogo.RemoveObjectOptions{})
+	if err == nil || isNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("storage/s3: remove object %s: %w", key, err)
+}
+
+// URL implements [den.Storage]. Returns a SigV4-presigned GET URL
+// valid for the configured presign TTL. Signing is local computation;
+// any error here points at a programming bug (e.g. an invalid bucket
+// name that slipped past New). Errors are logged and "" is returned so
+// HTTP layers fall through to a 404 instead of crashing on a
+// misconfiguration that has nothing to do with the request.
+func (s *Storage) URL(a document.Attachment) string {
+	key := s.objectKey(a.StoragePath)
+	u, err := s.client.PresignedGetObject(context.Background(), s.bucket, key, s.presignTTL, nil)
+	if err != nil {
+		slog.Error("storage/s3: presign failed",
+			"bucket", s.bucket, "key", key, "error", err)
+		return ""
+	}
+	return u.String()
+}
+
+// objectKey nests relPath under the configured path prefix.
+func (s *Storage) objectKey(relPath string) string {
+	if s.prefix == "" {
+		return relPath
+	}
+	return s.prefix + "/" + relPath
+}
+
+// isNotFound reports whether err is a "key does not exist" response
+// from S3. minio-go surfaces this as ErrorResponse.Code == "NoSuchKey"
+// regardless of which call produced the error.
+func isNotFound(err error) bool {
+	return miniogo.ToErrorResponse(err).Code == "NoSuchKey"
 }

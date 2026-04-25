@@ -5,6 +5,9 @@ default:
 # Modules tracked by go.work. Extend when adding new storage/* submodules.
 mods := ". ./storage/s3"
 
+# Minimum per-package coverage enforced by `just coverage-check` (CI hook).
+coverage_threshold := "80.0"
+
 # Run all tests across all modules (SQLite + PostgreSQL)
 test *args:
     #!/usr/bin/env bash
@@ -48,29 +51,32 @@ coverage:
     done
     echo
     echo "Per-package coverage:"
-    # Concatenated profiles from per-module `go test -coverpkg=./...`
-    # repeat each statement range once per test package that instrumented
-    # it (most with count=0). Dedup by range key, taking max count, before
-    # aggregating — otherwise totals are inflated and percentages tank.
-    awk 'NR > 1 {
-        key = $1
-        if (!(key in stmts)) { stmts[key] = $2 }
-        if ($3 > maxc[key]) { maxc[key] = $3 }
-    } END {
-        for (key in stmts) {
-            split(key, a, ":")
-            n = split(a[1], parts, "/")
-            pkg = parts[1]
-            for (i = 2; i < n; i++) pkg = pkg "/" parts[i]
-            total[pkg] += stmts[key]
-            if (maxc[key] > 0) covered[pkg] += stmts[key]
-        }
-        for (p in total) printf "  %-55s %5.1f%%\n", p, (covered[p] / total[p]) * 100
-    }' coverage.out | sort
+    ./scripts/coverage-summary.sh | awk '{ printf "  %-55s %5.1f%%\n", $1, $2 }'
     echo
     go tool cover -func=coverage.out | tail -n 1
     go tool cover -html=coverage.out -o coverage.html
     echo "HTML report: coverage.html"
+
+# Enforce the per-package coverage threshold ({{coverage_threshold}}%).
+# Runs `coverage` first (so coverage.out is fresh) and fails if any
+# package falls below the bar. CI runs this; locally use it before
+# pushing if you want the same gate.
+coverage-check: coverage
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed=0
+    while read -r pkg pct; do
+        if awk -v a="$pct" -v t={{coverage_threshold}} 'BEGIN { exit !(a < t) }'; then
+            echo "FAIL: $pkg at $pct% (below {{coverage_threshold}}%)"
+            failed=1
+        fi
+    done < <(./scripts/coverage-summary.sh)
+    if [ $failed -eq 1 ]; then
+        echo
+        echo "Coverage gate failed: tighten tests or lower coverage_threshold ({{coverage_threshold}}%)."
+        exit 1
+    fi
+    echo "All packages meet the {{coverage_threshold}}% coverage threshold."
 
 # Run benchmarks (use count=N for statistical significance)
 bench count="1":

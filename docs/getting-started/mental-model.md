@@ -26,6 +26,8 @@ den.Register(ctx, db, &Note{})
 
 If you query an unregistered type, the operation returns `ErrNotRegistered` with a message that names the type and tells you which `Register` call to add. There is no auto-discovery — explicit registration is the Go-idiomatic choice.
 
+`document.Base` reserves a small set of underscore-prefixed JSON keys (`_id`, `_created_at`, `_updated_at`, `_rev`) for its standard fields, with `document.SoftDelete` adding `_deleted_at` and friends. The Go-side fields keep natural names (`doc.ID`, `doc.CreatedAt`); the underscore form only appears when you reference the field by JSON name in `where.Field`, `Sort`, or `SetFields`. Use the [`den.FieldID`, `den.FieldCreatedAt`, …](../reference/struct-tags.md#reserved-json-field-names) constants instead of typing the strings — refactor-safe and IDE-discoverable.
+
 ## Two struct tags
 
 | Tag | Job |

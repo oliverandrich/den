@@ -129,7 +129,7 @@ Find all open tasks for a project, with the linked Project hydrated:
 tasks, err := den.NewQuery[Task](db,
     where.Field("project").Eq(proj.ID),
     where.Field("status").Eq("todo"),
-).WithFetchLinks().Sort("_created_at", den.Desc).All(ctx)
+).WithFetchLinks().Sort(den.FieldCreatedAt, den.Desc).All(ctx)
 if err != nil { log.Fatal(err) }
 
 for _, t := range tasks {
@@ -150,7 +150,7 @@ The single-field update pattern: route through `FindOneAndUpdate` so you avoid t
 ```go
 done, err := den.FindOneAndUpdate[Task](ctx, db,
     den.SetFields{"status": "done"},
-    []where.Condition{where.Field("_id").Eq(task.ID)},
+    []where.Condition{where.Field(den.FieldID).Eq(task.ID)},
 )
 if err != nil { log.Fatal(err) }
 fmt.Println("marked done:", done.Title, "→", done.Status)

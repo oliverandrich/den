@@ -255,7 +255,37 @@ Composable embeds for feature opt-in:
 | Embed | Purpose |
 |---|---|
 | `document.Base` | Required. ID, CreatedAt, UpdatedAt, Rev |
-| `document.SoftDelete` | Opt-in. DeletedAt, IsDeleted |
+| `document.SoftDelete` | Opt-in. DeletedAt, DeletedBy, DeleteReason |
 | `document.Tracked` | Opt-in. Snapshot machinery for IsChanged, GetChanges, Revert |
 
 Compose freely: `struct { document.Base; document.SoftDelete; document.Tracked; ... }`.
+
+---
+
+## Reserved JSON Field Names
+
+The standard embeds (`document.Base` and `document.SoftDelete`) install JSON keys with an underscore prefix to namespace them from user-defined fields — the same convention MongoDB uses. Whenever you need one of these in code that takes a string (`where.Field`, `Sort`, `SetFields`, `After` / `Before`, `Project`'s `den:"from:…"`) prefer the constants exported from the `den` package over the literal — typos become compile errors and a rename stays safe across the codebase.
+
+| Constant | Value | Comes from | When to query it |
+|---|---|---|---|
+| `den.FieldID` | `_id` | `document.Base.ID` | Lookup-by-id, cursor pagination, sort by insert order (ULIDs sort chronologically) |
+| `den.FieldCreatedAt` | `_created_at` | `document.Base.CreatedAt` | Time-window filters, "newest first" sorts |
+| `den.FieldUpdatedAt` | `_updated_at` | `document.Base.UpdatedAt` | "Last touched" filters, change detection |
+| `den.FieldRev` | `_rev` | `document.Base.Rev` | Rare — usually accessed via `IgnoreRevision()` instead of a manual where |
+| `den.FieldDeletedAt` | `_deleted_at` | `document.SoftDelete.DeletedAt` | Soft-deleted-only queries (combine with `IncludeDeleted` + `IsNotNil`) |
+| `den.FieldDeletedBy` | `_deleted_by` | `document.SoftDelete.DeletedBy` | Per-actor audit queries on soft-deleted rows |
+| `den.FieldDeleteReason` | `_delete_reason` | `document.SoftDelete.DeleteReason` | Per-reason audit queries on soft-deleted rows |
+
+The Go-side fields keep their natural names (`doc.ID`, `doc.CreatedAt`, …). Only the JSON tag (and therefore the SQL JSONB access path) uses the underscore form. Storage is independent of the constants — renaming the JSON tag would be a breaking storage change, not a source rename.
+
+```go
+// Cursor pagination over the natural ULID order:
+page, _ := den.NewQuery[Post](db).
+    Sort(den.FieldID, den.Asc).
+    Limit(50).All(ctx)
+
+// Recently touched, oldest first:
+recent, _ := den.NewQuery[Post](db,
+    where.Field(den.FieldUpdatedAt).Gt(cutoff),
+).Sort(den.FieldUpdatedAt, den.Asc).All(ctx)
+```

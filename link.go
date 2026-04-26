@@ -438,9 +438,14 @@ func detectLinkType(t reflect.Type) bool {
 // calls in fn already honor ctx, so the explicit check upper-bounds the
 // latency to one link field rather than one more backend round-trip.
 func forEachLinkField(ctx context.Context, doc any, fn func(elem reflect.Value, lf linkFieldInfo) error) error {
-	v := reflect.ValueOf(doc).Elem()
+	t := reflect.TypeOf(doc).Elem()
+	bundle := loadLinkFieldsBundle(t)
+	if len(bundle.fields) == 0 {
+		return nil
+	}
 
-	for _, lf := range getLinkFields(v.Type()) {
+	v := reflect.ValueOf(doc).Elem()
+	for _, lf := range bundle.fields {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

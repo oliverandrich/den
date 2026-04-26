@@ -29,6 +29,10 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 			return fmt.Errorf("analyze %s: %w", t.Name(), err)
 		}
 
+		if err := validateEagerTags(info); err != nil {
+			return fmt.Errorf("%w: %s: %w", ErrValidation, t.Name(), err)
+		}
+
 		meta := buildCollectionMeta(info)
 		settings := getSettings(docType)
 

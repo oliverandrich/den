@@ -395,6 +395,30 @@ func hasEagerLinkFields(t reflect.Type) bool {
 	return loadLinkFieldsBundle(t).anyEager
 }
 
+// validateEagerTags rejects den:"eager" placed on a field that is not
+// Link[T] or []Link[T]. Other tag/type mismatches (unique on a non-string,
+// fts on a non-string) are caught at Register time the same way; eager
+// follows the pattern so a misplaced tag fails loud at startup instead
+// of being silently ignored.
+func validateEagerTags(info *internal.StructInfo) error {
+	for _, f := range info.Fields {
+		if !f.Options.Eager {
+			continue
+		}
+		ft := f.Type
+		isLink := ft.Kind() == reflect.Struct && detectLinkType(ft)
+		isSliceOfLink := ft.Kind() == reflect.Slice &&
+			ft.Elem().Kind() == reflect.Struct && detectLinkType(ft.Elem())
+		if !isLink && !isSliceOfLink {
+			return fmt.Errorf(
+				`den: tag den:"eager" on field %q (%s): only valid on Link[T] or []Link[T]`,
+				f.GoName, ft.String(),
+			)
+		}
+	}
+	return nil
+}
+
 func detectLinkType(t reflect.Type) bool {
 	if t.NumField() < 3 {
 		return false

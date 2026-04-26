@@ -440,3 +440,23 @@ func TestOpenURL_ContextCanceledDuringRegistration(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// badEagerType: tag den:"eager" on a string field — illegal, must be
+// rejected at Register. Defined at package scope so the type literal
+// stays out of the test body's reflection path.
+type badEagerType struct {
+	document.Base
+	Name string `json:"name" den:"eager"`
+}
+
+// TestRegister_RejectsEagerOnNonLinkField pins that the eager tag is
+// validated against the field type at Register, mirroring the
+// long-standing behavior for index/unique/fts.
+func TestRegister_RejectsEagerOnNonLinkField(t *testing.T) {
+	dsn := "sqlite:///" + t.TempDir() + "/bad_eager.db"
+	_, err := den.OpenURL(context.Background(), dsn, den.WithTypes(&badEagerType{}))
+	require.Error(t, err)
+	require.ErrorIs(t, err, den.ErrValidation)
+	require.Contains(t, err.Error(), `den:"eager"`)
+	require.Contains(t, err.Error(), "Name")
+}

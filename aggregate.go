@@ -149,10 +149,8 @@ func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rawBytes := make([]byte, len(iter.Bytes()))
-		copy(rawBytes, iter.Bytes())
 		var docMap map[string]any
-		if err := enc.Decode(rawBytes, &docMap); err != nil {
+		if err := enc.Decode(iter.Bytes(), &docMap); err != nil {
 			return fmt.Errorf("decode for projection: %w", err)
 		}
 

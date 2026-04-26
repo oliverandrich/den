@@ -275,6 +275,160 @@ func TestEagerLink_IterRespectsEager(t *testing.T) {
 	}
 }
 
+// EagerSliceHouse pins that `[]Link[T]` honors `den:"eager"` too — the
+// per-element walk inside batchResolveField must hit the same skip
+// predicate as the scalar case.
+type EagerSliceHouse struct {
+	document.Base
+	Name    string             `json:"name"`
+	Windows []den.Link[Window] `json:"windows" den:"eager"`
+}
+
+// TestEagerLink_SliceField pins that the slice-link path hydrates an
+// eager-tagged `[]Link[T]` field by default. Previously only scalar
+// `Link[T]` fields were exercised in the eager tests.
+func TestEagerLink_SliceField(t *testing.T) {
+	db := dentest.MustOpen(t, &Window{}, &EagerSliceHouse{})
+	ctx := context.Background()
+
+	w1 := &Window{X: 100, Y: 50}
+	w2 := &Window{X: 200, Y: 60}
+	require.NoError(t, den.Insert(ctx, db, w1))
+	require.NoError(t, den.Insert(ctx, db, w2))
+	h := &EagerSliceHouse{
+		Name:    "SlicedCottage",
+		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+	}
+	require.NoError(t, den.Insert(ctx, db, h))
+
+	got, err := den.FindByID[EagerSliceHouse](ctx, db, h.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Windows, 2)
+	for i, link := range got.Windows {
+		assert.Truef(t, link.IsLoaded(),
+			"slice element %d must be hydrated by the eager tag", i)
+		require.NotNilf(t, link.Value, "slice element %d Value", i)
+	}
+}
+
+// EagerInner / EagerMiddle / EagerOuter form a three-deep eager chain
+// for nested-depth tests. Outer.Middle is eager → Middle.Inner is eager.
+type EagerInner struct {
+	document.Base
+	Label string `json:"label"`
+}
+
+type EagerMiddle struct {
+	document.Base
+	Inner den.Link[EagerInner] `json:"inner" den:"eager"`
+}
+
+type EagerOuter struct {
+	document.Base
+	Middle den.Link[EagerMiddle] `json:"middle" den:"eager"`
+}
+
+// TestEagerLink_NestedDepth pins the depth contract for recursive eager
+// hydration. The batched path (.All) recurses up to nestDepth, so under
+// the default depth both levels of eager links resolve. The per-row
+// path (FindByID and Iter) is strictly single-level — it hydrates the
+// direct eager fields but does not descend into the loaded targets'
+// own eager fields, even when nestDepth would allow it. WithNestingDepth(1)
+// caps the batched path at the first level.
+func TestEagerLink_NestedDepth(t *testing.T) {
+	db := dentest.MustOpen(t, &EagerInner{}, &EagerMiddle{}, &EagerOuter{})
+	ctx := context.Background()
+
+	inner := &EagerInner{Label: "leaf"}
+	require.NoError(t, den.Insert(ctx, db, inner))
+	mid := &EagerMiddle{Inner: den.NewLink(inner)}
+	require.NoError(t, den.Insert(ctx, db, mid))
+	outer := &EagerOuter{Middle: den.NewLink(mid)}
+	require.NoError(t, den.Insert(ctx, db, outer))
+
+	t.Run("All recurses through nested eager under default depth", func(t *testing.T) {
+		results, err := den.NewQuery[EagerOuter](db,
+			where.Field("_id").Eq(outer.ID),
+		).All(ctx)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		got := results[0]
+		require.True(t, got.Middle.IsLoaded(), "first level hydrated by eager")
+		require.NotNil(t, got.Middle.Value)
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"batched path recurses into the loaded Middle's own eager links")
+	})
+
+	t.Run("All with WithNestingDepth(1) caps at first level", func(t *testing.T) {
+		results, err := den.NewQuery[EagerOuter](db,
+			where.Field("_id").Eq(outer.ID),
+		).WithNestingDepth(1).All(ctx)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		got := results[0]
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
+		require.NotNil(t, got.Middle.Value)
+		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
+			"WithNestingDepth(1) must stop before recursing into the second level")
+	})
+
+	t.Run("FindByID per-row path is single-level only", func(t *testing.T) {
+		got, err := den.FindByID[EagerOuter](ctx, db, outer.ID)
+		require.NoError(t, err)
+		require.True(t, got.Middle.IsLoaded(),
+			"first eager level fires on the per-row path too")
+		require.NotNil(t, got.Middle.Value)
+		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
+			"FindByID hydrates one level only — same single-level contract as Iter "+
+				"(use NewQuery[T].WithFetchLinks().All for transitive hydration)")
+	})
+}
+
+// SoftDeletableTarget is the link target that opts into soft-delete.
+// Used by TestEagerLink_SoftDeletedTarget to pin what eager hydration
+// does when the referenced row was soft-deleted.
+type SoftDeletableTarget struct {
+	document.Base
+	document.SoftDelete
+	Name string `json:"name"`
+}
+
+type HouseWithSoftLink struct {
+	document.Base
+	Name string                        `json:"name"`
+	Ref  den.Link[SoftDeletableTarget] `json:"ref" den:"eager"`
+}
+
+// TestEagerLink_SoftDeletedTarget pins the actual behavior for an eager
+// link whose target has been soft-deleted: hydration uses Get/IN-query
+// directly without applying the soft-delete filter, so the target IS
+// loaded — Value points at the soft-deleted record. Callers can check
+// `Ref.Value.IsDeleted()` to react. This matches FindByID's own
+// soft-delete-blind contract (FindByID also returns soft-deleted docs
+// by ID). Documented in relations.md "Eager + soft-delete".
+func TestEagerLink_SoftDeletedTarget(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftDeletableTarget{}, &HouseWithSoftLink{})
+	ctx := context.Background()
+
+	target := &SoftDeletableTarget{Name: "doomed"}
+	require.NoError(t, den.Insert(ctx, db, target))
+	h := &HouseWithSoftLink{Name: "House", Ref: den.NewLink(target)}
+	require.NoError(t, den.Insert(ctx, db, h))
+
+	require.NoError(t, den.Delete(ctx, db, target))
+
+	got, err := den.FindByID[HouseWithSoftLink](ctx, db, h.ID)
+	require.NoError(t, err, "the holder is fine; only the target was soft-deleted")
+	assert.Equal(t, target.ID, got.Ref.ID, "ID survives even when target is soft-deleted")
+	assert.True(t, got.Ref.IsLoaded(),
+		"eager hydration loads soft-deleted targets — same contract as FindByID by ID, "+
+			"the soft-delete filter is a query-time concept that doesn't apply to "+
+			"by-ID link resolution")
+	require.NotNil(t, got.Ref.Value)
+	assert.True(t, got.Ref.Value.IsDeleted(),
+		"caller can detect the soft-deleted state on the loaded target")
+}
+
 // TestFetchLinkField pins the typed alternative to FetchLink: pass a
 // pointer to the Link[T] directly, no string field name lookup. Renames
 // of the JSON tag on the parent's link field cannot silently break a

@@ -177,9 +177,11 @@ func FetchLinkField[T any](ctx context.Context, s Scope, link *Link[T]) error {
 }
 
 // FetchAllLinks resolves all link fields on a document. See FetchLink for
-// the scope semantics.
+// the scope semantics. The eager / lazy tag on each Link field is ignored
+// here — calling FetchAllLinks is itself the explicit ask for full
+// hydration.
 func FetchAllLinks[T any](ctx context.Context, s Scope, doc *T) error {
-	return fetchAllLinksOnDoc(ctx, s.db(), s.readWriter(), doc, 1)
+	return fetchAllLinksOnDoc(ctx, s.db(), s.readWriter(), doc, 1, fetchAll)
 }
 
 // fetchLinkByName resolves one named link field. The rw parameter carries
@@ -219,12 +221,15 @@ func fetchLinkByName(ctx context.Context, db *DB, rw ReadWriter, doc any, fieldN
 	return fmt.Errorf("den: link field %q not found", fieldName)
 }
 
-func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, depth int) error {
-	if depth <= 0 {
+func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, depth int, mode fetchMode) error {
+	if depth <= 0 || mode == fetchNone {
 		return nil
 	}
 
 	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
+		if lf.skipForMode(mode) {
+			return nil
+		}
 		return resolveSingleLink(ctx, db, rw, elem, lf)
 	})
 }
@@ -283,18 +288,35 @@ type linkFieldInfo struct {
 	valueIdx   []int        // index path for Link[T].Value
 	loadedIdx  []int        // index path for Link[T].Loaded
 	targetType reflect.Type // T in Link[T] (derived from the Value *T field)
+	eager      bool         // true when the field is tagged den:"eager"
 }
 
-var linkFieldCache sync.Map // reflect.Type → []linkFieldInfo
+// skipForMode reports whether a hydration mode should leave this field
+// untouched. fetchDefault hydrates only eager-tagged fields; the other
+// modes are decided one level up and never reach this predicate.
+func (lf linkFieldInfo) skipForMode(mode fetchMode) bool {
+	return mode == fetchDefault && !lf.eager
+}
 
-// getLinkFields returns the cached list of link field indices for a struct type.
-func getLinkFields(t reflect.Type) []linkFieldInfo {
+// linkFieldsBundle is the cached per-type analysis used by both the
+// batched and per-row hydration paths. anyEager lets terminals skip
+// hydration work entirely on types that have no eager-tagged links —
+// no reflect walk on the hot path.
+type linkFieldsBundle struct {
+	fields   []linkFieldInfo
+	anyEager bool
+}
+
+var linkFieldCache sync.Map // reflect.Type → linkFieldsBundle
+
+func loadLinkFieldsBundle(t reflect.Type) linkFieldsBundle {
 	if cached, ok := linkFieldCache.Load(t); ok {
-		v, _ := cached.([]linkFieldInfo)
-		return v
+		bundle, _ := cached.(linkFieldsBundle)
+		return bundle
 	}
 
 	var fields []linkFieldInfo
+	anyEager := false
 	for i := range t.NumField() {
 		f := t.Field(i)
 		if f.Anonymous {
@@ -316,6 +338,13 @@ func getLinkFields(t reflect.Type) []linkFieldInfo {
 		idF, _ := linkType.FieldByName("ID")
 		valF, _ := linkType.FieldByName("Value")
 		loadF, _ := linkType.FieldByName("Loaded")
+		// Best-effort tag parse: an unknown den-tag option here would be
+		// rejected at Register time anyway, so a parse error is silently
+		// dropped (the eager flag stays false).
+		opts, _ := internal.ParseDenTag(f.Tag.Get("den"))
+		if opts.Eager {
+			anyEager = true
+		}
 		fields = append(fields, linkFieldInfo{
 			index:      i,
 			slice:      slice,
@@ -323,11 +352,25 @@ func getLinkFields(t reflect.Type) []linkFieldInfo {
 			valueIdx:   valF.Index,
 			loadedIdx:  loadF.Index,
 			targetType: valF.Type.Elem(), // Value is *T, Elem() is T
+			eager:      opts.Eager,
 		})
 	}
 
-	linkFieldCache.Store(t, fields)
-	return fields
+	bundle := linkFieldsBundle{fields: fields, anyEager: anyEager}
+	linkFieldCache.Store(t, bundle)
+	return bundle
+}
+
+// getLinkFields returns the cached list of link field indices for a struct type.
+func getLinkFields(t reflect.Type) []linkFieldInfo {
+	return loadLinkFieldsBundle(t).fields
+}
+
+// hasEagerLinkFields reports whether T has at least one Link[T] or
+// []Link[T] field tagged den:"eager". Used by terminals to skip
+// hydration work in the default fetch mode without walking the slice.
+func hasEagerLinkFields(t reflect.Type) bool {
+	return loadLinkFieldsBundle(t).anyEager
 }
 
 func detectLinkType(t reflect.Type) bool {
@@ -553,25 +596,28 @@ var parseJSONTagName = internal.ParseJSONTagName
 // except the batched path doesn't surface a dangling-link error (the IN
 // query simply produces no row for that id). Callers that need strict
 // dangling-link detection should stick to the streaming .Iter() path.
-func batchResolveLinks[T any](ctx context.Context, db *DB, rw ReadWriter, docs []*T, depth int) error {
-	if depth <= 0 || len(docs) == 0 {
+func batchResolveLinks[T any](ctx context.Context, db *DB, rw ReadWriter, docs []*T, depth int, mode fetchMode) error {
+	if depth <= 0 || len(docs) == 0 || mode == fetchNone {
 		return nil
 	}
-	return batchResolveLinksReflect(ctx, db, rw, reflect.ValueOf(docs), depth)
+	return batchResolveLinksReflect(ctx, db, rw, reflect.ValueOf(docs), depth, mode)
 }
 
 // batchResolveLinksReflect is the reflective worker so recursive resolution
 // at depth > 1 can operate on slices whose element type is only known via
 // reflect.Type (the loaded-target slice of one level becomes the input of
 // the next).
-func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, depth int) error {
-	if depth <= 0 || docsVal.Len() == 0 {
+func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, depth int, mode fetchMode) error {
+	if depth <= 0 || docsVal.Len() == 0 || mode == fetchNone {
 		return nil
 	}
 	// docsVal is []*T — Elem().Elem() peels off slice and pointer to reach T.
 	elemType := docsVal.Type().Elem().Elem()
 	for _, lf := range getLinkFields(elemType) {
-		if err := batchResolveField(ctx, db, rw, docsVal, lf, depth); err != nil {
+		if lf.skipForMode(mode) {
+			continue
+		}
+		if err := batchResolveField(ctx, db, rw, docsVal, lf, depth, mode); err != nil {
 			return err
 		}
 	}
@@ -581,7 +627,7 @@ func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVa
 // batchResolveField resolves a single link field across docsVal in one
 // IN-query to the target collection. Shared IDs produce a single decode
 // whose pointer is stored in every matching parent slot.
-func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, lf linkFieldInfo, depth int) error {
+func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, lf linkFieldInfo, depth int, mode fetchMode) error {
 	slotsByID := make(map[string][]reflect.Value)
 	for i := range docsVal.Len() {
 		docV := docsVal.Index(i).Elem() // *T → T (addressable)
@@ -661,7 +707,7 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 	}
 
 	if depth > 1 && loaded.Len() > 0 {
-		return batchResolveLinksReflect(ctx, db, rw, loaded, depth-1)
+		return batchResolveLinksReflect(ctx, db, rw, loaded, depth-1, mode)
 	}
 	return nil
 }

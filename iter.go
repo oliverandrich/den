@@ -43,6 +43,7 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 		}
 		defer func() { _ = it.Close() }()
 
+		hydrate := qs.shouldHydrate()
 		for it.Next() {
 			if err := ctx.Err(); err != nil {
 				yield(nil, err)
@@ -55,8 +56,8 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 				return
 			}
 
-			if qs.fetchLinks {
-				if err := fetchAllLinksOnDoc(ctx, qs.scope.db(), qs.scope.readWriter(), doc, qs.nestDepth); err != nil {
+			if hydrate {
+				if err := fetchAllLinksOnDoc(ctx, qs.scope.db(), qs.scope.readWriter(), doc, qs.nestDepth, qs.fetchMode); err != nil {
 					yield(nil, fmt.Errorf("fetch links: %w", err))
 					return
 				}

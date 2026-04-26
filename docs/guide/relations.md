@@ -161,6 +161,39 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 
     Each batch collapses N per-row `SELECT` round-trips into one `WHERE _id IN (…)`. On a 20-parent fixture with one shared link, this takes `WithFetchLinks` from ~1.6 ms down to ~630 µs.
 
+### Schema-level eager (`den:"eager"`)
+
+Tag a `Link[T]` or `[]Link[T]` field with `den:"eager"` and Den hydrates it on every read, no `WithFetchLinks()` call needed. This is the Django `select_related` analogue applied to the schema instead of the queryset:
+
+```go
+type House struct {
+    document.Base
+    Name    string         `json:"name"`
+    Door    Link[Door]     `json:"door"  den:"eager"` // always hydrated
+    Owner   Link[Person]   `json:"owner"`             // stays lazy
+    Windows []Link[Window] `json:"windows"`           // stays lazy
+}
+
+houses, _ := den.NewQuery[House](db).All(ctx)
+houses[0].Door.IsLoaded()      // true — eager
+houses[0].Owner.IsLoaded()     // false — untagged
+houses[0].Windows[0].IsLoaded() // false — untagged
+```
+
+Three modes interact with the tag:
+
+| Modifier | Behaviour |
+|---|---|
+| (none, default) | Hydrate `den:"eager"` fields, leave the rest lazy |
+| `WithFetchLinks()` | Hydrate every link, eager or not |
+| `WithoutFetchLinks()` | Hydrate nothing, even eager fields — bulk-export escape hatch |
+
+The default-mode resolver still uses the same batched `WHERE _id IN (…)` path on `.All` / `.AllWithCount` / `.Search`, so eager fields cost one extra query per target type per page rather than N+1.
+
+`.Iter(ctx)` honours the tag too, but resolves per row (streaming can't batch). An eager field on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted.
+
+`FetchLink` / `FetchAllLinks` always hydrate everything passed to them — they're explicit user calls, the `eager` tag does not constrain them.
+
 ### On-Demand (FetchLink / FetchAllLinks)
 
 Fetch individual link fields or all link fields after the initial query:

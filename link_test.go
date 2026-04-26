@@ -154,6 +154,127 @@ func TestFetchLink(t *testing.T) {
 	assert.Equal(t, 200, found.Door.Value.Height)
 }
 
+// --- Per-field eager hydration via den:"eager" ---
+
+// EagerHouse mixes eager and lazy link fields on the same type. Door
+// is tagged eager → hydrated by default; Owner is untagged → stays
+// lazy unless the caller opts into WithFetchLinks.
+type EagerOwner struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+type EagerHouse struct {
+	document.Base
+	Name  string               `json:"name"`
+	Door  den.Link[Door]       `json:"door"  den:"eager"`
+	Owner den.Link[EagerOwner] `json:"owner"`
+}
+
+// TestEagerLink_DefaultHydratesEagerField pins the new default mode:
+// fields tagged `den:"eager"` are hydrated automatically; untagged
+// fields stay lazy on the same query.
+func TestEagerLink_DefaultHydratesEagerField(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	owner := &EagerOwner{Name: "Alice"}
+	require.NoError(t, den.Insert(ctx, db, owner))
+
+	h := &EagerHouse{
+		Name:  "EagerCottage",
+		Door:  den.NewLink(door),
+		Owner: den.NewLink(owner),
+	}
+	require.NoError(t, den.Insert(ctx, db, h))
+
+	results, err := den.NewQuery[EagerHouse](db).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
+
+	assert.True(t, got.Door.IsLoaded(),
+		"eager-tagged Door must be hydrated by default — that's the whole point of the tag")
+	require.NotNil(t, got.Door.Value)
+	assert.Equal(t, 200, got.Door.Value.Height)
+
+	assert.False(t, got.Owner.IsLoaded(),
+		"untagged Owner must stay lazy — eager doesn't bleed across fields on the same type")
+	assert.Nil(t, got.Owner.Value)
+}
+
+// TestEagerLink_WithFetchLinksHydratesEverything pins that explicit
+// WithFetchLinks() overrides the per-field decision and hydrates all
+// link fields, eager-tagged or not.
+func TestEagerLink_WithFetchLinksHydratesEverything(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	owner := &EagerOwner{Name: "Bob"}
+	require.NoError(t, den.Insert(ctx, db, owner))
+	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+		Name: "FullCottage", Door: den.NewLink(door), Owner: den.NewLink(owner),
+	}))
+
+	results, err := den.NewQuery[EagerHouse](db).WithFetchLinks().All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
+
+	assert.True(t, got.Door.IsLoaded())
+	assert.True(t, got.Owner.IsLoaded(),
+		"WithFetchLinks must hydrate the untagged field too")
+}
+
+// TestEagerLink_WithoutFetchLinksSuppressesEager pins the bulk-export
+// escape hatch: WithoutFetchLinks() turns off hydration entirely, even
+// for eager-tagged fields.
+func TestEagerLink_WithoutFetchLinksSuppressesEager(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+		Name: "Bare", Door: den.NewLink(door),
+	}))
+
+	results, err := den.NewQuery[EagerHouse](db).WithoutFetchLinks().All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
+
+	assert.False(t, got.Door.IsLoaded(),
+		"WithoutFetchLinks must override the eager tag — explicit beats schema default")
+	assert.Equal(t, door.ID, got.Door.ID, "ID stays populated even without hydration")
+	assert.Nil(t, got.Door.Value)
+}
+
+// TestEagerLink_IterRespectsEager pins that the per-row Iter path
+// also respects eager tags (single-row hydration; no batching).
+func TestEagerLink_IterRespectsEager(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+		Name: "IterCottage", Door: den.NewLink(door),
+	}))
+
+	for got, err := range den.NewQuery[EagerHouse](db).Iter(ctx) {
+		require.NoError(t, err)
+		assert.True(t, got.Door.IsLoaded(),
+			"Iter must hydrate eager-tagged links per row")
+		assert.False(t, got.Owner.IsLoaded(),
+			"Iter must skip untagged links by default")
+	}
+}
+
 // TestFetchLinkField pins the typed alternative to FetchLink: pass a
 // pointer to the Link[T] directly, no string field name lookup. Renames
 // of the JSON tag on the parent's link field cannot silently break a

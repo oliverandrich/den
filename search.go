@@ -59,8 +59,8 @@ func (qs QuerySet[T]) Search(ctx context.Context, queryText string) ([]*T, error
 		return nil, err
 	}
 
-	if qs.fetchLinks {
-		if err := batchResolveLinks(ctx, db, qs.scope.readWriter(), results, qs.nestDepth); err != nil {
+	if qs.shouldHydrate() {
+		if err := batchResolveLinks(ctx, db, qs.scope.readWriter(), results, qs.nestDepth, qs.fetchMode); err != nil {
 			return nil, err
 		}
 	}

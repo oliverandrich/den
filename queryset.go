@@ -29,7 +29,7 @@ type QuerySet[T any] struct {
 	skipN          int
 	afterID        string
 	beforeID       string
-	fetchLinks     bool
+	fetchMode      fetchMode
 	nestDepth      int
 	includeDeleted bool
 	// lock is set by ForUpdate. Only meaningful when scope is *Tx; terminal
@@ -121,7 +121,20 @@ func (qs QuerySet[T]) Before(id string) QuerySet[T] {
 	return qs
 }
 
-// WithFetchLinks enables eager loading of linked documents.
+// fetchMode selects which Link[T] fields a terminal hydrates: only
+// `den:"eager"`-tagged fields (fetchDefault, the zero value), every
+// Link[T] field (fetchAll, set by WithFetchLinks), or none of them
+// (fetchNone, set by WithoutFetchLinks).
+type fetchMode int
+
+const (
+	fetchDefault fetchMode = iota
+	fetchAll
+	fetchNone
+)
+
+// WithFetchLinks hydrates every Link[T] field on the returned documents,
+// regardless of whether the field is tagged with `den:"eager"`.
 //
 // Honored only by terminals that return *T values: All, AllWithCount, First,
 // Iter, and Search. Every other terminal — counts, aggregates, projections,
@@ -129,8 +142,36 @@ func (qs QuerySet[T]) Before(id string) QuerySet[T] {
 // attach the resolved links to. See Update's godoc for the hook-visibility
 // caveat that follows from this rule.
 func (qs QuerySet[T]) WithFetchLinks() QuerySet[T] {
-	qs.fetchLinks = true
+	qs.fetchMode = fetchAll
 	return qs
+}
+
+// WithoutFetchLinks suppresses link hydration on this query, including
+// fields tagged `den:"eager"`. Use it when the eager tags would
+// otherwise pay a per-link round-trip cost the caller does not need
+// (bulk export, IDs-only sweep, count-by-link). Returned `Link[T]`
+// values carry their ID but `Value` stays `nil`.
+func (qs QuerySet[T]) WithoutFetchLinks() QuerySet[T] {
+	qs.fetchMode = fetchNone
+	return qs
+}
+
+// shouldHydrate reports whether the QuerySet's fetch mode would hydrate
+// at least one Link[T] field on T. The result is the routing decision
+// for All / AllWithCount / Search (drain to slice + run batched
+// resolver vs stream per-row through Iter) and the per-row gate inside
+// Iter (skip the resolver call entirely when nothing would be hydrated).
+func (qs QuerySet[T]) shouldHydrate() bool {
+	switch qs.fetchMode {
+	case fetchAll:
+		return true
+	case fetchNone:
+		return false
+	case fetchDefault:
+		var zero T
+		return hasEagerLinkFields(reflect.TypeOf(zero))
+	}
+	return false
 }
 
 // WithNestingDepth sets the maximum link resolution depth.
@@ -208,7 +249,7 @@ func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
 	if err := qs.preflight(); err != nil {
 		return nil, err
 	}
-	if qs.fetchLinks {
+	if qs.shouldHydrate() {
 		return qs.allBatched(ctx)
 	}
 	// Pre-allocate when limit is known to avoid repeated slice growth.
@@ -225,10 +266,10 @@ func (qs QuerySet[T]) All(ctx context.Context) ([]*T, error) {
 	return results, nil
 }
 
-// allBatched is the .All() implementation used when fetchLinks is enabled.
-// It drains the iterator fully before running the batched link resolver
-// so pgx's cursor has released the connection by the time the resolver
-// issues its IN-query through the same ReadWriter.
+// allBatched is the .All() implementation used when shouldHydrate reports
+// true. It drains the iterator fully before running the batched link
+// resolver so pgx's cursor has released the connection by the time the
+// resolver issues its IN-query through the same ReadWriter.
 func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
 	db := qs.scope.db()
 	col, err := collectionFor[T](db)
@@ -249,7 +290,7 @@ func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
 		return nil, err
 	}
 
-	if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth); err != nil {
+	if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -345,8 +386,8 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 			return nil, 0, err
 		}
 
-		if qs.fetchLinks {
-			if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth); err != nil {
+		if qs.shouldHydrate() {
+			if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode); err != nil {
 				return nil, 0, err
 			}
 		}

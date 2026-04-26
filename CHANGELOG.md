@@ -137,6 +137,24 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **`den.FetchLinkField[T]`** — typed alternative to `FetchLink(doc, "fieldname")`. Pass the `*Link[T]` directly; no string lookup, immune to JSON-tag renames on the parent struct. Same idempotency contract (no-op when the link's ID is empty or `Loaded` is already true). `FetchLink` stays as-is; godoc points at the typed variant as preferred.
 - **`den.BackLinksField[H, T]`** — typed alternative to `BackLinks[H](ctx, db, "field", id)`. Identifies the link field by walking H's struct for a unique `Link[T]` field; no string field name. Errors clearly when the holder has zero, multiple, or only-slice `Link[T]` fields — pointing at the string-based `BackLinks` (or a manual `Contains` query for slice-link cases) for those edges. Same call shape and result type as the original.
 - **`den.FindOrCreate[T]`** — find-or-create-with-defaults shorthand. Returns the existing row if conditions match, otherwise inserts `defaults`. Existing rows are NEVER modified — that's the contract that distinguishes it from `FindOneAndUpsert` (which can also apply post-find field updates). Same `(doc, inserted, err)` shape, same atomicity, same `ErrMultipleMatches` on non-unique conditions.
+- **`den:"eager"` struct tag + `WithoutFetchLinks()` QuerySet modifier** — declare per-field "always hydrate this link by default" on the schema, mirroring Django's `select_related` on a default queryset. `Link[T]` and `[]Link[T]` fields tagged `den:"eager"` are batch-resolved automatically by `QuerySet.All` / `AllWithCount` / `Search` and per-row by `Iter`, with no call-site changes; untagged links stay lazy. Three QuerySet modes:
+    - default (no modifier) — hydrate eager-tagged fields only
+    - `WithFetchLinks()` — hydrate everything (override for one query)
+    - `WithoutFetchLinks()` — hydrate nothing (bulk-export escape hatch when even eager fields would be wasted)
+
+    ```go
+    type House struct {
+        document.Base
+        Door  den.Link[Door]   `json:"door"  den:"eager"`
+        Owner den.Link[Person] `json:"owner"`              // stays lazy
+    }
+
+    houses, _ := den.NewQuery[House](db).All(ctx)         // doors hydrated, owners not
+    houses, _ = den.NewQuery[House](db).WithFetchLinks().All(ctx)    // both
+    houses, _ = den.NewQuery[House](db).WithoutFetchLinks().All(ctx) // neither
+    ```
+
+    `Iter` honors the same flag but resolves per-row (no batching in a streaming context), so eager fields cost N+1 lookups there — prefer `All` when hydration matters.
 - **`where.AnyOf[T]` typed-slice spread** — closes the `Field("id").In(typedSlice)` footgun where a typed slice silently matched against the literal slice value. Generic over `T`, returns `[]any` for spreading: `where.Field("id").In(where.AnyOf(stringIDs)...)`. Type inference picks T from the argument; no explicit type parameter at the call site. Documented as a warning callout in queries.md and a subsection in the operators reference.
 - **Constants for reserved JSON field names** — `den.FieldID`, `den.FieldCreatedAt`, `den.FieldUpdatedAt`, `den.FieldRev`, `den.FieldDeletedAt`, `den.FieldDeletedBy`, `den.FieldDeleteReason`. Use these whenever you'd otherwise type the underscore-prefixed string into `where.Field`, `Sort`, `SetFields`, `After` / `Before`, or a `den:"from:..."` tag — refactor-safe, IDE-discoverable, no typos. The string values are unchanged so storage stays binary-compatible. Documented under "Reserved JSON Field Names" in the Struct Tags reference.
 

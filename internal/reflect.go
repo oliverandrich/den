@@ -13,6 +13,7 @@ type TagOptions struct {
 	Unique         bool
 	FTS            bool
 	OmitEmpty      bool
+	Eager          bool   // valid on Link[T] / []Link[T] fields — auto-hydrate by default
 	UniqueTogether string // group name for composite unique index
 	IndexTogether  string // group name for composite non-unique index
 }
@@ -99,6 +100,8 @@ func ParseDenTag(tag string) (TagOptions, error) {
 			opts.FTS = true
 		case trimmed == "omitempty":
 			opts.OmitEmpty = true
+		case trimmed == "eager":
+			opts.Eager = true
 		case strings.HasPrefix(trimmed, "unique_together:"):
 			opts.UniqueTogether = strings.TrimPrefix(trimmed, "unique_together:")
 		case strings.HasPrefix(trimmed, "index_together:"):

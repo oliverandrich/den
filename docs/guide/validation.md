@@ -4,7 +4,7 @@ Den supports two validation mechanisms that can be used independently or combine
 
 ## Validator Interface
 
-Implement the `Validate() error` method on your document struct for custom business logic validation:
+Implement the `Validate(ctx context.Context) error` method on your document struct for custom business logic validation:
 
 ```go
 type Article struct {
@@ -13,7 +13,7 @@ type Article struct {
     Body  string `json:"body"`
 }
 
-func (a *Article) Validate() error {
+func (a *Article) Validate(ctx context.Context) error {
     if a.Title == "" {
         return errors.New("title is required")
     }
@@ -24,7 +24,7 @@ func (a *Article) Validate() error {
 }
 ```
 
-The `Validate()` hook is called automatically before every `Insert` and `Update`. If it returns an error, the write is aborted.
+The `Validate(ctx)` hook is called automatically before every `Insert` and `Update`. If it returns an error, the write is aborted. The context carries cancellation, deadlines, and any tracing/auth values from the surrounding call — use it for validators that hit a database, call out to another service, or otherwise need to participate in the request lifecycle.
 
 ## Struct Tag Validation
 
@@ -100,7 +100,7 @@ type User struct {
     Bio      string `json:"bio"                   validate:"max=500"`
 }
 
-func (u *User) Validate() error {
+func (u *User) Validate(ctx context.Context) error {
     if strings.Contains(u.Username, " ") {
         return errors.New("username must not contain spaces")
     }

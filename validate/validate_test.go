@@ -31,7 +31,7 @@ type CustomValidatorDoc struct {
 	Name string `json:"name" validate:"required"`
 }
 
-func (d *CustomValidatorDoc) Validate() error {
+func (d *CustomValidatorDoc) Validate(_ context.Context) error {
 	if d.Name == "forbidden" {
 		return errors.New("name is forbidden")
 	}

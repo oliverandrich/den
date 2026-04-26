@@ -376,7 +376,7 @@ func (c *counterHookDoc) BeforeSave(_ context.Context) error {
 	return nil
 }
 
-func (c *counterHookDoc) Validate() error {
+func (c *counterHookDoc) Validate(_ context.Context) error {
 	counterHookCalls = append(counterHookCalls, "Validate")
 	return nil
 }
@@ -441,7 +441,7 @@ func (d *counterLinkedDoc) BeforeSave(_ context.Context) error {
 	return nil
 }
 
-func (d *counterLinkedDoc) Validate() error {
+func (d *counterLinkedDoc) Validate(_ context.Context) error {
 	counterHookCalls = append(counterHookCalls, "Validate")
 	return nil
 }

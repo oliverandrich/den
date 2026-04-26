@@ -50,7 +50,7 @@ func (d *orderingDoc) AfterInsert(_ context.Context) error  { return d.record("A
 func (d *orderingDoc) AfterUpdate(_ context.Context) error  { return d.record("AfterUpdate") }
 func (d *orderingDoc) AfterDelete(_ context.Context) error  { return d.record("AfterDelete") }
 func (d *orderingDoc) AfterSave(_ context.Context) error    { return d.record("AfterSave") }
-func (d *orderingDoc) Validate() error                      { return d.record("Validate") }
+func (d *orderingDoc) Validate(_ context.Context) error     { return d.record("Validate") }
 
 // orderingSoftDoc mirrors orderingDoc but embeds SoftDelete so the soft-delete
 // path can be exercised through the same recorder.

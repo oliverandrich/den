@@ -48,7 +48,7 @@ type AfterSaver interface {
 }
 
 type Validator interface {
-    Validate() error
+    Validate(ctx context.Context) error
 }
 ```
 
@@ -112,7 +112,7 @@ func (a *Article) BeforeSave(ctx context.Context) error {
 }
 
 // Validate ensures required fields are present before any write.
-func (a *Article) Validate() error {
+func (a *Article) Validate(ctx context.Context) error {
     if a.Title == "" {
         return errors.New("title is required")
     }

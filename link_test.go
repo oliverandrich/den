@@ -867,7 +867,7 @@ type ValidatedPart struct {
 	Name string `json:"name"`
 }
 
-func (p *ValidatedPart) Validate() error {
+func (p *ValidatedPart) Validate(_ context.Context) error {
 	if p.Name == "" {
 		return errors.New("name is required")
 	}

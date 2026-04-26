@@ -758,7 +758,7 @@ type ParityValidated struct {
 	Name string `json:"name"`
 }
 
-func (v *ParityValidated) Validate() error {
+func (v *ParityValidated) Validate(_ context.Context) error {
 	if v.Name == "" {
 		return errors.New("name is required")
 	}

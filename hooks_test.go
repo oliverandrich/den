@@ -33,7 +33,7 @@ type Validated struct {
 	Name string `json:"name"`
 }
 
-func (v *Validated) Validate() error {
+func (v *Validated) Validate(_ context.Context) error {
 	if v.Name == "" {
 		return errors.New("name is required")
 	}
@@ -62,7 +62,7 @@ func (d *DefaultingDoc) BeforeInsert(_ context.Context) error {
 	return nil
 }
 
-func (d *DefaultingDoc) Validate() error {
+func (d *DefaultingDoc) Validate(_ context.Context) error {
 	if d.Slug == "" {
 		return errors.New("slug is required")
 	}
@@ -228,7 +228,7 @@ type ValidateOnUpdateDoc struct {
 	Name string `json:"name"`
 }
 
-func (v *ValidateOnUpdateDoc) Validate() error {
+func (v *ValidateOnUpdateDoc) Validate(_ context.Context) error {
 	if v.Name == "invalid" {
 		return errors.New("name is invalid")
 	}
@@ -280,6 +280,36 @@ func TestValidateOnSave_Valid(t *testing.T) {
 
 	v := &Validated{Name: "OK"}
 	require.NoError(t, den.Insert(ctx, db, v))
+}
+
+// CtxAwareValidated returns the ctx's error from Validate so the test
+// can prove the hook actually receives the caller's context (not a
+// substituted Background()).
+type CtxAwareValidated struct {
+	document.Base
+	Name string `json:"name"`
+}
+
+func (v *CtxAwareValidated) Validate(ctx context.Context) error {
+	return ctx.Err()
+}
+
+// TestValidate_PropagatesContext pins that Validator.Validate receives
+// the caller's ctx — a cancelled context surfaces immediately without
+// the validator having to capture it from outer scope.
+func TestValidate_PropagatesContext(t *testing.T) {
+	db := dentest.MustOpen(t, &CtxAwareValidated{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	v := &CtxAwareValidated{Name: "Anything"}
+	err := den.Insert(ctx, db, v)
+	require.Error(t, err)
+	require.ErrorIs(t, err, den.ErrValidation,
+		"validation failure must wrap ErrValidation")
+	require.ErrorIs(t, err, context.Canceled,
+		"validator must see the caller's cancellation through ctx")
 }
 
 // TestBeforeInsertPopulatesFieldForValidate regresses the pre-v0.6.0 bug

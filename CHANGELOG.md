@@ -6,6 +6,17 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Breaking Changes
 
+- **`Validator.Validate` now takes a `context.Context`** — the interface signature changed from `Validate() error` to `Validate(ctx context.Context) error`, matching every other Den hook. Validators that need to honor cancellation, hit a database, call out to another service, or attach to a tracing span now have ctx in scope without capturing one from outer scope. Update implementations:
+
+    ```go
+    // before
+    func (a *Article) Validate() error { ... }
+    // after
+    func (a *Article) Validate(ctx context.Context) error { ... }
+    ```
+
+    Pure validators that don't use ctx can take it as `_ context.Context`. Resolves the long-standing asymmetry where Validator was the only hook on the document-struct surface that didn't carry context.
+
 - **`FindOneAndUpdate` now requires a unique match** — previously the function silently picked the first row when conditions matched more than one document. It now returns the new `ErrMultipleMatches` instead. The conditions parameter has also moved from variadic `where.Condition` to a `[]where.Condition` slice to make room for trailing `CRUDOption`s. Update call sites:
 
     ```go

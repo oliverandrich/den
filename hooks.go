@@ -67,8 +67,18 @@ type AfterSaver interface {
 	AfterSave(ctx context.Context) error
 }
 
+// Validator is the custom-validation hook. Implement it on a document
+// to enforce invariants beyond what struct tag validation can express.
+// Returning an error rolls back the surrounding Insert / Update without
+// touching storage.
+//
+// The passed ctx is the same one threaded through the surrounding
+// Insert / Update call — use it for cancellation, deadlines, DB lookups
+// inside the validator, outbound HTTP calls that need to participate
+// in the request, or tracing spans. Matches the signature of every
+// other Den hook.
 type Validator interface {
-	Validate() error
+	Validate(ctx context.Context) error
 }
 
 // runBeforeInsertHooks runs the mutating before-hooks for insert in order:
@@ -89,14 +99,15 @@ func runBeforeInsertHooks(ctx context.Context, doc any) error {
 	return nil
 }
 
-// runValidationHooks runs the custom Validator.Validate() method, if any.
-// This runs after BeforeInsert/BeforeUpdate/BeforeSave hooks so that the
-// validator sees the final, fully-populated document. Tag-based validation
-// (via DB.tagValidator) is invoked separately in the CRUD functions so that
-// both declarative and custom validation see the same post-hook state.
-func runValidationHooks(_ context.Context, doc any) error {
+// runValidationHooks runs the custom Validator.Validate(ctx) method,
+// if any. Runs after BeforeInsert/BeforeUpdate/BeforeSave so the
+// validator sees the final, fully-populated document. Tag-based
+// validation (via DB.tagValidator) is invoked separately in the CRUD
+// functions so both declarative and custom validation see the same
+// post-hook state.
+func runValidationHooks(ctx context.Context, doc any) error {
 	if v, ok := doc.(Validator); ok {
-		if err := v.Validate(); err != nil {
+		if err := v.Validate(ctx); err != nil {
 			return fmt.Errorf("%w: %w", ErrValidation, err)
 		}
 	}

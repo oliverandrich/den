@@ -12,21 +12,35 @@ import (
 	"github.com/oliverandrich/den"
 )
 
-func TestInsertManyError_Unwrap_CachesBackingSlice(t *testing.T) {
-	failures := []den.InsertFailure{
-		{Index: 0, Err: errors.New("boom-0")},
-		{Index: 1, Err: errors.New("boom-1")},
+// TestInsertManyError_Unwrap_TracksFailureMutations pins the new contract:
+// Unwrap is built fresh on each call, so callers that read Failures after
+// mutating it see consistent unwrap output. The previous sync.Once cache
+// silently went stale once Failures changed.
+func TestInsertManyError_Unwrap_TracksFailureMutations(t *testing.T) {
+	first := errors.New("boom-0")
+	second := errors.New("boom-1")
+	replaced := errors.New("replaced")
+
+	e := &den.InsertManyError{
+		Failures: []den.InsertFailure{
+			{Index: 0, Err: first},
+			{Index: 1, Err: second},
+		},
+		TotalFailures: 2,
 	}
-	e := &den.InsertManyError{Failures: failures, TotalFailures: 2}
 
 	u1 := e.Unwrap()
-	u2 := e.Unwrap()
 	require.Len(t, u1, 2)
-	require.Len(t, u2, 2)
+	assert.Same(t, first, u1[0])
+	assert.Same(t, second, u1[1])
 
-	// Same backing array — the slice is built once and reused across calls so
-	// repeated errors.Is / errors.As walks don't re-allocate.
-	assert.Same(t, &u1[0], &u2[0], "Unwrap must return the same backing array on repeat calls")
+	// Mutate Failures after the first Unwrap and confirm the next call
+	// reflects the mutation. With the previous sync.Once cache this would
+	// silently return the stale snapshot.
+	e.Failures[0].Err = replaced
+	u2 := e.Unwrap()
+	assert.Same(t, replaced, u2[0],
+		"Unwrap must reflect post-call mutations of Failures")
 }
 
 func TestInsertManyError_Error_TruncatesLongDetail(t *testing.T) {

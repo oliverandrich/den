@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 )
 
 var (
@@ -66,9 +65,6 @@ type InsertManyError struct {
 	Failures      []InsertFailure
 	Truncated     bool
 	TotalFailures int
-
-	unwrapOnce sync.Once
-	unwrapped  []error
 }
 
 func (e *InsertManyError) Error() string {
@@ -99,18 +95,19 @@ func (e *InsertManyError) Error() string {
 }
 
 // Unwrap returns the wrapped errors so errors.Is and errors.As traverse
-// every recorded failure. The returned slice is built once and cached —
-// repeat calls return the same backing array.
+// every recorded failure. A fresh slice is allocated on each call so
+// callers that mutate Failures see consistent unwrap output afterward —
+// the previous sync.Once cache made the slice silently stale on mutation.
+// The cost is one O(len(Failures)) allocation per call, sub-microsecond
+// at the default MaxRecordedFailures cap of 100.
 //
 // When Truncated is true, only the recorded Failures are unwrapped; elided
 // failures are not reachable via the errors tree. This is intentional — a
 // sampled error should not silently appear exhaustive.
 func (e *InsertManyError) Unwrap() []error {
-	e.unwrapOnce.Do(func() {
-		e.unwrapped = make([]error, len(e.Failures))
-		for i, f := range e.Failures {
-			e.unwrapped[i] = f.Err
-		}
-	})
-	return e.unwrapped
+	out := make([]error, len(e.Failures))
+	for i, f := range e.Failures {
+		out[i] = f.Err
+	}
+	return out
 }

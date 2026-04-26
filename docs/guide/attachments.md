@@ -1,17 +1,15 @@
 # Attachments & Storage
 
-Den includes a built-in abstraction for attaching files to documents. The
-metadata (path, mime, size, hash) lives on an embeddable struct in the
-document; the actual bytes live behind a `den.Storage` interface that the
-application configures once at `Open` time.
+Den includes a built-in abstraction for attaching files to documents. The metadata (path, mime, size, hash) lives on an embeddable struct in the document; the actual bytes live behind a `den.Storage` interface that the application configures once at `Open` time.
+
+This page covers the concept, the document-side embed, and the upload / read / delete workflow. The two shipped storage implementations and the contract for writing your own each have their own page:
+
+- [File backend](storage/file.md) — local disk, content-addressed, included in Den core.
+- [S3 backend](storage/s3.md) — S3 / S3-compatible (MinIO, localstack), shipped as a separate Go submodule so the minio-go dep doesn't enter applications that don't use it.
+- [Writing a custom backend](storage/custom.md) — the `Storage` interface, required behaviour, optional `URLPrefix`.
 
 !!! note "One Storage per DB"
-    A single `den.Storage` is bound to the DB at Open. Every document
-    type that uses attachments routes its bytes through that one
-    backend. There is no per-collection storage routing built in — if
-    you need that (public CDN for post covers, private bucket for
-    invoices), wrap your Storage with a dispatcher in application code
-    and pick a backend per call site.
+    A single `den.Storage` is bound to the DB at Open. Every document type that uses attachments routes its bytes through that one backend. There is no per-collection storage routing built in — if you need that (public CDN for post covers, private bucket for invoices), wrap your Storage with a dispatcher in application code and pick a backend per call site.
 
 ## When to Use It
 
@@ -20,10 +18,7 @@ application configures once at `Open` time.
 - User-avatar uploads
 - Any document type that owns a file
 
-If you only need to store small inline payloads (JSON config blobs, small
-snippets), just add a `string` or `[]byte` field. Attachments earn their
-keep when the payload is bytes that belong on a CDN, a disk, or S3 — not
-inside the document JSON.
+If you only need to store small inline payloads (JSON config blobs, small snippets), just add a `string` or `[]byte` field. Attachments earn their keep when the payload is bytes that belong on a CDN, a disk, or S3 — not inside the document JSON.
 
 ## Enabling Attachments
 
@@ -52,32 +47,19 @@ type Attachment struct {
 }
 ```
 
-These fields are set by the Storage when bytes are stored and are not meant
-to be edited by application code afterwards — `StoragePath`, `Size`, and
-`SHA256` are intrinsic to the stored content.
+These fields are set by the Storage when bytes are stored and are not meant to be edited by application code afterwards — `StoragePath`, `Size`, and `SHA256` are intrinsic to the stored content.
 
 !!! note "About the `validate:` tags"
-    The `validate:` tags fire only when validation is enabled on the
-    DB via `validate.WithValidation()` (see [Validation](validation.md)).
-    `Storage.Store` itself does NOT run validation; the tags kick in
-    when the containing document is later inserted or updated through
-    `den.Insert` / `den.Update`. With validation disabled the tags are
-    inert metadata.
+    The `validate:` tags fire only when validation is enabled on the DB via `validate.WithValidation()` (see [Validation](validation.md)). `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`. With validation disabled the tags are inert metadata.
 
 !!! note "StoragePath is an object key, not a URL"
-    `StoragePath` is the path **relative to the storage backend's root** —
-    for the `storage/file` backend that is the root directory, for S3 that is the
-    object key inside the bucket. Hosts, bucket names, query strings, and
-    pre-signed URL parameters do NOT belong here; they come out of
-    `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS
-    object-key maxima.
+    `StoragePath` is the path **relative to the storage backend's root** — for the file backend that is the root directory, for S3 that is the object key inside the bucket. Hosts, bucket names, query strings, and pre-signed URL parameters do NOT belong here; they come out of `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS object-key maxima.
 
 ## IS-a-file vs. HAS-files
 
 There are two common shapes:
 
-**IS-a-file** — the document represents a single file. Embed the
-`Attachment`:
+**IS-a-file** — the document represents a single file. Embed the `Attachment`:
 
 ```go
 type Media struct {
@@ -87,8 +69,7 @@ type Media struct {
 }
 ```
 
-**HAS-files** — the document references one or more files. Use named
-fields:
+**HAS-files** — the document references one or more files. Use named fields:
 
 ```go
 type Product struct {
@@ -99,17 +80,13 @@ type Product struct {
 }
 ```
 
-Both shapes use the same `Attachment` struct. Den's hard-delete cascade
-finds attachments in either position via reflection.
+Both shapes use the same `Attachment` struct. Den's hard-delete cascade finds attachments in either position via reflection.
 
 ## Installing a Storage Backend
 
-Storage is configured once, at `Open`, via `den.WithStorage`. Concrete
-backends live in sub-packages of `den/storage` and register themselves
-on import. Two construction styles work:
+Storage is configured once, at `Open`, via `den.WithStorage`. Concrete backends live in sub-packages of `den/storage` (or a separate Go submodule, in the case of `storage/s3`) and register themselves on import. Two construction styles work:
 
-**Direct constructor** — import the backend package and call its
-`New`:
+**Direct constructor** — import the backend package and call its `New`:
 
 ```go
 import (
@@ -125,10 +102,7 @@ if err != nil {
 db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
 ```
 
-**DSN-based dispatch** — useful for configuration-driven setups where
-the backend is chosen at runtime (for example Burrow's `--storage-dsn`
-flag). Import the backend for its side effect so it registers its
-scheme:
+**DSN-based dispatch** — useful for configuration-driven setups where the backend is chosen at runtime (for example Burrow's `--storage-dsn` flag). Import the backend for its side effect so it registers its scheme:
 
 ```go
 import (
@@ -145,33 +119,13 @@ if err != nil {
 db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
 ```
 
-The `file://` DSN uses the same SQLAlchemy/JDBC-style convention as
-`sqlite://`:
+For the per-backend DSN syntax, see the [file backend](storage/file.md#dsn-syntax) and [S3 backend](storage/s3.md#dsn-form) pages.
 
-| DSN | Path handed to the filesystem |
-|---|---|
-| `file:///data/media` | `data/media` *(relative, 3 slashes)* |
-| `file:////var/media` | `/var/media` *(absolute, 4 slashes)* |
-
-One leading slash is stripped on parse so that standard URL libraries
-(Go `net/url`, Python `urllib.parse`) can tokenise the DSN with the
-authority component staying empty. Direct construction via `file.New(...)`
-takes the filesystem path literally — no stripping.
-
-One Storage serves every document type in the database. If you need
-per-type routing (public CDN for post covers, private bucket for invoices),
-that is an application concern — wrap your Storage with a dispatcher that
-picks a backend based on the call site.
-
-Without a Storage, `Store` / `Open` / `Delete` on attachments still work
-because application code holds a reference to the Storage instance
-directly. What breaks is the automatic hard-delete cascade, which only
-runs if a Storage is installed on the DB.
+Without a Storage, `Store` / `Open` / `Delete` on attachments still work because application code holds a reference to the Storage instance directly. What breaks is the automatic hard-delete cascade, which only runs if a Storage is installed on the DB — `den.Delete(..., HardDelete())` on an attachment-bearing document returns `ErrValidation` instead of orphaning bytes.
 
 ## Uploading Bytes
 
-Use `Storage.Store` directly — attachment upload happens in your HTTP
-handler (or CLI importer), not inside Den:
+Use `Storage.Store` directly — attachment upload happens in your HTTP handler (or CLI importer), not inside Den:
 
 ```go
 func uploadHandler(db *den.DB) http.HandlerFunc {
@@ -204,21 +158,12 @@ func uploadHandler(db *den.DB) http.HandlerFunc {
 
 Two cleanup situations to keep in mind:
 
-1. **Insert fails after Store succeeds** — application code must call
-   `Storage.Delete` to avoid an orphan. Store-then-Insert is not atomic.
-2. **Hard delete cascade** — Den handles this automatically: when
-   `den.Delete(ctx, db, doc, den.HardDelete())` removes a document that
-   contains attachments, Den calls `Storage.Delete` for each.
+1. **Insert fails after Store succeeds** — application code must call `Storage.Delete` to avoid an orphan. Store-then-Insert is not atomic.
+2. **Hard delete cascade** — Den handles this automatically: when `den.Delete(ctx, db, doc, den.HardDelete())` removes a document that contains attachments, Den calls `Storage.Delete` for each.
 
-Hard-deleting an attachment-bearing document without a configured
-Storage is rejected with `ErrValidation` before the database delete
-runs — orphan bytes are worse than a clear error.
+Hard-deleting an attachment-bearing document without a configured Storage is rejected with `ErrValidation` before the database delete runs — orphan bytes are worse than a clear error.
 
-Remote `Storage.Delete` failures *after* the database delete succeeds
-are logged via `slog.Warn` but do not roll the delete back. A broken
-reference (DB pointing at missing bytes) is worse than orphan bytes,
-which are recoverable via an offline sweep that cross-references
-filesystem paths with `StoragePath` values.
+Remote `Storage.Delete` failures *after* the database delete succeeds are logged via `slog.Warn` but do not roll the delete back. A broken reference (DB pointing at missing bytes) is worse than orphan bytes, which are recoverable via an offline sweep that cross-references filesystem paths with `StoragePath` values.
 
 ## Reading Bytes
 
@@ -233,9 +178,7 @@ io.Copy(w, f)
 
 ## Serving URLs
 
-`Storage.URL` returns the URL path at which the file is served. For
-the filesystem backend that is the URL prefix passed at construction
-plus the storage path:
+`Storage.URL` returns the URL at which the file is served. For the filesystem backend that is the URL prefix passed at construction plus the storage path:
 
 ```go
 fs, _ := file.New("./uploads", "/media")
@@ -243,28 +186,20 @@ fs, _ := file.New("./uploads", "/media")
 fs.URL(att) // -> "/media/2026/04/abc123def4567890.jpg"
 ```
 
-Remote storage backends may return absolute URLs (`https://cdn.example.com/...`)
-or pre-signed URLs. Applications should treat the return value as opaque.
+Remote storage backends may return absolute URLs (`https://cdn.example.com/...`) or pre-signed URLs (S3 returns SigV4-presigned GETs). Applications should treat the return value as opaque.
 
-Serving the files is up to the application. The
-[burrow/uploader](https://github.com/oliverandrich/burrow/tree/main/uploader)
-package provides a ready-made HTTP serving handler and multipart ingress
-helpers built on the `Storage` interface.
+Serving the files is up to the application. The [burrow/uploader](https://github.com/oliverandrich/burrow/tree/main/uploader) package provides a ready-made HTTP serving handler and multipart ingress helpers built on the `Storage` interface.
 
 ## Hard-Delete Cascade
 
-When a document that contains attachments is hard-deleted, Den walks the
-document via reflection, collects every non-zero `Attachment` it finds
-(in embeds and in named fields), and calls `Storage.Delete` for each:
+When a document that contains attachments is hard-deleted, Den walks the document via reflection, collects every non-zero `Attachment` it finds (in embeds and in named fields), and calls `Storage.Delete` for each:
 
 ```go
 // Bytes AND record are gone after this call.
 err := den.Delete(ctx, db, media, den.HardDelete())
 ```
 
-The walker only descends into struct fields and pointer-to-struct fields.
-Slices and maps are not followed — if you need to clean up attachments in
-a slice, use a `BeforeDeleter` hook:
+The walker only descends into struct fields and pointer-to-struct fields. Slices and maps are not followed — if you need to clean up attachments in a slice, use a `BeforeDeleter` hook:
 
 ```go
 type Gallery struct {
@@ -284,215 +219,10 @@ func (g *Gallery) BeforeDelete(ctx context.Context) error {
 }
 ```
 
-Soft-delete does NOT trigger the cascade — the bytes stay until you
-hard-delete. That matches the intent of soft delete (reversible removal).
-
-## The File Reference Implementation
-
-`den/storage/file` is the reference backend. It stores bytes on the
-local disk under a configurable root directory, addressed by the
-content hash:
-
-```go
-import "github.com/oliverandrich/den/storage/file"
-
-fs, err := file.New("./uploads", "/media")
-```
-
-Importing the package for its side effect also registers the `file://`
-scheme with [`storage.OpenURL`](#installing-a-storage-backend), so
-configuration-driven setups can use either form interchangeably.
-
-The generated path is
-`YYYY/MM/<first-16-of-sha256>.<ext>` — grouped by month, content-addressed,
-dedup-on-write. Two uploads of the same bytes in the same month resolve to
-the same path; the second `Store` returns the existing path instead of
-duplicating the file.
-
-Security-relevant behavior:
-
-- **Path traversal is refused** — `Open` and `Delete` use `os.Root` (Go
-  1.24+). A `StoragePath` that escapes the root (via `..` or symlinks)
-  cannot read anything outside the configured directory.
-- **Empty uploads are rejected** — `Store` on a zero-byte reader returns
-  `storage.ErrEmptyContent`.
-- **Delete is idempotent** — a missing path returns success, simplifying
-  cleanup orchestration against the document lifecycle.
-
-### URL-prefix accessor
-
-The filesystem backend exposes its HTTP prefix via `URLPrefix() string`:
-
-```go
-fs, _ := file.New("./uploads", "/media")
-fs.URLPrefix() // "/media"
-```
-
-HTTP-layer packages (`burrow/uploader`, custom handlers) use this to
-mount a serving handler on the same route that `URL` produces, without
-having the prefix configured twice. Remote backends (S3, GCS)
-intentionally do NOT implement this method — the absent `URLPrefix()`
-is the signal that the Storage is responsible for serving and the HTTP
-package should skip local routing.
-
-## The S3 Backend
-
-`den/storage/s3` is an S3 (and S3-compatible, e.g. MinIO) backend
-backed by [`minio-go`](https://github.com/minio/minio-go). It lives
-in its own Go module so the `minio-go` dependency only enters the
-build of applications that actually need S3 — Den core stays free of
-any S3-specific transitive deps.
-
-```bash
-go get github.com/oliverandrich/den/storage/s3
-```
-
-The submodule is versioned independently of Den core; release tags
-follow the `storage/s3/vX.Y.Z` convention.
-
-### Construction
-
-**Direct constructor**:
-
-```go
-import s3 "github.com/oliverandrich/den/storage/s3"
-
-st, err := s3.New("my-bucket",
-    s3.WithRegion("eu-central-1"),
-    s3.WithPresignTTL(15*time.Minute),
-)
-```
-
-**DSN-based dispatch** — same pattern as the file backend, with the
-side-effect import registering the `s3://` scheme:
-
-```go
-import (
-    "github.com/oliverandrich/den/storage"
-    _ "github.com/oliverandrich/den/storage/s3" // registers "s3://"
-)
-
-st, err := storage.OpenURL(
-    "s3://my-bucket/uploads?region=eu-central-1&presign_ttl=15m",
-    "/media/", // unused by S3 — URLs are absolute
-)
-```
-
-The DSN form is `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`:
-
-| Query param | Meaning | Default |
-|---|---|---|
-| `region` | AWS region, e.g. `eu-central-1` | empty (required by real S3) |
-| `endpoint` | S3-compatible endpoint without scheme, e.g. `minio.local:9000` | `s3.amazonaws.com` |
-| `secure` | TLS to the endpoint (`true` / `false`) | `true` |
-| `presign_ttl` | Lifetime of pre-signed URLs (Go duration) | `15m` |
-
-Credentials are intentionally **NOT** parsed from the DSN. They come
-from the standard AWS chain: `AWS_ACCESS_KEY_ID` /
-`AWS_SECRET_ACCESS_KEY` env vars, or the IAM instance profile when
-running on EC2 / ECS / EKS. For tests or one-off setups, pass them
-explicitly via `s3.WithCredentials(accessKey, secretKey)`.
-
-### MinIO / localstack
-
-Override the endpoint and disable TLS:
-
-```go
-st, err := s3.New("local",
-    s3.WithEndpoint("minio.local:9000"),
-    s3.WithSecure(false),
-    s3.WithCredentials("minioadmin", "minioadmin"),
-)
-```
-
-For DSN-based setup, credentials still come from the standard AWS env
-vars (the DSN intentionally never carries secrets). MinIO's defaults
-work as drop-in `AWS_*` values:
-
-```bash
-export AWS_ACCESS_KEY_ID=minioadmin
-export AWS_SECRET_ACCESS_KEY=minioadmin
-```
-
-```go
-st, err := storage.OpenURL(
-    "s3://local?endpoint=minio.local:9000&secure=false",
-    "/media/",
-)
-```
-
-The same env-var mechanism feeds real S3 — point `AWS_ACCESS_KEY_ID` /
-`AWS_SECRET_ACCESS_KEY` at IAM-issued credentials and drop the endpoint
-override.
-
-### Object layout and dedup
-
-Generated keys mirror the file backend:
-`<prefix>/YYYY/MM/<first-16-of-sha256><ext>` — content-addressed,
-month-bucketed. Two `Store` calls with identical bytes produce the
-same key; the second call short-circuits via a `HeadObject` check
-instead of re-uploading.
-
-The optional path prefix (DSN path component or `s3.WithPathPrefix`)
-nests every object under one folder inside the bucket — useful when
-sharing a bucket across applications.
-
-### Pre-signed URLs
-
-`Storage.URL` returns a SigV4-pre-signed GET URL valid for the
-configured TTL (`s3.DefaultPresignTTL` is 15 minutes; override with
-`s3.WithPresignTTL` or the `presign_ttl` DSN param). Signing is local
-computation — no network round-trip per call.
-
-S3 URLs are absolute, so the S3 backend deliberately omits the
-`URLPrefix() string` method. HTTP-layer packages should treat the
-returned URL as opaque and not register a local serving handler.
-
-## Writing a Custom Storage Backend
-
-Implement `den.Storage`:
-
-```go
-type Storage interface {
-    Store(ctx context.Context, r io.Reader, ext, mime string) (document.Attachment, error)
-    Open(ctx context.Context, a document.Attachment) (io.ReadCloser, error)
-    Delete(ctx context.Context, a document.Attachment) error
-    URL(a document.Attachment) string
-}
-```
-
-Requirements implementations MUST honour:
-
-- **Content-addressed** — two `Store` calls with identical bytes must
-  resolve to the same `StoragePath`. Den relies on this for dedup.
-- **Idempotent Delete** — a missing path is not an error.
-- **Concurrency-safe** — `Store` / `Open` / `Delete` / `URL` must be
-  callable from multiple goroutines.
-- **Fill in SHA256** — the returned Attachment's `SHA256` should be the
-  full hex-encoded SHA-256 of the stored bytes. Several Den features rely
-  on the hash for diff detection.
-
-Optional method:
-
-- **`URLPrefix() string`** — implement only when `URL` returns a path
-  relative to the current HTTP server (i.e. the application is expected
-  to serve the bytes itself). HTTP-layer packages (`burrow/uploader`)
-  type-assert on a local `interface { URLPrefix() string }` to decide
-  whether to mount a serving handler and at what route. Backends that
-  return absolute URLs (S3, GCS, a CDN) should omit the method — its
-  absence signals "I serve myself, do not register a local handler".
+Soft-delete does NOT trigger the cascade — the bytes stay until you hard-delete. That matches the intent of soft delete (reversible removal).
 
 ## Uniqueness Trade-off
 
-`document.Attachment` deliberately does NOT carry a `den:"unique"` tag on
-`StoragePath`. The reason: a `Product.Hero` attachment that references the
-same bytes as another `Product.Hero` is a legitimate case — two products
-can share a hero image via content addressing. A unique constraint on
-`storage_path` at the collection level would forbid that.
+`document.Attachment` deliberately does NOT carry a `den:"unique"` tag on `StoragePath`. The reason: a `Product.Hero` attachment that references the same bytes as another `Product.Hero` is a legitimate case — two products can share a hero image via content addressing. A unique constraint on `storage_path` at the collection level would forbid that.
 
-For "library" collections where each file must map to one record (a media
-library: one record per file), either add your own unique constraint in
-application logic (look up by SHA256 before insert) or lean on the
-content-addressed Storage's dedup — identical bytes produce the same
-`StoragePath`, and the database insert will fail if your collection has a
-unique index on that field.
+For "library" collections where each file must map to one record (a media library: one record per file), either add your own unique constraint in application logic (look up by SHA256 before insert) or lean on the content-addressed Storage's dedup — identical bytes produce the same `StoragePath`, and the database insert will fail if your collection has a unique index on that field.

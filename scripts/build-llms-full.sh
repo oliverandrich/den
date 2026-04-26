@@ -13,7 +13,9 @@ OUT=docs/llms-full.txt
 PAGES=(
   docs/index.md
   docs/getting-started/installation.md
+  docs/getting-started/mental-model.md
   docs/getting-started/quickstart.md
+  docs/getting-started/tour.md
   docs/getting-started/backends.md
   docs/guide/documents.md
   docs/guide/crud.md
@@ -22,6 +24,9 @@ PAGES=(
   docs/guide/aggregations.md
   docs/guide/full-text-search.md
   docs/guide/attachments.md
+  docs/guide/storage/file.md
+  docs/guide/storage/s3.md
+  docs/guide/storage/custom.md
   docs/guide/transactions.md
   docs/guide/hooks.md
   docs/guide/soft-delete.md

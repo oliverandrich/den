@@ -59,7 +59,9 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
+      - Mental Model: getting-started/mental-model.md
       - Quick Start: getting-started/quickstart.md
+      - 10-Minute Tour: getting-started/tour.md
       - Backends: getting-started/backends.md
   - Guide:
       - Core:
@@ -70,7 +72,11 @@ nav:
       - Features:
           - Aggregations: guide/aggregations.md
           - Full-Text Search: guide/full-text-search.md
-          - Attachments & Storage: guide/attachments.md
+          - Attachments & Storage:
+              - Overview: guide/attachments.md
+              - File Backend: guide/storage/file.md
+              - S3 Backend: guide/storage/s3.md
+              - Custom Backend: guide/storage/custom.md
           - Transactions: guide/transactions.md
           - Lifecycle Hooks: guide/hooks.md
       - Data Integrity:

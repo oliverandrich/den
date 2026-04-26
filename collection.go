@@ -101,7 +101,12 @@ func collectionForType(db *DB, t reflect.Type) (*collectionInfo, error) {
 	db.mu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotRegistered, name)
+		return nil, fmt.Errorf(
+			"%w: %s — call den.Register(ctx, db, &%s{}) before this operation, "+
+				"or pass it via den.WithTypes() when opening "+
+				"(see https://den-odm.readthedocs.io/getting-started/quickstart/)",
+			ErrNotRegistered, t, t.Name(),
+		)
 	}
 
 	// Cache for future lookups

@@ -124,6 +124,27 @@ func TestMeta_Unregistered(t *testing.T) {
 	assert.ErrorIs(t, err, den.ErrNotRegistered)
 }
 
+// TestErrNotRegistered_MessageIsActionable pins that the error a user
+// sees points them at the exact Register call needed to fix it.
+// Every-type-must-be-registered is the #1 thing migrators forget;
+// the message has to be self-correcting.
+func TestErrNotRegistered_MessageIsActionable(t *testing.T) {
+	db := dentest.MustOpen(t)
+
+	_, err := den.Meta[Note](db)
+	require.Error(t, err)
+
+	msg := err.Error()
+	assert.Contains(t, msg, "den_test.Note",
+		"qualified type name disambiguates between same-named types in different packages")
+	assert.Contains(t, msg, "den.Register(ctx, db, &Note{})",
+		"message must spell out the exact Register call to add")
+	assert.Contains(t, msg, "den.WithTypes()",
+		"message must mention the WithTypes alternative")
+	assert.Contains(t, msg, "https://den-odm.readthedocs.io",
+		"message must link to the docs for the full setup")
+}
+
 func TestCollections(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{}, &Category{})
 

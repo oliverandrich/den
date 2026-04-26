@@ -93,6 +93,22 @@ where.Field("status").In("active", "pending")   // value in set
 where.Field("status").NotIn("deleted")           // value not in set
 ```
 
+!!! warning "Spreading a typed slice into `In` / `NotIn`"
+    `In` and `NotIn` are variadic over `any`. Passing a typed slice
+    *without* spreading it silently matches against the literal slice
+    value, not its elements:
+
+    ```go
+    ids := []string{"a", "b", "c"}
+    where.Field("id").In(ids)            // ❌ matches the literal []string slice
+    where.Field("id").In(ids[0], ids[1]) // ✅ explicit spread (only works for fixed N)
+    where.Field("id").In(where.AnyOf(ids)...)  // ✅ generic spread for any []T
+    ```
+
+    `where.AnyOf[T any](values []T) []any` is the typed-spread shortcut.
+    Type inference picks T from the argument; no explicit type
+    parameter at the call site.
+
 ### Array Operators
 
 ```go

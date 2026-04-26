@@ -174,6 +174,26 @@ func Update[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption
 	return updateCore(ctx, s.db(), s.readWriter(), document, opts...)
 }
 
+// Save inserts the document if its ID is empty, otherwise updates it.
+// Convenience helper for the common "I have a *T; persist it" case where
+// the caller does not want to think about whether the row exists yet.
+//
+// Trade-off vs explicit Insert / Update: Save loses control over the
+// branch — if a stale-rev Update would have failed with
+// ErrRevisionConflict, an empty-ID Save instead silently routes to
+// Insert. Use the explicit calls when conflict semantics matter.
+//
+// Options pass through to whichever underlying call runs. Hooks fire
+// on exactly one path (Insert hooks on the new-doc branch, Update
+// hooks on the existing-doc branch).
+func Save[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
+	id, _ := extractBaseID(reflect.ValueOf(document).Elem())
+	if id == "" {
+		return Insert(ctx, s, document, opts...)
+	}
+	return Update(ctx, s, document, opts...)
+}
+
 func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
 	o := applyCRUDOpts(opts)
 	col, err := collectionFor[T](db)
@@ -406,6 +426,37 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 // When scope is a *DB, a new transaction is opened; when scope is a *Tx, the
 // operation runs inline in the caller's transaction.
 func FindOneAndUpsert[T any](
+	ctx context.Context,
+	s Scope,
+	defaults *T,
+	fields SetFields,
+	conditions []where.Condition,
+	opts ...CRUDOption,
+) (*T, bool, error) {
+	return findOneAndUpsertImpl(ctx, s, defaults, fields, conditions, opts...)
+}
+
+// FindOrCreate is the find-or-create-with-defaults shorthand: returns the
+// existing document if conditions match exactly one row, otherwise inserts
+// `defaults` as a new row. Existing rows are never modified.
+//
+// Equivalent to `FindOneAndUpsert(ctx, s, defaults, SetFields{}, conditions, opts...)`
+// — same atomicity, same hook firing rules, same `ErrMultipleMatches` on
+// non-unique conditions, same `(doc, inserted, err)` return shape. Reach
+// for it when the typical "fetch this row by unique key, create with
+// these defaults if missing, leave the rest alone" pattern doesn't need
+// the post-find field updates FindOneAndUpsert can apply.
+func FindOrCreate[T any](
+	ctx context.Context,
+	s Scope,
+	defaults *T,
+	conditions []where.Condition,
+	opts ...CRUDOption,
+) (*T, bool, error) {
+	return findOneAndUpsertImpl(ctx, s, defaults, SetFields{}, conditions, opts...)
+}
+
+func findOneAndUpsertImpl[T any](
 	ctx context.Context,
 	s Scope,
 	defaults *T,
@@ -651,6 +702,18 @@ func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, op
 		Truncated:     limit != 0 && total > limit,
 		TotalFailures: total,
 	}
+}
+
+// UpdateMany applies fields to every document matching conditions. Returns
+// the number of modified documents.
+//
+// Top-level shorthand for `NewQuery[T](s, conditions...).Update(ctx, fields)`
+// — discoverable next to DeleteMany / Insert / Update instead of buried
+// in the QuerySet chain. All semantics (per-row hooks, fail-fast on error,
+// SetFields key validation, transaction wrapping) come from QuerySet.Update;
+// see [QuerySet.Update] for the full contract.
+func UpdateMany[T any](ctx context.Context, s Scope, conditions []where.Condition, fields SetFields) (int64, error) {
+	return NewQuery[T](s, conditions...).Update(ctx, fields)
 }
 
 // DeleteMany deletes all documents matching the given conditions.

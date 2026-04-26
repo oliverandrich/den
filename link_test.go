@@ -154,6 +154,57 @@ func TestFetchLink(t *testing.T) {
 	assert.Equal(t, 200, found.Door.Value.Height)
 }
 
+// TestFetchLinkField pins the typed alternative to FetchLink: pass a
+// pointer to the Link[T] directly, no string field name lookup. Renames
+// of the JSON tag on the parent's link field cannot silently break a
+// FetchLinkField call the way they break FetchLink.
+func TestFetchLinkField(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	house := &House{Name: "Cottage", Door: den.NewLink(door)}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	found, err := den.FindByID[House](ctx, db, house.ID)
+	require.NoError(t, err)
+	assert.False(t, found.Door.IsLoaded(), "Link should start unloaded after FindByID")
+
+	require.NoError(t, den.FetchLinkField(ctx, db, &found.Door))
+	assert.True(t, found.Door.IsLoaded())
+	require.NotNil(t, found.Door.Value)
+	assert.Equal(t, 200, found.Door.Value.Height)
+}
+
+// TestFetchLinkField_AlreadyLoaded is a no-op when the Link is already
+// loaded. Mirrors FetchLink's idempotency.
+func TestFetchLinkField_AlreadyLoaded(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	link := den.NewLink(door) // Loaded=true, Value=door
+	require.True(t, link.IsLoaded())
+	require.NoError(t, den.FetchLinkField(ctx, db, &link))
+	assert.Same(t, door, link.Value, "FetchLinkField on a loaded Link must not replace Value")
+}
+
+// TestFetchLinkField_EmptyID is a no-op when the Link has no ID — same
+// contract as the cascade-write path.
+func TestFetchLinkField_EmptyID(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
+	ctx := context.Background()
+
+	var link den.Link[Door]
+	require.NoError(t, den.FetchLinkField(ctx, db, &link))
+	assert.False(t, link.IsLoaded())
+	assert.Nil(t, link.Value)
+}
+
 func TestFetchLink_SliceLink(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()

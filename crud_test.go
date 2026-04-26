@@ -109,6 +109,68 @@ func TestFindByIDs_Empty(t *testing.T) {
 	assert.Empty(t, docs)
 }
 
+// TestUpdateMany_DelegatesToQuerySet pins that the top-level shim
+// produces the same result as the chained QuerySet.Update form. It is
+// pure ergonomics — the test just confirms the rows actually change.
+func TestUpdateMany_DelegatesToQuerySet(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	require.NoError(t, den.InsertMany(ctx, db, []*Product{
+		{Name: "A", Price: 1.0},
+		{Name: "B", Price: 2.0},
+		{Name: "C", Price: 99.0},
+	}))
+
+	count, err := den.UpdateMany[Product](ctx, db,
+		[]where.Condition{where.Field("price").Lt(10.0)},
+		den.SetFields{"price": 50.0},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	updated, err := den.NewQuery[Product](db, where.Field("price").Eq(50.0)).All(ctx)
+	require.NoError(t, err)
+	assert.Len(t, updated, 2)
+}
+
+// TestSave_InsertWhenIDEmpty pins that Save routes to Insert when the
+// document has no ID yet — the new-document path. After Save returns the
+// ID is populated, mirroring Insert's contract.
+func TestSave_InsertWhenIDEmpty(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "FreshDoc", Price: 5.0}
+	require.NoError(t, den.Save(ctx, db, p))
+	assert.NotEmpty(t, p.ID, "Save must set the ID via the Insert path")
+
+	found, err := den.FindByID[Product](ctx, db, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "FreshDoc", found.Name)
+}
+
+// TestSave_UpdateWhenIDPresent pins that Save routes to Update when the
+// document already has an ID — the existing-document path. The stored
+// row must reflect the in-memory state after the call.
+func TestSave_UpdateWhenIDPresent(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	p := &Product{Name: "Initial", Price: 10.0}
+	require.NoError(t, den.Insert(ctx, db, p))
+	originalID := p.ID
+
+	p.Price = 99.0
+	require.NoError(t, den.Save(ctx, db, p))
+	assert.Equal(t, originalID, p.ID, "Update must not change the ID")
+
+	found, err := den.FindByID[Product](ctx, db, originalID)
+	require.NoError(t, err)
+	assert.InDelta(t, 99.0, found.Price, 0.001,
+		"Save must persist the in-memory state through the Update path")
+}
+
 func TestUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
@@ -799,6 +861,47 @@ func TestFindOneAndUpdate_MultipleMatches(t *testing.T) {
 	require.Len(t, all, 2)
 	assert.InDelta(t, 10.0, all[0].Price, 0.001)
 	assert.InDelta(t, 20.0, all[1].Price, 0.001)
+}
+
+// --- FindOrCreate tests (find-or-create-with-defaults shorthand) ---
+
+// TestFindOrCreate_Insert pins the miss path: no row matches, defaults
+// becomes the new document, inserted=true.
+func TestFindOrCreate_Insert(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	doc, inserted, err := den.FindOrCreate[Product](ctx, db,
+		&Product{Name: "Widget", Price: 1.0},
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted, "no existing match → must insert")
+	assert.Equal(t, "Widget", doc.Name)
+	assert.InDelta(t, 1.0, doc.Price, 0.001, "defaults price persisted as-is on insert")
+	assert.NotEmpty(t, doc.ID)
+}
+
+// TestFindOrCreate_Existing pins the hit path: a matching row exists,
+// it is returned untouched and inserted=false. The key contract that
+// distinguishes FindOrCreate from FindOneAndUpsert: existing rows are
+// NEVER modified.
+func TestFindOrCreate_Existing(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	existing := &Product{Name: "Widget", Price: 99.0}
+	require.NoError(t, den.Insert(ctx, db, existing))
+
+	doc, inserted, err := den.FindOrCreate[Product](ctx, db,
+		&Product{Name: "Widget", Price: 1.0}, // defaults — must NOT overwrite the 99.0
+		[]where.Condition{where.Field("name").Eq("Widget")},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted, "existing row → must not insert")
+	assert.Equal(t, existing.ID, doc.ID, "must return the existing row's ID")
+	assert.InDelta(t, 99.0, doc.Price, 0.001,
+		"existing row price must be untouched — defaults apply only on miss")
 }
 
 // --- FindOneAndUpsert tests ---

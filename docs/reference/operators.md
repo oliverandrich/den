@@ -55,6 +55,18 @@ results, err := den.NewQuery[Product](db,
 | `In` | `Field("status").In("active", "pending")` | Value is one of the given values | `json_extract(data, '$.status') IN (?, ?)` | `data->>'status' = ANY($1)` |
 | `NotIn` | `Field("status").NotIn("deleted", "banned")` | Value is not one of the given values | `json_extract(data, '$.status') NOT IN (?, ?)` | `data->>'status' != ALL($1)` |
 
+### Spreading typed slices into `In` / `NotIn`
+
+Both methods are variadic over `any`. Passing a typed slice directly silently matches against the literal slice value rather than its elements — common footgun. Use `where.AnyOf[T]` to convert and spread:
+
+```go
+ids := []string{"a", "b", "c"}
+where.Field("id").In(where.AnyOf(ids)...)
+where.Field("status").NotIn(where.AnyOf(allClosedStatuses)...)
+```
+
+Type inference picks `T` from the argument; no explicit type parameter needed.
+
 ## Array Operators
 
 | Operator | Example | Description | SQLite | PostgreSQL |

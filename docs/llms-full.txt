@@ -1391,6 +1391,22 @@ where.Field("status").In("active", "pending")   // value in set
 where.Field("status").NotIn("deleted")           // value not in set
 ```
 
+!!! warning "Spreading a typed slice into `In` / `NotIn`"
+    `In` and `NotIn` are variadic over `any`. Passing a typed slice
+    *without* spreading it silently matches against the literal slice
+    value, not its elements:
+
+    ```go
+    ids := []string{"a", "b", "c"}
+    where.Field("id").In(ids)            // ❌ matches the literal []string slice
+    where.Field("id").In(ids[0], ids[1]) // ✅ explicit spread (only works for fixed N)
+    where.Field("id").In(where.AnyOf(ids)...)  // ✅ generic spread for any []T
+    ```
+
+    `where.AnyOf[T any](values []T) []any` is the typed-spread shortcut.
+    Type inference picks T from the argument; no explicit type
+    parameter at the call site.
+
 ### Array Operators
 
 ```go
@@ -4516,6 +4532,18 @@ results, err := den.NewQuery[Product](db,
 |---|---|---|---|---|
 | `In` | `Field("status").In("active", "pending")` | Value is one of the given values | `json_extract(data, '$.status') IN (?, ?)` | `data->>'status' = ANY($1)` |
 | `NotIn` | `Field("status").NotIn("deleted", "banned")` | Value is not one of the given values | `json_extract(data, '$.status') NOT IN (?, ?)` | `data->>'status' != ALL($1)` |
+
+### Spreading typed slices into `In` / `NotIn`
+
+Both methods are variadic over `any`. Passing a typed slice directly silently matches against the literal slice value rather than its elements — common footgun. Use `where.AnyOf[T]` to convert and spread:
+
+```go
+ids := []string{"a", "b", "c"}
+where.Field("id").In(where.AnyOf(ids)...)
+where.Field("status").NotIn(where.AnyOf(allClosedStatuses)...)
+```
+
+Type inference picks `T` from the argument; no explicit type parameter needed.
 
 ## Array Operators
 

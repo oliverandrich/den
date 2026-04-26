@@ -137,8 +137,43 @@ func WithLinkRule(rule LinkRule) CRUDOption {
 // FetchLink resolves a single named link field on a document. The scope
 // parameter accepts either a *DB (read from the backend directly) or a *Tx
 // (read from the enclosing transaction).
+//
+// The fieldName is the JSON tag on the parent's link field. Renaming
+// the JSON tag silently breaks every FetchLink call against this
+// collection. Prefer [FetchLinkField] when you can pass the typed
+// link pointer directly — it's compile-checked.
 func FetchLink[T any](ctx context.Context, s Scope, doc *T, fieldName string) error {
 	return fetchLinkByName(ctx, s.db(), s.readWriter(), doc, fieldName, 1)
+}
+
+// FetchLinkField resolves the link by typed pointer instead of a
+// stringly-named field on the parent. Use it when you have the
+// Link[T] in hand directly — refactor-safe and immune to JSON-tag
+// renames on the parent struct.
+//
+// No-op when the link's ID is empty (cascade-write input) or when
+// Loaded is already true (idempotent — matches FetchLink).
+func FetchLinkField[T any](ctx context.Context, s Scope, link *Link[T]) error {
+	if link.ID == "" || link.Loaded {
+		return nil
+	}
+	db := s.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return err
+	}
+	data, err := s.readWriter().Get(ctx, col.meta.Name, link.ID)
+	if err != nil {
+		return err
+	}
+	target := new(T)
+	if err := db.decode(data, target); err != nil {
+		return fmt.Errorf("decode linked %s: %w", col.meta.Name, err)
+	}
+	link.Value = target
+	link.Loaded = true
+	captureSnapshot(data, target)
+	return nil
 }
 
 // FetchAllLinks resolves all link fields on a document. See FetchLink for

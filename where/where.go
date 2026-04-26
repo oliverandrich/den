@@ -87,6 +87,29 @@ func (fb FieldBuilder) NotIn(values ...any) Condition {
 	return &fieldCondition{field: fb.name, op: OpNotIn, values: values}
 }
 
+// AnyOf converts a typed slice into a []any so it can be spread into
+// In or NotIn without per-call boilerplate. The variadic forms above
+// require the spread either way; this helper closes the typed-slice
+// footgun (`Field("id").In(stringIDs)` would silently match the
+// literal slice value).
+//
+// Type inference picks T from the argument; no explicit type
+// parameter needed at the call site.
+//
+//	where.Field("id").In(where.AnyOf(stringIDs)...)
+//	where.Field("status").NotIn(where.AnyOf(allStatuses)...)
+//
+// Go does not allow generic methods on non-generic receivers, so a
+// chained `.InSlice(stringIDs)` form is not possible — this top-level
+// helper is the closest typed-spread the language permits.
+func AnyOf[T any](values []T) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
+}
+
 func (fb FieldBuilder) IsNil() Condition {
 	return &fieldCondition{field: fb.name, op: OpIsNil}
 }

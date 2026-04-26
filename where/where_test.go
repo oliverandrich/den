@@ -48,6 +48,38 @@ func TestField_In_NotIn(t *testing.T) {
 	assert.Equal(t, OpNotIn, fc.op)
 }
 
+// TestAnyOf_StringSlice pins the typed-slice spread shortcut: AnyOf
+// converts []string → []any, then In/NotIn spread it into the same
+// underlying condition shape as a literal variadic call would produce.
+func TestAnyOf_StringSlice(t *testing.T) {
+	ids := []string{"a", "b", "c"}
+	c := Field("id").In(AnyOf(ids)...)
+	fc := c.(*fieldCondition)
+	assert.Equal(t, OpIn, fc.op)
+	assert.Equal(t, []any{"a", "b", "c"}, fc.values,
+		"AnyOf must convert each element into []any so In sees them as N values, not one slice")
+}
+
+// TestAnyOf_Int64Slice pins that the helper is generic over the
+// element type. A typed []int64 spreads identically; In does not
+// silently accept the slice as a single value.
+func TestAnyOf_Int64Slice(t *testing.T) {
+	versions := []int64{1, 2, 3}
+	c := Field("version").NotIn(AnyOf(versions)...)
+	fc := c.(*fieldCondition)
+	assert.Equal(t, OpNotIn, fc.op)
+	assert.Equal(t, []any{int64(1), int64(2), int64(3)}, fc.values)
+}
+
+// TestAnyOf_Empty pins the empty-slice contract: an empty input
+// produces zero values, which the backends interpret as "match
+// nothing" (In) or "match everything" (NotIn).
+func TestAnyOf_Empty(t *testing.T) {
+	var ids []string
+	out := AnyOf(ids)
+	assert.Empty(t, out, "empty input → empty []any output")
+}
+
 func TestField_IsNil_IsNotNil(t *testing.T) {
 	c := Field("read_at").IsNil()
 	fc := c.(*fieldCondition)

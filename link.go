@@ -477,14 +477,12 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 			return err
 		}
 
-		now := time.Now()
-		setSoftDeletedAt(docPtr.Elem(), col.structInfo, &now)
-
-		encoded, err := db.encode(doc)
-		if err != nil {
-			return fmt.Errorf("encode soft delete linked %s: %w", colName, err)
-		}
-		if err := b.Put(ctx, colName, id, encoded); err != nil {
+		// Route through softDelete so the cascade participates in the
+		// revision chain (concurrent stale-rev writers see
+		// ErrRevisionConflict instead of clobbering DeletedAt) and the
+		// caller's SoftDeleteBy / SoftDeleteReason audit fields propagate
+		// to the cascade target the same way they do for direct deletes.
+		if err := softDelete(ctx, db, b, docPtr.Elem(), doc, col, o); err != nil {
 			return err
 		}
 		if err := runAfterSoftDeleteHooks(ctx, doc); err != nil {

@@ -64,7 +64,12 @@ func SoftDeleteReason(reason string) CRUDOption {
 // atomically. Concurrent writers holding the pre-delete revision therefore
 // see ErrRevisionConflict on their next Update instead of silently clobbering
 // DeletedAt. Pass IgnoreRevision to opt out.
-func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, document *T, col *collectionInfo, o crudOpts) error {
+//
+// Non-generic by design — both the top-level deleteCore and the
+// cascadeDeleteLinks soft-path call this with `any`-typed documents, and
+// none of the body needs the type parameter (encode and captureSnapshot
+// both take any).
+func softDelete(ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, doc any, col *collectionInfo, o crudOpts) error {
 	// When revision checking is active and we're not already in a
 	// transaction, auto-wrap so the revision check (Get) and write (Put)
 	// are atomic — preventing TOCTOU races on PostgreSQL where concurrent
@@ -72,7 +77,7 @@ func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Val
 	if col.settings.UseRevision && !o.ignoreRevision {
 		if backend, ok := b.(Backend); ok {
 			return runInWriteTx(ctx, backend, func(tx Transaction) error {
-				return softDelete(ctx, db, tx, rv, document, col, o)
+				return softDelete(ctx, db, tx, rv, doc, col, o)
 			})
 		}
 	}
@@ -85,7 +90,7 @@ func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Val
 	setSoftDeletedAt(rv, col.structInfo, &now)
 	setSoftDeleteAuditFields(rv, col.structInfo, o.softDeleteBy, o.softDeleteReason)
 
-	data, err := db.encode(document)
+	data, err := db.encode(doc)
 	if err != nil {
 		return fmt.Errorf("encode soft delete: %w", err)
 	}
@@ -95,7 +100,7 @@ func softDelete[T any](ctx context.Context, db *DB, b ReadWriter, rv reflect.Val
 	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
 		return err
 	}
-	captureSnapshot(data, document)
+	captureSnapshot(data, doc)
 	return nil
 }
 

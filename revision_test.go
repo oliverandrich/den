@@ -243,6 +243,49 @@ func TestRevision_ConcurrentSoftDeleteUpdate(t *testing.T) {
 	assert.Equal(t, "v1", found.Name, "stale Update must not take effect")
 }
 
+// SoftRevHouse links to a revisioned soft-delete-capable target so cascade
+// soft-delete can be exercised against the revision chain.
+type SoftRevHouse struct {
+	document.Base
+	Name string                   `json:"name"`
+	Door den.Link[SoftRevProduct] `json:"door"`
+}
+
+// TestRevision_CascadeSoftDeleteBumpsLinkedRevision pins that the
+// LinkDelete cascade soft-deletes its targets through the revision chain
+// — a concurrent writer holding the pre-cascade revision must see
+// ErrRevisionConflict on Update, not silently clobber the cascade-set
+// DeletedAt. Before this fix the cascade did a raw Put, leaving the
+// stored _rev unchanged and inviting the lost-update race.
+func TestRevision_CascadeSoftDeleteBumpsLinkedRevision(t *testing.T) {
+	db := dentest.MustOpen(t, &SoftRevProduct{}, &SoftRevHouse{})
+	ctx := context.Background()
+
+	door := &SoftRevProduct{Name: "v1"}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	house := &SoftRevHouse{Name: "Home", Door: den.NewLink(door)}
+	require.NoError(t, den.Insert(ctx, db, house))
+
+	// Snapshot the door as a concurrent writer would have it.
+	stale := *door
+
+	// Cascade soft-delete via the parent.
+	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+
+	// The concurrent writer's stale-rev Update must conflict.
+	stale.Name = "would-clobber-deletion"
+	err := den.Update(ctx, db, &stale)
+	require.ErrorIs(t, err, den.ErrRevisionConflict,
+		"cascade soft-delete must bump linked _rev so concurrent stale Update conflicts")
+
+	// Stored doc still soft-deleted, name unchanged.
+	found, err := den.NewQuery[SoftRevProduct](db).IncludeDeleted().First(ctx)
+	require.NoError(t, err)
+	assert.True(t, found.IsDeleted(), "DeletedAt must survive the stale Update attempt")
+	assert.Equal(t, "v1", found.Name, "stale Update must not take effect")
+}
+
 // TestRevision_SoftDeleteIgnoreRevision confirms that HardDelete-less
 // soft-deletes still respect IgnoreRevision — callers that deliberately want
 // to bypass the check can do so.

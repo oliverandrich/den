@@ -98,6 +98,9 @@ When a document is written to storage, `Link[T]` fields serialize to their ID on
 }
 ```
 
+!!! note "Link equality compares the ID, not the Value"
+    Because the on-disk representation is just the ID, two `Link[T]` values referring to the same target document compare equal by their `ID` field — regardless of whether one was freshly constructed via `NewLink(&doc)` (Loaded=true, Value populated) and the other was decoded from storage (Loaded=false, Value=nil). Code that needs to test "do these two links point at the same row" should compare `a.ID == b.ID`. Comparing `a == b` directly will return `false` for two valid links to the same target whenever their `Loaded`/`Value` differ.
+
 ## Creating Links
 
 Use `NewLink` to create a link from an existing document:

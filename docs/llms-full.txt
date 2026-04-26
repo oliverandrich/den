@@ -1366,6 +1366,25 @@ Import the `where` package and build conditions with `Field()`:
 import "github.com/oliverandrich/den/where"
 ```
 
+!!! tip "Field names are stringly-typed"
+    `where.Field("name")` takes the JSON tag value as a string — typos surface as backend errors at query time, not at compile time. Compile-safety would require a code-generation step that Den deliberately doesn't include. Two pragmatic mitigations:
+
+    1. **Reuse the [reserved-field constants](../reference/struct-tags.md#reserved-json-field-names)** for `Base` / `SoftDelete` fields: `where.Field(den.FieldID)`, `where.Field(den.FieldCreatedAt)`, etc.
+    2. **Validate user-defined field names at startup** against the registered metadata. `den.Meta[T](db).Fields` returns every field Den knows about for a type — wrap it in a sanity check so a typo fails fast at process boot instead of on the first matching query:
+
+        ```go
+        meta, _ := den.Meta[Product](db)
+        known := make(map[string]struct{}, len(meta.Fields))
+        for _, f := range meta.Fields {
+            known[f.Name] = struct{}{}
+        }
+        for _, name := range []string{"name", "price", "category"} {
+            if _, ok := known[name]; !ok {
+                log.Fatalf("Product has no JSON field %q — possible typo", name)
+            }
+        }
+        ```
+
 ### Comparison Operators
 
 ```go
@@ -1729,6 +1748,9 @@ When a document is written to storage, `Link[T]` fields serialize to their ID on
     "windows": ["01HQ5...", "01HQ6..."]
 }
 ```
+
+!!! note "Link equality compares the ID, not the Value"
+    Because the on-disk representation is just the ID, two `Link[T]` values referring to the same target document compare equal by their `ID` field — regardless of whether one was freshly constructed via `NewLink(&doc)` (Loaded=true, Value populated) and the other was decoded from storage (Loaded=false, Value=nil). Code that needs to test "do these two links point at the same row" should compare `a.ID == b.ID`. Comparing `a == b` directly will return `false` for two valid links to the same target whenever their `Loaded`/`Value` differ.
 
 ## Creating Links
 

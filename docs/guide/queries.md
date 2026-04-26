@@ -68,6 +68,25 @@ Import the `where` package and build conditions with `Field()`:
 import "github.com/oliverandrich/den/where"
 ```
 
+!!! tip "Field names are stringly-typed"
+    `where.Field("name")` takes the JSON tag value as a string — typos surface as backend errors at query time, not at compile time. Compile-safety would require a code-generation step that Den deliberately doesn't include. Two pragmatic mitigations:
+
+    1. **Reuse the [reserved-field constants](../reference/struct-tags.md#reserved-json-field-names)** for `Base` / `SoftDelete` fields: `where.Field(den.FieldID)`, `where.Field(den.FieldCreatedAt)`, etc.
+    2. **Validate user-defined field names at startup** against the registered metadata. `den.Meta[T](db).Fields` returns every field Den knows about for a type — wrap it in a sanity check so a typo fails fast at process boot instead of on the first matching query:
+
+        ```go
+        meta, _ := den.Meta[Product](db)
+        known := make(map[string]struct{}, len(meta.Fields))
+        for _, f := range meta.Fields {
+            known[f.Name] = struct{}{}
+        }
+        for _, name := range []string{"name", "price", "category"} {
+            if _, ok := known[name]; !ok {
+                log.Fatalf("Product has no JSON field %q — possible typo", name)
+            }
+        }
+        ```
+
 ### Comparison Operators
 
 ```go

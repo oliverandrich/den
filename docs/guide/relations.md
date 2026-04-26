@@ -251,9 +251,24 @@ Find all documents of a given type that reference a specific document via a link
 houses, err := den.BackLinks[House](ctx, db, "door", doorID)
 ```
 
-Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or define a constant for the field name.
+Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or use the typed variant below.
 
 This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
+
+### Typed variant: `BackLinksField[H, T]`
+
+When the holder has exactly one `Link[T]` field for the target type, the typed variant skips the string field name entirely:
+
+```go
+houses, err := den.BackLinksField[House, Door](ctx, db, doorID)
+```
+
+The framework walks `House`'s fields once, finds the unique `Link[Door]` field, and uses its JSON tag for the underlying query. Renaming the JSON tag is caught at the next call instead of silently returning wrong results. Two type parameters are required (Go can't infer them from the `targetID string`), but the call is otherwise identical.
+
+The string-based form stays for two cases the typed lookup deliberately rejects with a clear error:
+
+- **Multiple `Link[T]` fields on the holder** (e.g. `FrontDoor` and `BackDoor` both `Link[Door]`) — disambiguate by passing the explicit JSON tag to `BackLinks`.
+- **Slice-link fields** (`[]Link[T]`) — the underlying query uses `Eq`, which doesn't match against array contents. Use a manual `where.Field("...").Contains(targetID)` query for slice-link backlinks.
 
 ## Nesting Depth
 

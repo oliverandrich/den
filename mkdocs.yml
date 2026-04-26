@@ -81,6 +81,7 @@ nav:
       - Operations:
           - Migrations: guide/migrations.md
           - Testing: guide/testing.md
+      - Recipes: guide/recipes.md
   - Reference:
       - API Reference: reference/api.md
       - Where Operators: reference/operators.md

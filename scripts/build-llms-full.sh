@@ -30,6 +30,7 @@ PAGES=(
   docs/guide/validation.md
   docs/guide/migrations.md
   docs/guide/testing.md
+  docs/guide/recipes.md
   docs/reference/api.md
   docs/reference/operators.md
   docs/reference/errors.md

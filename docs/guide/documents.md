@@ -81,12 +81,14 @@ Den detects features **structurally**: soft-delete by the presence of the `_dele
 
 ## Struct Tag Syntax
 
-Den uses two struct tags with distinct responsibilities:
+Document structs use two tags:
 
 - **`json`** -- Sets the serialized field name (the key stored in JSONB). Standard Go `encoding/json` rules apply.
-- **`den`** -- Carries Den-specific metadata only. No field name, just options.
+- **`den`** -- Carries Den-specific metadata. No field name, just options.
 
-Available `den` tag options:
+The `den` tag also appears on `GroupBy().Into()` and `Project()` target structs with a different set of values (`count`, `sum:`, `from:`, etc.). For the full inventory of every value across every context, see the [`den:` reference table](../reference/struct-tags.md#all-den-values-by-context).
+
+Available `den` tag options on document fields:
 
 | Option | Effect |
 |---|---|

@@ -1,6 +1,6 @@
 # Struct Tags
 
-Den uses two struct tags: `json` for serialization and `den` for index and metadata options. An optional `validate` tag integrates with `go-playground/validator`.
+Den uses three struct tags: `json` for serialization, `den` for Den-specific metadata, and an optional `validate` tag for `go-playground/validator` integration. The `den` tag carries different sets of values depending on **which struct it appears on** — a document type, a `GroupBy().Into()` target, or a `Project()` target.
 
 ---
 
@@ -9,8 +9,33 @@ Den uses two struct tags: `json` for serialization and `den` for index and metad
 | Tag | Purpose | Example |
 |---|---|---|
 | `json` | Sets the serialized field name (the key stored in JSONB) | `json:"name"` |
-| `den` | Den-specific options: indexing, uniqueness, FTS, omitempty | `den:"index"` |
+| `den` | Den-specific metadata (index/unique/fts on documents; `from:` on projections; `count`/`sum:`/`group_key` on aggregations) | `den:"index"` |
 | `validate` | Struct tag validation rules (requires `validate.WithValidation()`) | `validate:"required,email"` |
+
+---
+
+## All `den:` Values by Context
+
+Every supported `den:` value, where it's valid, and what it does. Values are context-specific: an aggregation tag on a document field is rejected at registration; a document tag on an aggregation target is ignored.
+
+| `den:` value | Valid on | Meaning |
+|---|---|---|
+| `index` | Document field | Secondary index for lookups and sorts |
+| `unique` | Document field | Unique index (doubles as a lookup index — `index` is redundant alongside) |
+| `fts` | Document field | Include this field in full-text search |
+| `omitempty` | Document field | Omit from storage when zero-valued |
+| `unique_together:GROUP` | Document field | Composite unique index keyed by `GROUP` (multiple fields with the same group form one index) |
+| `index_together:GROUP` | Document field | Composite (non-unique) index keyed by `GROUP` |
+| `from:path.to.field` | `Project()` target | Extract a nested value from the source document |
+| `group_key` | `GroupBy().Into()` target | Receives the single group key value |
+| `group_key:N` | `GroupBy().Into()` target | Positional group key (slot `N`, zero-indexed) for multi-field `GroupBy(field0, field1, …)` |
+| `count` | `GroupBy().Into()` target | Count of documents per group |
+| `avg:FIELD` | `GroupBy().Into()` target | Average of `FIELD` per group |
+| `sum:FIELD` | `GroupBy().Into()` target | Sum of `FIELD` per group |
+| `min:FIELD` | `GroupBy().Into()` target | Minimum of `FIELD` per group |
+| `max:FIELD` | `GroupBy().Into()` target | Maximum of `FIELD` per group |
+
+Multiple values combine with commas: `den:"index,omitempty"`. The combinations that make sense are document-field × document-field; mixing across contexts is rejected (document fields refuse `from:`, projection targets refuse `index`, etc.).
 
 ---
 
@@ -142,14 +167,17 @@ Used with `GroupBy().Into()` to define the shape of aggregation results.
 
 | Tag | Description |
 |---|---|
-| `den:"group_key"` | Receives the group key value |
+| `den:"group_key"` | Receives the group key value (single-field `GroupBy`) |
+| `den:"group_key:N"` | Positional group key (slot `N`, zero-indexed) for multi-field `GroupBy` |
 | `den:"avg:fieldname"` | Average of `fieldname` within the group |
 | `den:"sum:fieldname"` | Sum of `fieldname` within the group |
 | `den:"min:fieldname"` | Minimum of `fieldname` within the group |
 | `den:"max:fieldname"` | Maximum of `fieldname` within the group |
 | `den:"count"` | Number of documents in the group |
 
-### Example
+Two struct fields claiming the same `group_key:N` slot, or two fields carrying the same aggregate tag (e.g. two `den:"sum:price"`), are rejected at the `Into` call — the framework refuses ambiguous targets.
+
+### Single-key example
 
 ```go
 type CategoryStats struct {
@@ -166,6 +194,22 @@ err := den.NewQuery[Product](db,
     where.Field("status").Eq("active"),
 ).GroupBy("category.name").Into(ctx, &results)
 ```
+
+### Multi-key example
+
+```go
+type RegionStats struct {
+    Category string  `den:"group_key:0"` // first GroupBy field
+    Region   string  `den:"group_key:1"` // second GroupBy field
+    Count    int64   `den:"count"`
+    Total    float64 `den:"sum:price"`
+}
+
+var stats []RegionStats
+err := den.NewQuery[Product](db).GroupBy("category", "region").Into(ctx, &stats)
+```
+
+The slot index in `group_key:N` matches the position in the `GroupBy(...)` argument list. Unindexed `den:"group_key"` is shorthand for `group_key:0` and is only valid when `GroupBy` was called with exactly one field.
 
 ---
 

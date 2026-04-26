@@ -73,13 +73,17 @@ func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
 }
 
 // WithTypes queues document types to be registered at the end of Open.
-// Equivalent to calling Register(context.Background(), db, types...) after
-// Open returns, but lets the whole setup read as a single expression:
+// Equivalent to calling Register(ctx, db, types...) after Open returns,
+// where ctx is the same context passed to Open / OpenURL — there is no
+// silent context.Background() substitution. Lets the whole setup read as
+// a single expression:
 //
-//	db, err := den.OpenURL(dsn, den.WithTypes(&Note{}, &Tag{}))
+//	db, err := den.OpenURL(ctx, dsn, den.WithTypes(&Note{}, &Tag{}))
 //
-// Any registration error aborts Open and is surfaced as its error. Use
-// Register directly when you need to supply a specific context.
+// Registration runs after every other Option has been applied, so a
+// Validator installed via WithTagValidator is in place before the
+// queued types are validated. Any registration error aborts Open and
+// is surfaced as its error.
 func WithTypes(types ...any) Option {
 	return func(db *DB) {
 		db.pendingTypes = append(db.pendingTypes, types...)

@@ -23,10 +23,21 @@ type AfterUpdater interface {
 	AfterUpdate(ctx context.Context) error
 }
 
+// BeforeDeleter fires before any deletion — both soft and hard. The hook
+// runs before the soft-delete flip OR the physical row removal, whichever
+// the call resolves to. Use BeforeSoftDeleter for soft-only logic.
+//
+// Ordering on the soft path: BeforeDelete → BeforeSoftDelete → [write]
+// → AfterSoftDelete → AfterDelete.
+//
+// Ordering on the hard path (HardDelete() option, or no SoftDelete embed):
+// BeforeDelete → [write] → AfterDelete; the soft-only hooks are skipped.
 type BeforeDeleter interface {
 	BeforeDelete(ctx context.Context) error
 }
 
+// AfterDeleter fires after any deletion completes — both soft and hard.
+// See BeforeDeleter for the full hook ordering on each path.
 type AfterDeleter interface {
 	AfterDelete(ctx context.Context) error
 }
@@ -34,12 +45,16 @@ type AfterDeleter interface {
 // BeforeSoftDeleter fires only on the soft-delete path — after BeforeDelete,
 // before the write. HardDelete() bypasses this hook. Use it for audit-log
 // side effects that should not fire on permanent deletion.
+//
+// Full ordering: BeforeDelete → BeforeSoftDelete → [write] →
+// AfterSoftDelete → AfterDelete.
 type BeforeSoftDeleter interface {
 	BeforeSoftDelete(ctx context.Context) error
 }
 
 // AfterSoftDeleter fires only on the soft-delete path — after the write,
-// before AfterDelete. HardDelete() bypasses this hook.
+// before AfterDelete. HardDelete() bypasses this hook. See BeforeDeleter
+// for the full hook ordering.
 type AfterSoftDeleter interface {
 	AfterSoftDelete(ctx context.Context) error
 }

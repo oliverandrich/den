@@ -106,9 +106,18 @@ Update specific fields on all documents matching a query. Returns the number of 
 ```go
 count, err := den.NewQuery[Product](db,
     where.Field("category").Eq("old"),
-).Update(ctx, den.SetFields{"category": "new"})
+).Update(ctx, den.SetFields{"category": "new"})  // keys are JSON tag names ("category"), not Go field names ("Category")
 // count = number of documents updated
 ```
+
+!!! warning "`SetFields` keys are JSON tag names"
+    Every `SetFields{...}` map uses the JSON tag name (`"category"`,
+    `"price"`, `"login_count"`), NOT the Go field name. Mixing them up
+    fails fast — see "Fail-fast and field validation" below — but it's
+    easy to get wrong on the first try because every other Go API in
+    the package uses Go field names. The same rule applies in
+    `FindOneAndUpdate`, `FindOneAndUpsert`, and any other CRUD
+    operation taking `SetFields`.
 
 !!! tip
     Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.

@@ -1,5 +1,20 @@
 # Testing
 
+## Picking a Registration Path
+
+Den exposes three ways to register document types. Use them roughly like this:
+
+| Where you are | Reach for | Why |
+|---|---|---|
+| App code, types known at startup | `den.WithTypes(&T{}, ...)` as an `Open` option | Single expression sets up the whole DB. Idempotent — safe on every startup. |
+| App code, types discovered after Open | `den.Register(ctx, db, &T{}, ...)` | Same registration logic, called once you know the types. |
+| Test code | `dentest.MustOpen(t, &T{}, ...)` (or `MustOpenPostgres(...)`) | Wraps `OpenURL` + `Register` + `t.Cleanup` in one call. |
+
+The `dentest` helpers also import both backend packages for their side
+effects, so test files do **not** need the
+`_ "github.com/oliverandrich/den/backend/sqlite"` blank import that
+production code uses.
+
 ## SQLite Test Helper
 
 The `dentest` package provides a one-liner to create a file-backed SQLite database in a temporary directory, pre-register document types, and auto-close when the test ends:

@@ -248,6 +248,8 @@ Find all documents of a given type that reference a specific document via a link
 houses, err := den.BackLinks[House](ctx, db, "door", doorID)
 ```
 
+Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or define a constant for the field name.
+
 This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
 
 ## Nesting Depth

@@ -864,9 +864,18 @@ Update specific fields on all documents matching a query. Returns the number of 
 ```go
 count, err := den.NewQuery[Product](db,
     where.Field("category").Eq("old"),
-).Update(ctx, den.SetFields{"category": "new"})
+).Update(ctx, den.SetFields{"category": "new"})  // keys are JSON tag names ("category"), not Go field names ("Category")
 // count = number of documents updated
 ```
+
+!!! warning "`SetFields` keys are JSON tag names"
+    Every `SetFields{...}` map uses the JSON tag name (`"category"`,
+    `"price"`, `"login_count"`), NOT the Go field name. Mixing them up
+    fails fast — see "Fail-fast and field validation" below — but it's
+    easy to get wrong on the first try because every other Go API in
+    the package uses Go field names. The same rule applies in
+    `FindOneAndUpdate`, `FindOneAndUpsert`, and any other CRUD
+    operation taking `SetFields`.
 
 !!! tip
     Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
@@ -1566,6 +1575,8 @@ Find all documents of a given type that reference a specific document via a link
 // Find all Houses that reference a specific Door
 houses, err := den.BackLinks[House](ctx, db, "door", doorID)
 ```
+
+Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or define a constant for the field name.
 
 This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
 
@@ -3587,6 +3598,21 @@ if errors.Is(err, den.ErrMigrationFailed) {
 ---
 
 # Testing
+
+## Picking a Registration Path
+
+Den exposes three ways to register document types. Use them roughly like this:
+
+| Where you are | Reach for | Why |
+|---|---|---|
+| App code, types known at startup | `den.WithTypes(&T{}, ...)` as an `Open` option | Single expression sets up the whole DB. Idempotent — safe on every startup. |
+| App code, types discovered after Open | `den.Register(ctx, db, &T{}, ...)` | Same registration logic, called once you know the types. |
+| Test code | `dentest.MustOpen(t, &T{}, ...)` (or `MustOpenPostgres(...)`) | Wraps `OpenURL` + `Register` + `t.Cleanup` in one call. |
+
+The `dentest` helpers also import both backend packages for their side
+effects, so test files do **not** need the
+`_ "github.com/oliverandrich/den/backend/sqlite"` blank import that
+production code uses.
 
 ## SQLite Test Helper
 

@@ -1772,9 +1772,12 @@ house := &House{
 
 ## Fetch Modes
 
-### Lazy (Default)
+### Lazy (Default for untagged fields)
 
-Links contain only IDs. No additional queries are performed:
+Untagged `Link[T]` fields contain only the target ID after a read; no
+additional query is performed unless the caller asks for one. Fields
+tagged with [`den:"eager"`](#schema-level-eager-deneager) opt out of
+lazy by default — see below.
 
 ```go
 houses, err := den.NewQuery[House](db,
@@ -1817,6 +1820,11 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 Tag a `Link[T]` or `[]Link[T]` field with `den:"eager"` and Den hydrates it on every read, no `WithFetchLinks()` call needed. This is the Django `select_related` analogue applied to the schema instead of the queryset:
 
 ```go
+type Person struct {
+    document.Base
+    Name string `json:"name"`
+}
+
 type House struct {
     document.Base
     Name    string         `json:"name"`
@@ -1841,9 +1849,47 @@ Three modes interact with the tag:
 
 The default-mode resolver still uses the same batched `WHERE _id IN (…)` path on `.All` / `.AllWithCount` / `.Search`, so eager fields cost one extra query per target type per page rather than N+1.
 
-`.Iter(ctx)` honours the tag too, but resolves per row (streaming can't batch). An eager field on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted.
+The CRUD-style read APIs honor the same tag without a QuerySet: `FindByID`, `FindByIDs`, `Refresh`, `BackLinks`, `BackLinksField`, `FindOneAndUpdate`, `FindOneAndUpsert`, and `FindOrCreate` all hydrate eager-tagged fields by default. The `den.WithoutFetchLinks()` CRUDOption is the opt-out, mirroring the QuerySet modifier.
+
+```go
+// FindByID honors den:"eager" — Door is hydrated, Owner is not.
+h, _ := den.FindByID[House](ctx, db, houseID)
+
+// Suppress eager hydration on this one read.
+h, _ = den.FindByID[House](ctx, db, houseID, den.WithoutFetchLinks())
+```
+
+!!! warning "`Iter` is N+1 for eager fields"
+    `.Iter(ctx)` honors the tag too, but resolves per row (streaming can't batch). An eager field on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted. `FindByID` and the other single-doc read APIs share this single-level contract: they hydrate the direct eager fields but do not recurse into the loaded targets' own eager links. Use `NewQuery[T](db, where.Field(den.FieldID).Eq(id)).All(ctx)` when you need transitive hydration of a single doc.
 
 `FetchLink` / `FetchAllLinks` always hydrate everything passed to them — they're explicit user calls, the `eager` tag does not constrain them.
+
+!!! note "Tag validity is enforced at Register"
+    `den:"eager"` is only valid on `Link[T]` or `[]Link[T]` fields. Placing it on any other field type causes `Register` to return `ErrValidation`, mirroring the existing register-time guards for `index`, `unique`, and `fts` on incompatible field types.
+
+#### Eager + soft-delete
+
+A soft-deleted target is **not** filtered out of eager hydration. The
+link resolver fetches by ID directly (single-doc `Get` or batched
+`WHERE _id IN (...)`), and that path does not apply the soft-delete
+filter — it matches `FindByID`'s own behavior of returning a doc by
+ID regardless of its `DeletedAt`. The loaded `Value` is the
+soft-deleted record; callers can detect this via
+`link.Value.IsDeleted()` and decide what to do.
+
+```go
+target := &Account{Name: "x"}
+den.Insert(ctx, db, target)
+
+holder := &Holder{Account: den.NewLink(target)}
+den.Insert(ctx, db, holder)
+
+den.Delete(ctx, db, target) // soft-delete
+
+got, _ := den.FindByID[Holder](ctx, db, holder.ID)
+got.Account.IsLoaded()     // true — eager hydration is soft-delete-blind
+got.Account.Value.IsDeleted() // true — caller can detect
+```
 
 ### On-Demand (FetchLink / FetchAllLinks)
 
@@ -1996,8 +2042,8 @@ type Window struct {
 type House struct {
     document.Base
     Name    string         `json:"name"`
-    Door    Link[Door]     `json:"door"`
-    Windows []Link[Window] `json:"windows"`
+    Door    Link[Door]     `json:"door" den:"eager"` // schema-level eager
+    Windows []Link[Window] `json:"windows"`           // stays lazy
 }
 
 func main() {
@@ -2018,13 +2064,15 @@ func main() {
     }
     den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 
-    // Query with eager fetch
+    // Schema-level eager: Door is hydrated automatically — no
+    // WithFetchLinks() needed. Windows stays lazy because it's
+    // not tagged eager; call .WithFetchLinks() when you want it too.
     found, _ := den.NewQuery[House](db,
         where.Field("name").Eq("Lakehouse"),
-    ).WithFetchLinks().First(ctx)
+    ).First(ctx)
 
-    fmt.Println(found.Door.Value.Height)      // 200
-    fmt.Println(found.Windows[0].Value.X)      // 100
+    fmt.Println(found.Door.Value.Height)         // 200 — eager hit
+    fmt.Println(found.Windows[0].IsLoaded())      // false — lazy
 
     // Back-links: find houses referencing this door
     houses, _ := den.BackLinks[House](ctx, db, "door", found.Door.ID)
@@ -4831,7 +4879,7 @@ Every supported `den:` value, where it's valid, and what it does. Values are con
 | `unique` | Document field | Unique index (doubles as a lookup index — `index` is redundant alongside) |
 | `fts` | Document field | Include this field in full-text search |
 | `omitempty` | Document field | Omit from storage when zero-valued |
-| `eager` | `Link[T]` / `[]Link[T]` field | Auto-hydrate this link on every read by default (Django `select_related` analogue) |
+| `eager` | `Link[T]` / `[]Link[T]` field | Auto-hydrate this link on every read by default — see [Schema-level eager](../guide/relations.md#schema-level-eager-deneager) |
 | `unique_together:GROUP` | Document field | Composite unique index keyed by `GROUP` (multiple fields with the same group form one index) |
 | `index_together:GROUP` | Document field | Composite (non-unique) index keyed by `GROUP` |
 | `from:path.to.field` | `Project()` target | Extract a nested value from the source document |
@@ -4878,7 +4926,7 @@ The `den` tag carries Den-specific metadata. It does **not** set the field name 
 | `unique` | Create a unique index on this field | `den:"unique"` |
 | `fts` | Include this field in full-text search | `den:"fts"` |
 | `omitempty` | Omit this field from storage when zero-valued | `den:"omitempty"` |
-| `eager` | Auto-hydrate this `Link[T]` / `[]Link[T]` field on every read by default | `den:"eager"` |
+| `eager` | Auto-hydrate this `Link[T]` / `[]Link[T]` field on every read by default — see [Schema-level eager](../guide/relations.md#schema-level-eager-deneager) | `den:"eager"` |
 | `unique_together:group` | Composite unique index — fields with the same group name | `den:"unique_together:feed_guid"` |
 | `index_together:group` | Composite index (non-unique) — fields with the same group name | `den:"index_together:user_date"` |
 

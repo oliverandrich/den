@@ -24,7 +24,7 @@ Every supported `den:` value, where it's valid, and what it does. Values are con
 | `unique` | Document field | Unique index (doubles as a lookup index — `index` is redundant alongside) |
 | `fts` | Document field | Include this field in full-text search |
 | `omitempty` | Document field | Omit from storage when zero-valued |
-| `eager` | `Link[T]` / `[]Link[T]` field | Auto-hydrate this link on every read by default (Django `select_related` analogue) |
+| `eager` | `Link[T]` / `[]Link[T]` field | Auto-hydrate this link on every read by default — see [Schema-level eager](../guide/relations.md#schema-level-eager-deneager) |
 | `unique_together:GROUP` | Document field | Composite unique index keyed by `GROUP` (multiple fields with the same group form one index) |
 | `index_together:GROUP` | Document field | Composite (non-unique) index keyed by `GROUP` |
 | `from:path.to.field` | `Project()` target | Extract a nested value from the source document |
@@ -71,7 +71,7 @@ The `den` tag carries Den-specific metadata. It does **not** set the field name 
 | `unique` | Create a unique index on this field | `den:"unique"` |
 | `fts` | Include this field in full-text search | `den:"fts"` |
 | `omitempty` | Omit this field from storage when zero-valued | `den:"omitempty"` |
-| `eager` | Auto-hydrate this `Link[T]` / `[]Link[T]` field on every read by default | `den:"eager"` |
+| `eager` | Auto-hydrate this `Link[T]` / `[]Link[T]` field on every read by default — see [Schema-level eager](../guide/relations.md#schema-level-eager-deneager) | `den:"eager"` |
 | `unique_together:group` | Composite unique index — fields with the same group name | `den:"unique_together:feed_guid"` |
 | `index_together:group` | Composite index (non-unique) — fields with the same group name | `den:"index_together:user_date"` |
 

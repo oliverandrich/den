@@ -338,6 +338,9 @@ func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
 	// if a parent references a link id that does not exist in the target
 	// collection, .All() returns ErrNotFound. Otherwise callers migrating
 	// from the old implementation would silently see Loaded=false.
+	//
+	// The error is also a *DanglingLinkError so callers can extract the
+	// broken (collection, id) without parsing the message.
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()
 
@@ -353,6 +356,11 @@ func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
 		WithFetchLinks().
 		All(ctx)
 	require.ErrorIs(t, err, den.ErrNotFound)
+
+	var dle *den.DanglingLinkError
+	require.ErrorAs(t, err, &dle, "must surface as the typed *DanglingLinkError")
+	assert.Equal(t, "door", dle.Collection)
+	assert.Equal(t, "does-not-exist", dle.ID)
 }
 
 func TestWithFetchLinks_NestedDepthTwo(t *testing.T) {

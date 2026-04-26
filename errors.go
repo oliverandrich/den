@@ -45,6 +45,25 @@ type InsertFailure struct {
 	Err   error
 }
 
+// DanglingLinkError describes a Link[T] whose ID does not resolve to any
+// row in the target collection. Returned by the batched link-resolver
+// when a parent references a deleted or never-existed target. Wraps
+// ErrNotFound so callers can keep the simple `errors.Is(err, ErrNotFound)`
+// check, but also exposes Collection and ID for callers that need to
+// surface "which link broke" without parsing the error message.
+type DanglingLinkError struct {
+	Collection string
+	ID         string
+}
+
+func (e *DanglingLinkError) Error() string {
+	return fmt.Sprintf("%s: %s id=%q", ErrNotFound, e.Collection, e.ID)
+}
+
+func (e *DanglingLinkError) Unwrap() error {
+	return ErrNotFound
+}
+
 // insertManyErrorRenderCap bounds how many per-failure detail entries
 // Error() renders. Keeps the message usable in logs even when thousands of
 // failures accumulated. Remaining failures are reported as "and N more".

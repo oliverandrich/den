@@ -617,9 +617,11 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 	// in a parent but with no corresponding row in the target collection)
 	// surfaces as ErrNotFound. Without this, callers migrating from the
 	// old implementation would silently see Loaded=false for broken links.
+	// Returns the typed *DanglingLinkError so callers that need to act on
+	// the broken (collection, id) can errors.As without parsing the message.
 	for id := range slotsByID {
 		if _, ok := matched[id]; !ok {
-			return fmt.Errorf("%w: %s id=%q", ErrNotFound, col.meta.Name, id)
+			return &DanglingLinkError{Collection: col.meta.Name, ID: id}
 		}
 	}
 

@@ -5,6 +5,14 @@ metadata (path, mime, size, hash) lives on an embeddable struct in the
 document; the actual bytes live behind a `den.Storage` interface that the
 application configures once at `Open` time.
 
+!!! note "One Storage per DB"
+    A single `den.Storage` is bound to the DB at Open. Every document
+    type that uses attachments routes its bytes through that one
+    backend. There is no per-collection storage routing built in — if
+    you need that (public CDN for post covers, private bucket for
+    invoices), wrap your Storage with a dispatcher in application code
+    and pick a backend per call site.
+
 ## When to Use It
 
 - Blog engines uploading post covers and images
@@ -47,6 +55,14 @@ type Attachment struct {
 These fields are set by the Storage when bytes are stored and are not meant
 to be edited by application code afterwards — `StoragePath`, `Size`, and
 `SHA256` are intrinsic to the stored content.
+
+!!! note "About the `validate:` tags"
+    The `validate:` tags fire only when validation is enabled on the
+    DB via `validate.WithValidation()` (see [Validation](validation.md)).
+    `Storage.Store` itself does NOT run validation; the tags kick in
+    when the containing document is later inserted or updated through
+    `den.Insert` / `den.Update`. With validation disabled the tags are
+    inert metadata.
 
 !!! note "StoragePath is an object key, not a URL"
     `StoragePath` is the path **relative to the storage backend's root** —
@@ -389,7 +405,25 @@ st, err := s3.New("local",
 )
 ```
 
-Or via DSN: `s3://local?endpoint=minio.local:9000&secure=false`.
+For DSN-based setup, credentials still come from the standard AWS env
+vars (the DSN intentionally never carries secrets). MinIO's defaults
+work as drop-in `AWS_*` values:
+
+```bash
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+```go
+st, err := storage.OpenURL(
+    "s3://local?endpoint=minio.local:9000&secure=false",
+    "/media/",
+)
+```
+
+The same env-var mechanism feeds real S3 — point `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` at IAM-issued credentials and drop the endpoint
+override.
 
 ### Object layout and dedup
 

@@ -17,7 +17,7 @@
 
 An ODM for Go with two storage backends — SQLite and PostgreSQL. Same API, your choice of engine.
 
-Den provides a MongoDB/Beanie-style document model using native Go structs. Store documents as JSONB, query them with a fluent builder, relate them with typed links, and run it all in transactions. The SQLite backend compiles into your binary with no external dependencies. The PostgreSQL backend connects to your existing database. Switch between them by changing one line.
+Each Go struct you register is a *document*, stored as a JSONB row in a SQL table that Den calls a *collection*. The SQL schema is one table per type with a JSONB `data` column plus a small set of secondary indexes Den maintains for you. You query collections with a fluent builder, relate them with typed links, and run it all in transactions. The SQLite backend compiles into your binary with no external dependencies. The PostgreSQL backend connects to your existing database. Switch between them by changing one line.
 
 > [!NOTE]
 > Den is a document store, not a relational database. It does not support SQL, JOINs, or schema migrations in the traditional sense. If you need relational modeling, use [Bun](https://bun.uptrace.dev/) or [GORM](https://gorm.io/) instead.

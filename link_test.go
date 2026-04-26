@@ -43,6 +43,57 @@ func TestNewLink(t *testing.T) {
 	assert.True(t, link.IsLoaded())
 }
 
+// TestNewLink_EmptyIDAllowed pins the cascade-write contract: a doc that
+// has not been inserted yet (empty Base.ID) produces a Link with empty ID;
+// LinkWrite later fills it in once the cascaded Insert assigns the ID.
+// This must not panic.
+func TestNewLink_EmptyIDAllowed(t *testing.T) {
+	d := &Door{Height: 200, Width: 80} // no ID set
+	link := den.NewLink(d)
+	assert.Empty(t, link.ID)
+	assert.Equal(t, d, link.Value)
+	assert.True(t, link.IsLoaded())
+}
+
+// nestedBaseDoc embeds document.Base via an intermediate wrapper struct.
+// FieldByName("ID") wouldn't find ID through this depth in the renamed-
+// embed scenario; the type-walk does.
+type nestedBaseWrapper struct {
+	document.Base
+	Extra string `json:"extra,omitempty"`
+}
+
+type nestedBaseDoc struct {
+	nestedBaseWrapper
+	Name string `json:"name"`
+}
+
+func TestNewLink_NestedEmbed(t *testing.T) {
+	d := &nestedBaseDoc{Name: "x"}
+	d.ID = "nested-1"
+
+	link := den.NewLink(d)
+	assert.Equal(t, "nested-1", link.ID,
+		"NewLink must find document.Base through nested embeds, not just top-level promotion")
+}
+
+// noBaseDoc deliberately omits document.Base. Today NewLink silently
+// returns Link{ID: ""} for this — a programmer error masquerading as a
+// valid cascade-write input. The fix turns it into a panic so the
+// misuse fails at construction time.
+type noBaseDoc struct {
+	Name string `json:"name"`
+}
+
+func TestNewLink_PanicsWithoutBase(t *testing.T) {
+	d := &noBaseDoc{Name: "no-base"}
+	assert.PanicsWithValue(t,
+		"den: NewLink: type den_test.noBaseDoc does not embed document.Base",
+		func() { _ = den.NewLink(d) },
+		"NewLink on a type without document.Base must fail loudly, not silently produce a broken Link",
+	)
+}
+
 func TestLink_ZeroValue(t *testing.T) {
 	var link den.Link[Door]
 	assert.Empty(t, link.ID)

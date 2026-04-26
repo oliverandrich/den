@@ -11,9 +11,14 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/where"
 )
+
+// documentBaseType is the cached reflect.Type of document.Base, used by
+// NewLink's structural ID extraction.
+var documentBaseType = reflect.TypeFor[document.Base]()
 
 // Link represents a reference to a document in another collection.
 // Only the ID is persisted; Value is populated on fetch.
@@ -40,18 +45,51 @@ func (l *Link[T]) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// NewLink creates a Link from an existing document, extracting its ID.
+// NewLink creates a Link from an existing document, extracting its ID
+// from the embedded document.Base.
+//
+// The doc must contain a document.Base anywhere in its struct tree —
+// directly embedded (the standard pattern), embedded via a wrapper, or
+// even as a named field. NewLink panics if no document.Base is found,
+// because a Link without an ID is silently broken downstream and
+// always indicates a programmer error.
+//
+// An empty Base.ID (i.e. the doc has not been inserted yet) is fine and
+// expected on the LinkWrite cascade path — the cascaded Insert will
+// populate the ID and propagate it back into the parent's Link.
 func NewLink[T any](doc *T) Link[T] {
 	v := reflect.ValueOf(doc).Elem()
-
-	// Look for an ID field
-	idField := v.FieldByName("ID")
-	var id string
-	if idField.IsValid() && idField.Kind() == reflect.String {
-		id = idField.String()
+	id, ok := extractBaseID(v)
+	if !ok {
+		panic(fmt.Sprintf("den: NewLink: type %T does not embed document.Base", *doc))
 	}
-
 	return Link[T]{ID: id, Value: doc, Loaded: true}
+}
+
+// extractBaseID walks v's struct tree and returns the ID of the first
+// document.Base it finds. Robust against renamed embeds, deep
+// composition, and ambiguous-promotion cases that defeat
+// reflect.Value.FieldByName("ID"). Returns ("", false) when no
+// document.Base is present anywhere in the tree.
+func extractBaseID(v reflect.Value) (string, bool) {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "", false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return "", false
+	}
+	if v.Type() == documentBaseType {
+		return v.FieldByName("ID").String(), true
+	}
+	for i := range v.NumField() {
+		if id, ok := extractBaseID(v.Field(i)); ok {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // IsLoaded reports whether the linked document has been fetched.

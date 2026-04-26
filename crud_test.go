@@ -1073,3 +1073,135 @@ func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, den.ErrValidation)
 }
+
+// --- den:"eager" honored across CRUD-style read APIs ---
+
+// seedEagerHouse inserts one Door + one EagerHouse pointing at it,
+// returning the persisted house. Used by the eager-CRUD tests below.
+// EagerHouse / Door / EagerOwner are defined in link_test.go.
+func seedEagerHouse(ctx context.Context, t *testing.T, db *den.DB, name string) *EagerHouse {
+	t.Helper()
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	owner := &EagerOwner{Name: "Owner"}
+	require.NoError(t, den.Insert(ctx, db, owner))
+	h := &EagerHouse{Name: name, Door: den.NewLink(door), Owner: den.NewLink(owner)}
+	require.NoError(t, den.Insert(ctx, db, h))
+	return h
+}
+
+func TestFindByID_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+
+	got, err := den.FindByID[EagerHouse](ctx, db, h.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Door.IsLoaded(), "FindByID must honor den:\"eager\" on Door")
+	assert.False(t, got.Owner.IsLoaded(), "untagged Owner stays lazy")
+}
+
+func TestFindByID_WithoutFetchLinksSuppressesEager(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+
+	got, err := den.FindByID[EagerHouse](ctx, db, h.ID, den.WithoutFetchLinks())
+	require.NoError(t, err)
+	assert.False(t, got.Door.IsLoaded(), "WithoutFetchLinks must override eager tag")
+	assert.NotEmpty(t, got.Door.ID, "ID still populated")
+}
+
+func TestFindByIDs_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h1 := seedEagerHouse(ctx, t, db, "A")
+	h2 := seedEagerHouse(ctx, t, db, "B")
+
+	got, err := den.FindByIDs[EagerHouse](ctx, db, []string{h1.ID, h2.ID})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	for _, h := range got {
+		assert.True(t, h.Door.IsLoaded(), "FindByIDs must honor eager tag for every result")
+	}
+}
+
+func TestRefresh_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+	stale := &EagerHouse{Base: document.Base{ID: h.ID}}
+
+	require.NoError(t, den.Refresh(ctx, db, stale))
+	assert.True(t, stale.Door.IsLoaded(), "Refresh must honor den:\"eager\"")
+}
+
+func TestFindOneAndUpdate_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+
+	got, err := den.FindOneAndUpdate[EagerHouse](ctx, db,
+		den.SetFields{"name": "Renamed"},
+		[]where.Condition{where.Field("_id").Eq(h.ID)},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed", got.Name)
+	assert.True(t, got.Door.IsLoaded(), "FindOneAndUpdate must honor den:\"eager\"")
+}
+
+func TestFindOneAndUpsert_HonorsEagerTag_HitPath(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+
+	got, inserted, err := den.FindOneAndUpsert[EagerHouse](ctx, db,
+		&EagerHouse{Name: "should-not-insert"},
+		den.SetFields{"name": "Updated"},
+		[]where.Condition{where.Field("_id").Eq(h.ID)},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.True(t, got.Door.IsLoaded(), "Upsert hit path must honor den:\"eager\"")
+}
+
+func TestFindOneAndUpsert_HonorsEagerTag_MissPath(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	defaults := &EagerHouse{Name: "Fresh", Door: den.NewLink(door)}
+	got, inserted, err := den.FindOneAndUpsert[EagerHouse](ctx, db,
+		defaults,
+		den.SetFields{},
+		[]where.Condition{where.Field("name").Eq("Fresh")},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted)
+	assert.True(t, got.Door.IsLoaded(),
+		"Upsert miss path must hydrate eager links on the freshly inserted doc")
+}
+
+func TestFindOrCreate_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	h := seedEagerHouse(ctx, t, db, "Cottage")
+
+	got, inserted, err := den.FindOrCreate[EagerHouse](ctx, db,
+		&EagerHouse{Name: "should-not-insert"},
+		[]where.Condition{where.Field("_id").Eq(h.ID)},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.True(t, got.Door.IsLoaded(),
+		"FindOrCreate delegates to upsert; must honor den:\"eager\"")
+}

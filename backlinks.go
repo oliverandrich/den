@@ -20,22 +20,32 @@ import (
 // for the target type — it's compile-checked on H and T and immune to
 // JSON-tag renames. Use this string form to disambiguate when multiple
 // Link[T] fields point at the same target type.
-func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error) {
+func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID string, opts ...CRUDOption) ([]*T, error) {
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
+	rw := s.readWriter()
 	q := NewQuery[T](db, where.Field(linkField).Eq(targetID)).buildBackendQuery(col)
 
-	iter, err := s.readWriter().Query(ctx, col.meta.Name, q)
+	iter, err := rw.Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = iter.Close() }()
 
-	return drainIter[T](ctx, db, iter, 0)
+	results, err := drainIter[T](ctx, db, iter, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	o := applyCRUDOpts(opts)
+	if err := batchResolveLinks(ctx, db, rw, results, defaultNestingDepth, crudFetchMode(o)); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // BackLinksField is the typed alternative to BackLinks: it identifies
@@ -55,7 +65,7 @@ func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID s
 // only matching fields are []Link[T] slices (use a manual
 // where.Field(...).Contains(targetID) query — Eq doesn't match against
 // array contents).
-func BackLinksField[H any, T any](ctx context.Context, s Scope, targetID string) ([]*H, error) {
+func BackLinksField[H any, T any](ctx context.Context, s Scope, targetID string, opts ...CRUDOption) ([]*H, error) {
 	var holderZero H
 	holderType := reflect.TypeOf(holderZero)
 	var targetZero T
@@ -110,5 +120,5 @@ func BackLinksField[H any, T any](ctx context.Context, s Scope, targetID string)
 	if linkField == "" {
 		linkField = strings.ToLower(field.Name)
 	}
-	return BackLinks[H](ctx, s, linkField, targetID)
+	return BackLinks[H](ctx, s, linkField, targetID, opts...)
 }

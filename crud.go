@@ -120,7 +120,10 @@ func commitInsert[T any](ctx context.Context, b ReadWriter, col *collectionInfo,
 
 // FindByIDs retrieves multiple documents by their IDs in a single query.
 // Missing IDs are silently skipped. Order is not guaranteed.
-func FindByIDs[T any](ctx context.Context, s Scope, ids []string) ([]*T, error) {
+//
+// `den:"eager"`-tagged link fields on T are batch-resolved by default;
+// pass WithoutFetchLinks to suppress hydration.
+func FindByIDs[T any](ctx context.Context, s Scope, ids []string, opts ...CRUDOption) ([]*T, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -136,25 +139,38 @@ func FindByIDs[T any](ctx context.Context, s Scope, ids []string) ([]*T, error) 
 		return nil, err
 	}
 
+	rw := s.readWriter()
 	q := NewQuery[T](db, where.Field("_id").In(anyIDs...)).buildBackendQuery(col)
-	iter, err := s.readWriter().Query(ctx, col.meta.Name, q)
+	iter, err := rw.Query(ctx, col.meta.Name, q)
 	if err != nil {
 		return nil, err
 	}
 	results, err := drainIter[T](ctx, db, iter, len(ids))
 	_ = iter.Close()
-	return results, err
+	if err != nil {
+		return nil, err
+	}
+
+	o := applyCRUDOpts(opts)
+	if err := batchResolveLinks(ctx, db, rw, results, defaultNestingDepth, crudFetchMode(o)); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // FindByID retrieves a document by its ID.
-func FindByID[T any](ctx context.Context, s Scope, id string) (*T, error) {
+//
+// `den:"eager"`-tagged link fields on T are hydrated by default; pass
+// WithoutFetchLinks to suppress hydration.
+func FindByID[T any](ctx context.Context, s Scope, id string, opts ...CRUDOption) (*T, error) {
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := s.readWriter().Get(ctx, col.meta.Name, id)
+	rw := s.readWriter()
+	data, err := rw.Get(ctx, col.meta.Name, id)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +181,10 @@ func FindByID[T any](ctx context.Context, s Scope, id string) (*T, error) {
 	}
 	captureSnapshot(data, result)
 
+	o := applyCRUDOpts(opts)
+	if err := fetchAllLinksOnDoc(ctx, db, rw, result, defaultNestingDepth, crudFetchMode(o)); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -311,7 +331,10 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 
 // Refresh re-reads a document from the database by its ID,
 // overwriting all fields on the provided struct.
-func Refresh[T any](ctx context.Context, s Scope, document *T) error {
+//
+// `den:"eager"`-tagged link fields on T are hydrated by default; pass
+// WithoutFetchLinks to suppress hydration.
+func Refresh[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
 	db := s.db()
 	col, err := collectionFor[T](db)
 	if err != nil {
@@ -323,7 +346,8 @@ func Refresh[T any](ctx context.Context, s Scope, document *T) error {
 		return fmt.Errorf("den: cannot refresh document without ID")
 	}
 
-	data, err := s.readWriter().Get(ctx, col.meta.Name, id)
+	rw := s.readWriter()
+	data, err := rw.Get(ctx, col.meta.Name, id)
 	if err != nil {
 		return err
 	}
@@ -332,7 +356,9 @@ func Refresh[T any](ctx context.Context, s Scope, document *T) error {
 		return err
 	}
 	captureSnapshot(data, document)
-	return nil
+
+	o := applyCRUDOpts(opts)
+	return fetchAllLinksOnDoc(ctx, db, rw, document, defaultNestingDepth, crudFetchMode(o))
 }
 
 // SetFields is a map of field names (as they appear in the `json` struct
@@ -384,6 +410,9 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 		}
 
 		if err := Update(ctx, tx, doc); err != nil {
+			return nil, err
+		}
+		if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), doc, defaultNestingDepth, crudFetchMode(o)); err != nil {
 			return nil, err
 		}
 		return doc, nil
@@ -486,6 +515,9 @@ func findOneAndUpsertImpl[T any](
 			if err := Update(ctx, tx, existing); err != nil {
 				return upsertResult[T]{}, err
 			}
+			if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), existing, defaultNestingDepth, crudFetchMode(o)); err != nil {
+				return upsertResult[T]{}, err
+			}
 			return upsertResult[T]{doc: existing, inserted: false}, nil
 		case errors.Is(err, ErrNotFound):
 			rv := reflect.ValueOf(defaults).Elem()
@@ -493,6 +525,9 @@ func findOneAndUpsertImpl[T any](
 				return upsertResult[T]{}, err
 			}
 			if err := Insert(ctx, tx, defaults); err != nil {
+				return upsertResult[T]{}, err
+			}
+			if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), defaults, defaultNestingDepth, crudFetchMode(o)); err != nil {
 				return upsertResult[T]{}, err
 			}
 			return upsertResult[T]{doc: defaults, inserted: true}, nil

@@ -178,3 +178,30 @@ func TestBackLinksField_AmbiguousMultipleLinkFields(t *testing.T) {
 	assert.Contains(t, err.Error(), "BackLinks",
 		"error must point at the explicit-field-name BackLinks as the disambiguation tool")
 }
+
+// TestBackLinks_HonorsEagerTag pins that BackLinks (and BackLinksField
+// via delegation) hydrates `den:"eager"`-tagged link fields on the
+// returned holder type, and that WithoutFetchLinks suppresses it.
+// EagerHouse is defined in link_test.go: Door is eager, Owner is lazy.
+func TestBackLinks_HonorsEagerTag(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+		Name: "Cottage", Door: den.NewLink(door),
+	}))
+
+	got, err := den.BackLinks[EagerHouse](ctx, db, "door", door.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.True(t, got[0].Door.IsLoaded(),
+		"BackLinks must honor den:\"eager\" on the holder type")
+
+	gotSuppressed, err := den.BackLinks[EagerHouse](ctx, db, "door", door.ID, den.WithoutFetchLinks())
+	require.NoError(t, err)
+	require.Len(t, gotSuppressed, 1)
+	assert.False(t, gotSuppressed[0].Door.IsLoaded(),
+		"WithoutFetchLinks must override the eager tag on BackLinks")
+}

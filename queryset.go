@@ -50,12 +50,18 @@ type QuerySet[T any] struct {
 // RunInTransaction closure for a query that sees the transaction's view of
 // the data. Use ForUpdate only on a *Tx-bound QuerySet.
 func NewQuery[T any](scope Scope, conditions ...where.Condition) QuerySet[T] {
-	qs := QuerySet[T]{scope: scope, nestDepth: 3}
+	qs := QuerySet[T]{scope: scope, nestDepth: defaultNestingDepth}
 	if len(conditions) > 0 {
 		qs.conditions = conditions
 	}
 	return qs
 }
+
+// defaultNestingDepth caps recursive link resolution when the caller
+// hasn't set WithNestingDepth explicitly. Used by every read path that
+// hydrates links (QuerySet terminals + the CRUD-style read APIs that
+// honor `den:"eager"`).
+const defaultNestingDepth = 3
 
 // --- Chain methods (return copies) ---
 

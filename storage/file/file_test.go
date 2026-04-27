@@ -161,7 +161,7 @@ func TestInit_RegistersFileScheme(t *testing.T) {
 	// t.TempDir() is absolute, so we need the 4-slash (SQLAlchemy-style)
 	// form: "file:///" + "/abs/path" → "file:////abs/path" → "/abs/path".
 	tmp := t.TempDir()
-	s, err := storage.OpenURL("file:///"+tmp, "/media")
+	s, err := storage.OpenURL("file:///" + tmp + "?url_prefix=/media")
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -177,7 +177,7 @@ func TestInit_RegistersFileScheme(t *testing.T) {
 func TestInit_RelativePath(t *testing.T) {
 	// 3-slash form: "file:///relative" → location "/relative" → strip → "relative".
 	t.Chdir(t.TempDir())
-	s, err := storage.OpenURL("file:///uploads", "/media")
+	s, err := storage.OpenURL("file:///uploads?url_prefix=/media")
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	if c, ok := s.(interface{ Close() error }); ok {
@@ -186,11 +186,11 @@ func TestInit_RelativePath(t *testing.T) {
 }
 
 func TestInit_RejectsEmptyPath(t *testing.T) {
-	_, err := storage.OpenURL("file://", "/media")
+	_, err := storage.OpenURL("file://?url_prefix=/media")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires a path")
 
-	_, err = storage.OpenURL("file:///", "/media")
+	_, err = storage.OpenURL("file:///?url_prefix=/media")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires a path")
 }

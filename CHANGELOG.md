@@ -34,6 +34,19 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`Backend.Begin(ctx, writable bool)` → `Backend.Begin(ctx)`** — internal backend interface signature change. Neither backend honored the `writable` hint; external backend implementers (none known) must drop the parameter. A typed option can reintroduce read-only tx mode when there's concrete demand.
 
+- **`storage.OpenURL(dsn, urlPrefix string)` → `storage.OpenURL(dsn string)`** — the URL prefix moves into the DSN as a `url_prefix=…` query parameter, joining the same backend-specific config pattern as `region`, `presign_ttl`, and `endpoint`. The S3 backend always ignored the second argument anyway (S3 returns absolute URLs); the new uniform single-arg signature removes that smell. Update call sites:
+
+    ```go
+    // before
+    storage.OpenURL("file:///uploads", "/media/")
+    storage.OpenURL("s3://bucket?region=eu-central-1", "/media/") // /media/ was ignored
+    // after
+    storage.OpenURL("file:///uploads?url_prefix=/media")
+    storage.OpenURL("s3://bucket?region=eu-central-1") // no vestigial arg
+    ```
+
+    The internal `OpenerFunc(location, urlPrefix string)` signature is unchanged — `OpenURL` extracts and strips `url_prefix` before dispatching, so backend implementations don't change. Empty value (`?url_prefix=`) is treated the same as not specified.
+
 ### Added
 
 - **`storage/s3` Storage backend** — `github.com/oliverandrich/den/storage/s3` package backed by [`minio-go`](https://github.com/minio/minio-go), works against real S3 and any S3-compatible service (MinIO, localstack). Optional: Den core does not import the package, so binaries that don't `_`-import it pay nothing for the s3 code path (the linker drops it via dead-code elimination). DSN form `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`; credentials come from `AWS_*` env vars or the IAM instance profile via the standard chain. `Storage.URL` returns SigV4-presigned GET URLs (default TTL 15 min, override via `presign_ttl=` or `s3.WithPresignTTL`). Tested against MinIO via `testcontainers-go`.
@@ -43,7 +56,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
         "github.com/oliverandrich/den/storage"
         _ "github.com/oliverandrich/den/storage/s3" // side-effect: registers "s3" scheme
     )
-    st, err := storage.OpenURL("s3://my-bucket?region=eu-central-1", "/media/")
+    st, err := storage.OpenURL("s3://my-bucket?region=eu-central-1")
     ```
 
 - **`FindOneAndUpsert[T]`** — atomic find-or-create-then-update in a single transaction. Returns `(doc, inserted, err)` so callers can branch on whether the document was new. Hooks fire on exactly one path: Insert hooks on miss, Update hooks on hit. Soft-deleted matches are skipped by default; pass `IncludeDeleted()` to update them in place. Concurrent upserts on the same missing row rely on a unique constraint to fail one inserter with `ErrDuplicate` — there is no internal retry.

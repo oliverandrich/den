@@ -7,7 +7,7 @@
 //
 //	import _ "github.com/oliverandrich/den/storage/file"
 //
-//	s, err := storage.OpenURL("file:///data/media", "/media/")
+//	s, err := storage.OpenURL("file:///data/media?url_prefix=/media")
 //
 // The DSN follows the SQLAlchemy/JDBC convention: three slashes for a
 // relative path, four for an absolute path (one leading slash is

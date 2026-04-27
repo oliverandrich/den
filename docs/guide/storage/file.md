@@ -13,7 +13,16 @@ fs, err := file.New("./uploads", "/media")
 - First argument: filesystem root where bytes are stored.
 - Second argument: HTTP URL prefix for `Storage.URL()`.
 
-Importing the package for its side effect also registers the `file://` scheme with `storage.OpenURL`, so configuration-driven setups can use either form interchangeably.
+Importing the package for its side effect also registers the `file://` scheme with `storage.OpenURL`, so configuration-driven setups can use either form interchangeably:
+
+```go
+import (
+    "github.com/oliverandrich/den/storage"
+    _ "github.com/oliverandrich/den/storage/file"
+)
+
+fs, err := storage.OpenURL("file:///uploads?url_prefix=/media")
+```
 
 ## DSN syntax
 
@@ -25,6 +34,15 @@ The `file://` DSN follows the same SQLAlchemy/JDBC convention as `sqlite://`:
 | `file:////var/media` | `/var/media` *(absolute, 4 slashes)* |
 
 One leading slash is stripped on parse so standard URL libraries (Go `net/url`, Python `urllib.parse`) can tokenise the DSN with the authority component staying empty. Direct construction via `file.New(...)` takes the filesystem path literally — no stripping.
+
+The HTTP URL prefix is set via the `url_prefix` query parameter:
+
+| DSN | `Storage.URL()` prefix |
+|---|---|
+| `file:///uploads?url_prefix=/media` | `/media` |
+| `file:///uploads` | empty (URLs return as relative paths under the root) |
+
+`url_prefix` is consumed by the storage registry and never reaches the file backend's parser, so other backends (S3) can honor or ignore the same query param uniformly.
 
 ## Object layout
 

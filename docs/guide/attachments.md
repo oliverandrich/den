@@ -111,7 +111,7 @@ import (
     _ "github.com/oliverandrich/den/storage/file" // registers "file://"
 )
 
-fs, err := storage.OpenURL("file:///uploads", "/media")
+fs, err := storage.OpenURL("file:///uploads?url_prefix=/media")
 if err != nil {
     return err
 }

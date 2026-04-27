@@ -270,7 +270,7 @@ func applyOpts(opts []Option) config {
 func TestInit_RegistersS3Scheme(t *testing.T) {
 	// Side-effect import + valid DSN now constructs a *Storage end-to-end
 	// (no network round-trip — minio-go lazy-loads creds on first call).
-	s, err := storage.OpenURL("s3://my-bucket", "/media/")
+	s, err := storage.OpenURL("s3://my-bucket")
 	require.NoError(t, err)
 	require.NotNil(t, s)
 
@@ -282,7 +282,7 @@ func TestInit_RegistersS3Scheme(t *testing.T) {
 }
 
 func TestOpener_RequiresBucket(t *testing.T) {
-	_, err := storage.OpenURL("s3://", "/media/")
+	_, err := storage.OpenURL("s3://")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires a bucket")
 }
@@ -361,7 +361,6 @@ func TestOpener_AppliesDSNOptions(t *testing.T) {
 	// observable on the resulting *Storage.
 	s, err := storage.OpenURL(
 		"s3://my-bucket/uploads?endpoint=minio.local:9000&secure=false&presign_ttl=2h",
-		"/media/",
 	)
 	require.NoError(t, err)
 	st, ok := s.(*Storage)

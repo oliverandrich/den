@@ -13,8 +13,7 @@
 //	import _ "github.com/oliverandrich/den/storage/s3"
 //
 //	st, err := storage.OpenURL(
-//	    "s3://my-bucket/uploads?region=eu-central-1&presign_ttl=15m",
-//	    "/media/")
+//	    "s3://my-bucket/uploads?region=eu-central-1&presign_ttl=15m")
 //
 // Or construct directly when an explicit configuration is preferable:
 //

@@ -238,7 +238,7 @@ backends live in sub-packages that self-register on import.
 
 | Function | Signature | Description |
 |---|---|---|
-| `OpenURL` | `OpenURL(dsn, urlPrefix string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
+| `OpenURL` | `OpenURL(dsn string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. Intercepts an optional `?url_prefix=` query param and forwards it as the opener's URL prefix. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
 | `Register` | `Register(scheme string, opener OpenerFunc)` | Registers an opener for a scheme. Typically called from a backend sub-package's `init()`. Panics on duplicate registration |
 | `OpenerFunc` | `type OpenerFunc func(location, urlPrefix string) (den.Storage, error)` | Factory signature for backend openers |
 | `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Storage.Store` on a zero-byte reader |

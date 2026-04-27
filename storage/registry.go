@@ -10,12 +10,13 @@
 //	    _ "github.com/oliverandrich/den/storage/file" // registers file://
 //	)
 //
-//	s, err := storage.OpenURL("file://./data/media", "/media/")
+//	s, err := storage.OpenURL("file://./data/media?url_prefix=/media")
 package storage
 
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -71,9 +72,11 @@ func Register(scheme string, opener OpenerFunc) {
 }
 
 // OpenURL parses dsn as "<scheme>://<location>" and delegates to the
-// OpenerFunc registered for that scheme. urlPrefix is passed through as
-// the public URL prefix under which the storage should serve files
-// (ignored by backends that return absolute URLs).
+// OpenerFunc registered for that scheme. The optional `url_prefix=…`
+// query parameter on the location is intercepted here and passed to
+// the opener as its second argument — backends that need a URL prefix
+// (file) consume it; backends that return absolute URLs (s3) ignore it.
+// The opener never sees `url_prefix` in its location.
 //
 // The scheme is matched case-insensitively: "file://...", "File://..."
 // and "FILE://..." all resolve to the same backend.
@@ -81,7 +84,7 @@ func Register(scheme string, opener OpenerFunc) {
 // Returns an error with a helpful message for empty DSNs, missing
 // schemes, or schemes without a registered opener — the last usually
 // means a backend sub-package needs to be side-effect imported.
-func OpenURL(dsn, urlPrefix string) (den.Storage, error) {
+func OpenURL(dsn string) (den.Storage, error) {
 	if dsn == "" {
 		return nil, errors.New("storage: empty DSN")
 	}
@@ -96,5 +99,40 @@ func OpenURL(dsn, urlPrefix string) (den.Storage, error) {
 	if opener == nil {
 		return nil, fmt.Errorf("storage: no backend registered for scheme %q (did you forget to import a backend sub-package?)", scheme)
 	}
+	location, urlPrefix := extractURLPrefix(location)
 	return opener(location, urlPrefix)
+}
+
+// extractURLPrefix splits the optional `url_prefix=…` query parameter
+// out of a DSN location, returning the location with that param removed
+// and the value of the prefix. Other query parameters survive,
+// re-encoded via [url.Values.Encode] (so they may be reordered
+// alphabetically — opener implementations don't depend on order).
+//
+// A location with no query string, or a query string without
+// `url_prefix`, is returned unchanged with an empty prefix. An empty
+// value (`?url_prefix=`) is treated the same as not specified.
+//
+// Falls back to returning the location unchanged when the query string
+// is malformed enough to fail [url.ParseQuery] — opener gets the raw
+// location and can decide whether to error.
+func extractURLPrefix(location string) (string, string) {
+	qIdx := strings.IndexByte(location, '?')
+	if qIdx < 0 {
+		return location, ""
+	}
+	q, err := url.ParseQuery(location[qIdx+1:])
+	if err != nil {
+		return location, ""
+	}
+	if !q.Has("url_prefix") {
+		return location, ""
+	}
+	prefix := q.Get("url_prefix")
+	q.Del("url_prefix")
+	encoded := q.Encode()
+	if encoded == "" {
+		return location[:qIdx], prefix
+	}
+	return location[:qIdx+1] + encoded, prefix
 }

@@ -34,7 +34,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`Backend.Begin(ctx, writable bool)` → `Backend.Begin(ctx)`** — internal backend interface signature change. Neither backend honored the `writable` hint; external backend implementers (none known) must drop the parameter. A typed option can reintroduce read-only tx mode when there's concrete demand.
 
-- **`storage.OpenURL(dsn, urlPrefix string)` → `storage.OpenURL(dsn string)`** — the URL prefix moves into the DSN as a `url_prefix=…` query parameter, joining the same backend-specific config pattern as `region`, `presign_ttl`, and `endpoint`. The S3 backend always ignored the second argument anyway (S3 returns absolute URLs); the new uniform single-arg signature removes that smell. Update call sites:
+- **`storage.OpenURL(dsn, urlPrefix string)` → `storage.OpenURL(dsn string)`, `OpenerFunc(location, urlPrefix string)` → `OpenerFunc(location string)`** — the URL prefix moves into the DSN as a `url_prefix=…` query parameter, joining the same backend-specific config pattern as `region`, `presign_ttl`, and `endpoint`. The S3 backend always ignored the second argument anyway (S3 returns absolute URLs); the uniform single-arg signature on both the public API and the internal opener removes that smell. Update call sites:
 
     ```go
     // before
@@ -45,7 +45,31 @@ All notable changes to Den are documented here. The format is based on [Keep a C
     storage.OpenURL("s3://bucket?region=eu-central-1") // no vestigial arg
     ```
 
-    The internal `OpenerFunc(location, urlPrefix string)` signature is unchanged — `OpenURL` extracts and strips `url_prefix` before dispatching, so backend implementations don't change. Empty value (`?url_prefix=`) is treated the same as not specified.
+    Backends that honour `?url_prefix=` (file, and any future GCS/Azure) call the new exported helper `storage.URLPrefixFromLocation(location string) (stripped, prefix string)` from their `OpenerFunc` to extract it; the helper handles encoding edges (slashes in value, empty value, malformed query) uniformly. Backends that ignore url_prefix (S3) skip the call — their existing `url.Values.Get("known_key")`-style parsers silently drop the unknown param. Empty value (`?url_prefix=`) is treated the same as not specified.
+
+    Backend implementers update their `OpenerFunc`:
+
+    ```go
+    // before
+    func init() {
+        storage.Register("myscheme", func(location, urlPrefix string) (den.Storage, error) {
+            return New(location, urlPrefix)
+        })
+    }
+    // after — URL-prefix-aware backend
+    func init() {
+        storage.Register("myscheme", func(location string) (den.Storage, error) {
+            path, urlPrefix := storage.URLPrefixFromLocation(location)
+            return New(path, urlPrefix)
+        })
+    }
+    // after — absolute-URL backend (S3-style); url_prefix in DSN silently ignored
+    func init() {
+        storage.Register("myscheme", func(location string) (den.Storage, error) {
+            return New(parseDSN(location))
+        })
+    }
+    ```
 
 ### Added
 

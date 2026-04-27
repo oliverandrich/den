@@ -37,14 +37,17 @@ import (
 )
 
 func init() {
-	storage.Register("file", func(location, urlPrefix string) (den.Storage, error) {
+	storage.Register("file", func(location string) (den.Storage, error) {
+		// Strip `?url_prefix=` first — otherwise the trailing `?…`
+		// ends up inside the filesystem path after the TrimPrefix below.
+		path, urlPrefix := storage.URLPrefixFromLocation(location)
 		// SQLAlchemy/JDBC-style convention matching the sqlite backend:
 		// "file:///relative/path" → "relative/path"
 		// "file:////absolute/path" → "/absolute/path"
 		// A standard URL parser places everything in the path component
 		// (authority stays empty in both forms); stripping one leading
 		// slash yields the user-intended filesystem path.
-		path := strings.TrimPrefix(location, "/")
+		path = strings.TrimPrefix(path, "/")
 		if path == "" {
 			return nil, fmt.Errorf("storage/file: file:// requires a path")
 		}

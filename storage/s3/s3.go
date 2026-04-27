@@ -73,7 +73,12 @@ func init() {
 // Credentials are intentionally NOT parsed from the DSN — they come
 // from AWS_* env vars or the IAM instance profile via the default
 // chain in [New].
-func openerFunc(location, _ string) (den.Storage, error) {
+//
+// A stray `?url_prefix=` query param (meaningful only to URL-prefix
+// backends like file/, meaningless for S3 since S3 returns absolute
+// URLs) is silently dropped by [parseDSN] alongside any other unknown
+// query key.
+func openerFunc(location string) (den.Storage, error) {
 	bucket, opts, err := parseDSN(location)
 	if err != nil {
 		return nil, err

@@ -238,9 +238,10 @@ backends live in sub-packages that self-register on import.
 
 | Function | Signature | Description |
 |---|---|---|
-| `OpenURL` | `OpenURL(dsn string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. Intercepts an optional `?url_prefix=` query param and forwards it as the opener's URL prefix. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
+| `OpenURL` | `OpenURL(dsn string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. The opener receives the full location verbatim, including any query string. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
 | `Register` | `Register(scheme string, opener OpenerFunc)` | Registers an opener for a scheme. Typically called from a backend sub-package's `init()`. Panics on duplicate registration |
-| `OpenerFunc` | `type OpenerFunc func(location, urlPrefix string) (den.Storage, error)` | Factory signature for backend openers |
+| `OpenerFunc` | `type OpenerFunc func(location string) (den.Storage, error)` | Factory signature for backend openers. Receives the full location (everything after `://`); backends parse their own query parameters |
+| `URLPrefixFromLocation` | `URLPrefixFromLocation(location string) (stripped, prefix string)` | Helper for backends that honour the conventional `?url_prefix=` query param. Returns the location with that param stripped plus the extracted prefix. Backends that ignore url_prefix (S3) can skip the call; URL-prefix-aware backends (file) call it before parsing the rest of their location |
 | `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Storage.Store` on a zero-byte reader |
 
 ### Filesystem Backend (`storage/file`)

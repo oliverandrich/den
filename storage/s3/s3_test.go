@@ -287,6 +287,19 @@ func TestOpener_RequiresBucket(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires a bucket")
 }
 
+// TestOpener_IgnoresURLPrefixQueryParam pins that S3 silently accepts
+// (and discards) the conventional `?url_prefix=` query param —
+// matching the framework contract that url_prefix is meaningful only
+// to URL-prefix-aware backends. parseDSN treats it as just another
+// unknown query key.
+func TestOpener_IgnoresURLPrefixQueryParam(t *testing.T) {
+	s, err := storage.OpenURL("s3://my-bucket?url_prefix=/media&region=eu-central-1")
+	require.NoError(t, err)
+	st, ok := s.(*Storage)
+	require.True(t, ok)
+	assert.Equal(t, "my-bucket", st.bucket)
+}
+
 func TestParseDSN_BucketOnly(t *testing.T) {
 	bucket, opts, err := parseDSN("my-bucket")
 	require.NoError(t, err)

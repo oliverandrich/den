@@ -18,7 +18,7 @@ import (
 // and echoes the scheme in its error. Callers assert on that echo to prove
 // their scheme's opener was invoked — no den.Storage implementation needed.
 func stubOpener(scheme string) storage.OpenerFunc {
-	return func(_ string, _ string) (den.Storage, error) {
+	return func(_ string) (den.Storage, error) {
 		return nil, fmt.Errorf("stub opener for %s", scheme)
 	}
 }
@@ -137,69 +137,72 @@ func TestStorageRegister_CaseInsensitiveDuplicatePanics(t *testing.T) {
 	})
 }
 
-// capturingOpener returns an OpenerFunc that records the (location,
-// urlPrefix) it was called with into the provided pointers. Used by the
-// `?url_prefix=` extraction tests below to assert what the opener
-// actually sees after OpenURL strips the query param.
-func capturingOpener(loc, prefix *string) storage.OpenerFunc {
-	return func(location, urlPrefix string) (den.Storage, error) {
-		*loc = location
-		*prefix = urlPrefix
-		return nil, fmt.Errorf("captured")
+// TestURLPrefixFromLocation pins the conventional `?url_prefix=` query
+// parameter extraction used by URL-prefix-aware backends (file/, and
+// any future GCS/Azure backend that returns relative URLs). Backends
+// call this on the location they receive in their OpenerFunc; the
+// returned (stripped, prefix) pair feeds their constructor.
+func TestURLPrefixFromLocation(t *testing.T) {
+	cases := []struct {
+		name           string
+		location       string
+		wantStripped   string
+		wantPrefix     string
+		wantNoQuestion bool // strict assertion: stripped has no trailing/dangling `?`
+	}{
+		{
+			name:           "no query string",
+			location:       "/uploads",
+			wantStripped:   "/uploads",
+			wantPrefix:     "",
+			wantNoQuestion: true,
+		},
+		{
+			name:           "url_prefix only — no dangling ?",
+			location:       "/uploads?url_prefix=/media",
+			wantStripped:   "/uploads",
+			wantPrefix:     "/media",
+			wantNoQuestion: true,
+		},
+		{
+			name:         "interleaved with other params — others survive",
+			location:     "bucket?region=us-east-1&url_prefix=/media&endpoint=foo",
+			wantStripped: "bucket?endpoint=foo&region=us-east-1", // url.Values.Encode sorts keys
+			wantPrefix:   "/media",
+		},
+		{
+			name:           "empty value — treated same as not specified",
+			location:       "/uploads?url_prefix=",
+			wantStripped:   "/uploads",
+			wantPrefix:     "",
+			wantNoQuestion: true,
+		},
+		{
+			name:         "no url_prefix among other params — location unchanged",
+			location:     "bucket?region=us-east-1",
+			wantStripped: "bucket?region=us-east-1",
+			wantPrefix:   "",
+		},
+		{
+			// Malformed query falls through to the opener: the helper
+			// returns the raw location unchanged, no prefix extracted.
+			// The opener can decide whether the malformed location is
+			// usable or should error.
+			name:         "malformed query string — fall through unchanged",
+			location:     "bucket?%ZZ&url_prefix=/media",
+			wantStripped: "bucket?%ZZ&url_prefix=/media",
+			wantPrefix:   "",
+		},
 	}
-}
-
-func TestStorageOpenURL_ExtractsURLPrefixFromQuery(t *testing.T) {
-	scheme := regTestPrefix(t)
-	var gotLocation, gotPrefix string
-	storage.Register(scheme, capturingOpener(&gotLocation, &gotPrefix))
-
-	_, err := storage.OpenURL(scheme + ":///uploads?url_prefix=/media")
-	require.ErrorContains(t, err, "captured", "opener must be invoked")
-	assert.Equal(t, "/media", gotPrefix,
-		"url_prefix query param must be extracted and forwarded as the opener's urlPrefix arg")
-	assert.Equal(t, "/uploads", gotLocation,
-		"location passed to opener has url_prefix stripped")
-}
-
-func TestStorageOpenURL_StripsURLPrefixBeforeOpener(t *testing.T) {
-	scheme := regTestPrefix(t)
-	var gotLocation, gotPrefix string
-	storage.Register(scheme, capturingOpener(&gotLocation, &gotPrefix))
-
-	_, err := storage.OpenURL(scheme + "://bucket?region=us-east-1&url_prefix=/media&endpoint=foo")
-	require.ErrorContains(t, err, "captured")
-	assert.Equal(t, "/media", gotPrefix)
-	assert.NotContains(t, gotLocation, "url_prefix",
-		"opener must not see the url_prefix param in its location")
-	assert.Contains(t, gotLocation, "region=us-east-1", "other query params survive")
-	assert.Contains(t, gotLocation, "endpoint=foo", "other query params survive")
-}
-
-func TestStorageOpenURL_EmptyURLPrefixQueryParam(t *testing.T) {
-	scheme := regTestPrefix(t)
-	var gotLocation, gotPrefix string
-	storage.Register(scheme, capturingOpener(&gotLocation, &gotPrefix))
-
-	_, err := storage.OpenURL(scheme + ":///uploads?url_prefix=")
-	require.ErrorContains(t, err, "captured")
-	assert.Empty(t, gotPrefix,
-		"empty url_prefix= treated same as not specified — empty string passed through")
-	assert.Equal(t, "/uploads", gotLocation,
-		"location passed to opener has the empty url_prefix stripped, no dangling ?")
-}
-
-// TestStorageOpenURL_StripsTrailingQuestionMark pins that when url_prefix
-// is the only query param, the resulting location does NOT carry a
-// dangling `?` — backends like file/file.go that string-manipulate the
-// location would mishandle a trailing `?`.
-func TestStorageOpenURL_StripsTrailingQuestionMark(t *testing.T) {
-	scheme := regTestPrefix(t)
-	var gotLocation, gotPrefix string
-	storage.Register(scheme, capturingOpener(&gotLocation, &gotPrefix))
-
-	_, err := storage.OpenURL(scheme + ":///uploads?url_prefix=/media")
-	require.ErrorContains(t, err, "captured")
-	assert.NotContains(t, gotLocation, "?",
-		"empty leftover query string must not leave a dangling ? on the location")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotStripped, gotPrefix := storage.URLPrefixFromLocation(tc.location)
+			assert.Equal(t, tc.wantStripped, gotStripped, "stripped location")
+			assert.Equal(t, tc.wantPrefix, gotPrefix, "extracted prefix")
+			if tc.wantNoQuestion {
+				assert.NotContains(t, gotStripped, "?",
+					"location with no remaining query params must not carry a dangling ?")
+			}
+		})
+	}
 }

@@ -13,7 +13,21 @@ type Storage interface {
 }
 ```
 
-Install via `den.WithStorage(yourBackend)` at Open time, or register it for DSN dispatch by calling `storage.Register("myscheme", openerFn)` in your package's `init()`.
+Install via `den.WithStorage(yourBackend)` at Open time, or register it for DSN dispatch by calling `storage.Register("myscheme", openerFn)` in your package's `init()`. Your `OpenerFunc` receives the full location (everything after `<scheme>://`); parse its query string for any backend-specific config you accept.
+
+If your backend serves files at a configurable URL prefix (returns relative URLs that an HTTP layer mounts), honour the framework convention: take the prefix from the `?url_prefix=` query parameter via [`storage.URLPrefixFromLocation`](https://pkg.go.dev/github.com/oliverandrich/den/storage#URLPrefixFromLocation):
+
+```go
+func init() {
+    storage.Register("myscheme", func(location string) (den.Storage, error) {
+        path, urlPrefix := storage.URLPrefixFromLocation(location)
+        // ...parse path and any other query params from the now-cleaned location...
+        return New(path, urlPrefix)
+    })
+}
+```
+
+Backends that return absolute URLs (S3, GCS, a CDN) can skip the call — `parseDSN`-style code that uses `url.Values.Get("known_key")` already silently ignores any stray `url_prefix` in the DSN.
 
 ## Required behaviour
 

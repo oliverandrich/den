@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.11.0 — 2026-04-27
+
 ### Breaking Changes
 
 - **`Validator.Validate` now takes a `context.Context`** — the interface signature changed from `Validate() error` to `Validate(ctx context.Context) error`, matching every other Den hook. Validators that need to honor cancellation, hit a database, call out to another service, or attach to a tracing span now have ctx in scope without capturing one from outer scope. Update implementations:

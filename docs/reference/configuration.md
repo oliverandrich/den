@@ -8,7 +8,7 @@ How to open a Den database, configure backends, and customize document behavior.
 
 ### OpenURL (recommended)
 
-`OpenURL` takes a `context.Context` as its first argument and a URL-style DSN as the second. Backend packages must be imported for side-effect registration.
+`OpenURL` takes a `context.Context` as its first argument, a URL-style DSN as the second, and zero or more functional options as the third (variadic) argument — see the [Options](#options) table below. Backend packages must be imported for side-effect registration.
 
 ```go
 import (

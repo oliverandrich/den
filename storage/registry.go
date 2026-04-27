@@ -10,7 +10,7 @@
 //	    _ "github.com/oliverandrich/den/storage/file" // registers file://
 //	)
 //
-//	s, err := storage.OpenURL("file://./data/media?url_prefix=/media")
+//	s, err := storage.OpenURL("file:///data/media?url_prefix=/media")
 package storage
 
 import (
@@ -117,11 +117,11 @@ func OpenURL(dsn string) (den.Storage, error) {
 // is malformed enough to fail [url.ParseQuery] — opener gets the raw
 // location and can decide whether to error.
 func extractURLPrefix(location string) (string, string) {
-	qIdx := strings.IndexByte(location, '?')
-	if qIdx < 0 {
+	base, rawQuery, hasQuery := strings.Cut(location, "?")
+	if !hasQuery {
 		return location, ""
 	}
-	q, err := url.ParseQuery(location[qIdx+1:])
+	q, err := url.ParseQuery(rawQuery)
 	if err != nil {
 		return location, ""
 	}
@@ -132,7 +132,7 @@ func extractURLPrefix(location string) (string, string) {
 	q.Del("url_prefix")
 	encoded := q.Encode()
 	if encoded == "" {
-		return location[:qIdx], prefix
+		return base, prefix
 	}
-	return location[:qIdx+1] + encoded, prefix
+	return base + "?" + encoded, prefix
 }

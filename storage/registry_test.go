@@ -158,6 +158,8 @@ func TestStorageOpenURL_ExtractsURLPrefixFromQuery(t *testing.T) {
 	require.ErrorContains(t, err, "captured", "opener must be invoked")
 	assert.Equal(t, "/media", gotPrefix,
 		"url_prefix query param must be extracted and forwarded as the opener's urlPrefix arg")
+	assert.Equal(t, "/uploads", gotLocation,
+		"location passed to opener has url_prefix stripped")
 }
 
 func TestStorageOpenURL_StripsURLPrefixBeforeOpener(t *testing.T) {
@@ -183,6 +185,8 @@ func TestStorageOpenURL_EmptyURLPrefixQueryParam(t *testing.T) {
 	require.ErrorContains(t, err, "captured")
 	assert.Empty(t, gotPrefix,
 		"empty url_prefix= treated same as not specified — empty string passed through")
+	assert.Equal(t, "/uploads", gotLocation,
+		"location passed to opener has the empty url_prefix stripped, no dangling ?")
 }
 
 // TestStorageOpenURL_StripsTrailingQuestionMark pins that when url_prefix

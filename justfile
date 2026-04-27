@@ -2,45 +2,31 @@
 default:
     @just --list
 
-# Modules tracked by go.work. Extend when adding new storage/* submodules.
-mods := ". ./storage/s3"
-
 # Minimum per-package coverage enforced by `just coverage-check` (CI hook).
 coverage_threshold := "80.0"
 
-# Run all tests across all modules (SQLite + PostgreSQL)
+# Run all tests (SQLite + PostgreSQL)
 test *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for mod in {{mods}}; do
-        echo "==> tests: $mod"
-        (cd "$mod" && go test -race -json {{args}} ./...) | tparse
-    done
+    go test -race -json {{args}} ./... | tparse
 
-# Run linter across all modules
+# Run linter
 lint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for mod in {{mods}}; do
-        echo "==> lint: $mod"
-        (cd "$mod" && golangci-lint run ./...)
-    done
+    golangci-lint run ./...
 
 # Format all Go files
 fmt:
     gofmt -w .
     goimports -w .
 
-# Run tests with coverage across all modules, merge per-module
-# profiles into one coverage.out, and report per-source-package
-# coverage with cross-package attribution (`-coverpkg=./...` so code
-# reached only via cross-package tests like parity_test.go → backend/*
-# is credited correctly). For the test-runner view with timings, use
-# `just test`; this recipe is dedicated to the coverage signal.
+# Run tests with coverage and report per-source-package coverage with
+# cross-package attribution (`-coverpkg=./...` so code reached only via
+# cross-package tests like parity_test.go → backend/* is credited
+# correctly). For the test-runner view with timings, use `just test`;
+# this recipe is dedicated to the coverage signal.
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Two runs per module so both views are meaningful:
+    # Two runs so both views are meaningful:
     #   1. Plain `-cover` for tparse — its Cover column shows each
     #      package's self-coverage (its own _test.go files vs its own
     #      statements). Legitimate, just not the whole story.
@@ -48,21 +34,10 @@ coverage:
     #      coverage to every package, including code reached only via
     #      cross-package tests (parity_test.go → backend/*). This is
     #      what `just coverage-check` and the HTML report consume.
-    echo "mode: atomic" > coverage.out
-    for mod in {{mods}}; do
-        echo "==> $mod"
-        (
-            cd "$mod"
-            go test -race -json -cover ./... > test.json
-            tparse -file=test.json
-            rm -f test.json
-            go test -race -coverpkg=./... -coverprofile=cover.out ./... > /dev/null
-        )
-        if [ -f "$mod/cover.out" ]; then
-            tail -n +2 "$mod/cover.out" >> coverage.out
-            rm -f "$mod/cover.out"
-        fi
-    done
+    go test -race -json -cover ./... > test.json
+    tparse -file=test.json
+    rm -f test.json
+    go test -race -coverpkg=./... -coverprofile=coverage.out ./... > /dev/null
     go tool cover -html=coverage.out -o coverage.html
     echo "HTML report: coverage.html  (run \`just coverage-check\` for cross-package per-package numbers)"
 
@@ -103,23 +78,13 @@ bench-readme:
     go run ./scripts/bench_report.go -readme=README.md < "$out"
     echo "README.md benchmark tables updated."
 
-# Tidy module dependencies across all modules and sync the workspace
+# Tidy module dependencies
 tidy:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for mod in {{mods}}; do
-        (cd "$mod" && go mod tidy)
-    done
-    go work sync
+    go mod tidy
 
-# Run vulnerability check across all modules
+# Run vulnerability check
 vuln:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for mod in {{mods}}; do
-        echo "==> vuln: $mod"
-        (cd "$mod" && govulncheck ./...)
-    done
+    govulncheck ./...
 
 # List active beans (excludes completed and scrapped)
 beans:

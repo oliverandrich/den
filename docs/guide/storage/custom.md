@@ -1,6 +1,6 @@
 # Writing a Custom Storage Backend
 
-Implement `den.Storage` to plug in any byte store you like — a CDN, a network share, an in-memory test stub, GCS or Azure Blob (until they ship as official submodules).
+Implement `den.Storage` to plug in any byte store you like — a CDN, a network share, an in-memory test stub, GCS or Azure Blob (until they ship as official packages).
 
 ## The interface
 
@@ -40,4 +40,4 @@ Implement this **only** when `URL` returns a path relative to the current HTTP s
 The two shipped backends are good starting points:
 
 - [`storage/file`](file.md) — local-disk implementation, ~120 lines. Use as a template for any filesystem-shaped backend (NFS mount, S3FS).
-- [`storage/s3`](s3.md) — minio-go-backed remote implementation, lives in its own Go submodule. Use as a template for any HTTP-shaped backend.
+- [`storage/s3`](s3.md) — minio-go-backed remote implementation, optional package — Den core does not import it. Use as a template for any HTTP-shaped backend.

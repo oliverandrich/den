@@ -36,12 +36,12 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Added
 
-- **`storage/s3` Storage backend** — new submodule (`github.com/oliverandrich/den/storage/s3`) backed by [`minio-go`](https://github.com/minio/minio-go), works against real S3 and any S3-compatible service (MinIO, localstack). Lives in its own Go module so applications that don't use S3 don't pull in `minio-go`. DSN form `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`; credentials come from `AWS_*` env vars or the IAM instance profile via the standard chain. `Storage.URL` returns SigV4-presigned GET URLs (default TTL 15 min, override via `presign_ttl=` or `s3.WithPresignTTL`). Tested against MinIO via `testcontainers-go`; release tags follow the `storage/s3/vX.Y.Z` Go-submodule convention so it can ship out of step with Den core.
+- **`storage/s3` Storage backend** — `github.com/oliverandrich/den/storage/s3` package backed by [`minio-go`](https://github.com/minio/minio-go), works against real S3 and any S3-compatible service (MinIO, localstack). Optional: Den core does not import the package, so binaries that don't `_`-import it pay nothing for the s3 code path (the linker drops it via dead-code elimination). DSN form `s3://<bucket>[/<prefix>][?region=…&endpoint=…&secure=true|false&presign_ttl=15m]`; credentials come from `AWS_*` env vars or the IAM instance profile via the standard chain. `Storage.URL` returns SigV4-presigned GET URLs (default TTL 15 min, override via `presign_ttl=` or `s3.WithPresignTTL`). Tested against MinIO via `testcontainers-go`.
 
     ```go
     import (
         "github.com/oliverandrich/den/storage"
-        _ "github.com/oliverandrich/den/storage/s3"
+        _ "github.com/oliverandrich/den/storage/s3" // side-effect: registers "s3" scheme
     )
     st, err := storage.OpenURL("s3://my-bucket?region=eu-central-1", "/media/")
     ```

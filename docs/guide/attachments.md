@@ -5,7 +5,7 @@ Den includes a built-in abstraction for attaching files to documents. The metada
 This page covers the concept, the document-side embed, and the upload / read / delete workflow. The two shipped storage implementations and the contract for writing your own each have their own page:
 
 - [File backend](storage/file.md) — local disk, content-addressed, included in Den core.
-- [S3 backend](storage/s3.md) — S3 / S3-compatible (MinIO, localstack), shipped as a separate Go submodule so the minio-go dep doesn't enter applications that don't use it.
+- [S3 backend](storage/s3.md) — S3 / S3-compatible (MinIO, localstack), optional package — Den core does not import it, so the minio-go bytes stay out of binaries that don't `_`-import it.
 - [Writing a custom backend](storage/custom.md) — the `Storage` interface, required behaviour, optional `URLPrefix`.
 
 !!! note "One Storage per DB"
@@ -84,7 +84,7 @@ Both shapes use the same `Attachment` struct. Den's hard-delete cascade finds at
 
 ## Installing a Storage Backend
 
-Storage is configured once, at `Open`, via `den.WithStorage`. Concrete backends live in sub-packages of `den/storage` (or a separate Go submodule, in the case of `storage/s3`) and register themselves on import. Two construction styles work:
+Storage is configured once, at `Open`, via `den.WithStorage`. Concrete backends live in sub-packages of `den/storage` and register themselves on import. Two construction styles work:
 
 **Direct constructor** — import the backend package and call its `New`:
 

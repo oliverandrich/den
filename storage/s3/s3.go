@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 // Package s3 is the S3 (and S3-compatible, e.g. MinIO) Storage backend
-// for Den. It lives in its own Go module so the minio-go dependency
-// only enters the build of applications that actually import it — Den
-// core stays free of any S3-specific transitive deps.
+// for Den. The package is optional: Den core does not import it, so
+// applications that don't `_`-import it pay nothing for the s3 code
+// path (the linker drops it via dead-code elimination, and minio-go
+// stays out of their binary even though it appears as a noted dep in
+// go.sum).
 //
 // Importing this package for its side effect registers the "s3://"
 // scheme with [storage.OpenURL]:
@@ -37,9 +39,6 @@
 // absolute, [Storage] deliberately omits a `URLPrefix() string` method
 // — HTTP-layer code can type-assert on that interface to decide
 // whether to mount a local serving handler.
-//
-// Versioned independently of Den core; release tags use the
-// `storage/s3/vX.Y.Z` form per Go-submodule convention.
 package s3
 
 import (

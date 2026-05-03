@@ -112,7 +112,7 @@ func (s *Storage) URLPrefix() string {
 	return s.urlPrefix
 }
 
-// Store implements den.Storage.
+// Store implements [den.Storage].
 func (s *Storage) Store(_ context.Context, r io.Reader, ext, mime string) (document.Attachment, error) {
 	tmp, err := os.CreateTemp(s.rootPath, "upload-*")
 	if err != nil {
@@ -161,8 +161,27 @@ func (s *Storage) Store(_ context.Context, r io.Reader, ext, mime string) (docum
 	}, nil
 }
 
-// Open implements den.Storage.
+// Compile-time guarantee that this backend satisfies the optional
+// [den.SeekableStorage] capability — that's what lets http.ServeContent
+// serve Range requests against uploaded files.
+var _ den.SeekableStorage = (*Storage)(nil)
+
+// Open implements [den.Storage].
 func (s *Storage) Open(_ context.Context, a document.Attachment) (io.ReadCloser, error) {
+	return s.openFile(a)
+}
+
+// OpenSeekable implements [den.SeekableStorage] — local files are backed
+// by *os.File which natively supports Seek, so http.ServeContent can use
+// the returned handle for Range and If-None-Match handling.
+func (s *Storage) OpenSeekable(_ context.Context, a document.Attachment) (io.ReadSeekCloser, error) {
+	return s.openFile(a)
+}
+
+// openFile is the shared open path for Open and OpenSeekable. *os.File
+// satisfies both io.ReadCloser and io.ReadSeekCloser, so the same value
+// is returned typed differently to either caller.
+func (s *Storage) openFile(a document.Attachment) (*os.File, error) {
 	f, err := s.root.Open(filepath.FromSlash(a.StoragePath))
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", a.StoragePath, err)
@@ -170,7 +189,7 @@ func (s *Storage) Open(_ context.Context, a document.Attachment) (io.ReadCloser,
 	return f, nil
 }
 
-// Delete implements den.Storage. Missing paths are treated as success.
+// Delete implements [den.Storage]. Missing paths are treated as success.
 func (s *Storage) Delete(_ context.Context, a document.Attachment) error {
 	err := s.root.Remove(filepath.FromSlash(a.StoragePath))
 	if err != nil && !os.IsNotExist(err) {
@@ -179,7 +198,7 @@ func (s *Storage) Delete(_ context.Context, a document.Attachment) error {
 	return nil
 }
 
-// URL implements den.Storage.
+// URL implements [den.Storage].
 func (s *Storage) URL(a document.Attachment) string {
 	return s.urlPrefix + "/" + strings.TrimLeft(a.StoragePath, "/")
 }

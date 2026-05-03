@@ -7,11 +7,29 @@ import (
 	"github.com/oliverandrich/den/document"
 )
 
+// SeekableStorage is an optional Storage capability: backends whose stored
+// bytes can be read with random access cheaply (typically local
+// filesystems) may implement OpenSeekable in addition to Open. Callers
+// that need Range or conditional-GET support (e.g. http.ServeContent)
+// type-assert and use the seekable handle when available, falling back
+// to plain Open otherwise. Backends where Seek is technically possible
+// but expensive (e.g. S3, where each Seek triggers a fresh HTTP GET)
+// should leave this unimplemented; remote-storage Range support belongs
+// at the URL layer (pre-signed URLs) rather than smuggled through Open.
+type SeekableStorage interface {
+	Storage
+	OpenSeekable(ctx context.Context, a document.Attachment) (io.ReadSeekCloser, error)
+}
+
 // Storage abstracts the backing byte store for document.Attachment fields.
 // Implementations map logical paths to byte streams; they carry no
 // knowledge of Den's document metadata (which lives in the backend).
 //
 // Implementations must be safe for concurrent use.
+//
+// Backends with random access (local filesystem) should also implement
+// [SeekableStorage] so callers can serve Range requests directly via
+// http.ServeContent.
 type Storage interface {
 	// Store copies r into the backing store, computes a content hash, and
 	// returns a populated Attachment ready to be assigned onto a document

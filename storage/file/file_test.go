@@ -107,6 +107,28 @@ func TestStorage_Open_PathTraversalRejected(t *testing.T) {
 	require.Error(t, err, "os.Root refuses paths that escape the root")
 }
 
+func TestStorage_OpenSeekable_ReadsAndSeeks(t *testing.T) {
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	want := "the quick brown fox jumps over the lazy dog"
+	a, err := s.Store(ctx, strings.NewReader(want), ".txt", "text/plain")
+	require.NoError(t, err)
+
+	f, err := s.OpenSeekable(ctx, a)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	// Seek past "the quick brown fox " (20 bytes).
+	off, err := f.Seek(20, io.SeekStart)
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), off)
+
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+	assert.Equal(t, "jumps over the lazy dog", string(got))
+}
+
 func TestStorage_Delete(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()

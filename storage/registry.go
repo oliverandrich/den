@@ -28,6 +28,13 @@ import (
 // for it regardless of which backend is in use.
 var ErrEmptyContent = errors.New("storage: refusing to store empty content")
 
+// ErrUnsupportedScheme is returned by OpenURL when no opener is
+// registered for the DSN's scheme — typically because the caller forgot
+// the side-effect import (e.g. `_ "github.com/oliverandrich/den/storage/file"`).
+// Wrapped with the actual scheme via fmt.Errorf so callers can use
+// errors.Is to detect this case without scraping error strings.
+var ErrUnsupportedScheme = errors.New("storage: no backend registered for scheme")
+
 // OpenerFunc constructs a [den.Storage] from the location portion of a
 // DSN — everything after the `<scheme>://`, including any query string.
 // Backends that want to honour the conventional `?url_prefix=…` query
@@ -98,7 +105,7 @@ func OpenURL(dsn string) (den.Storage, error) {
 	opener := registry[scheme]
 	registryMu.RUnlock()
 	if opener == nil {
-		return nil, fmt.Errorf("storage: no backend registered for scheme %q (did you forget to import a backend sub-package?)", scheme)
+		return nil, fmt.Errorf("%w %q (did you forget to import a backend sub-package?)", ErrUnsupportedScheme, scheme)
 	}
 	return opener(location)
 }

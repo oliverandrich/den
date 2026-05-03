@@ -105,7 +105,8 @@ func TestStorageOpenURL_MissingScheme(t *testing.T) {
 func TestStorageOpenURL_UnregisteredScheme(t *testing.T) {
 	_, err := storage.OpenURL("nosuch_scheme_" + regTestPrefix(t) + "://x")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no backend registered")
+	require.ErrorIs(t, err, storage.ErrUnsupportedScheme,
+		"unregistered-scheme error must wrap ErrUnsupportedScheme so callers can match via errors.Is")
 	assert.Contains(t, err.Error(), "did you forget to import a backend sub-package?",
 		"error should nudge callers toward the side-effect import")
 }

@@ -65,7 +65,7 @@ func OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error) {
 	urlOpenersMu.RUnlock()
 
 	if !ok {
-		return nil, fmt.Errorf("den: unsupported database scheme %q (did you import the backend package?)", scheme)
+		return nil, fmt.Errorf("%w %q (did you import the backend package?)", ErrUnsupportedScheme, scheme)
 	}
 
 	backend, err := opener(ctx, dsn)

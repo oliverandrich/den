@@ -4,6 +4,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Added
+
+- **`den.ErrUnsupportedScheme`** and **`storage.ErrUnsupportedScheme`** — typed sentinels exported by both `OpenURL` paths so callers can detect missing-backend-import errors via `errors.Is(...)` instead of scraping the message text. Both error messages are unchanged for backward compatibility.
+
 ## 0.11.0 — 2026-04-27
 
 ### Breaking Changes

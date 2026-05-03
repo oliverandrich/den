@@ -29,7 +29,7 @@ func collectAttachments(v reflect.Value) []document.Attachment {
 
 func walkAttachments(v reflect.Value, out *[]document.Attachment) {
 	// Pointers: dereference if non-nil, otherwise there is nothing here.
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return
 		}
@@ -54,7 +54,7 @@ func walkAttachments(v reflect.Value, out *[]document.Attachment) {
 		switch f.Kind() { //nolint:exhaustive // only struct-shaped fields can hold an Attachment
 		case reflect.Struct:
 			walkAttachments(f, out)
-		case reflect.Ptr:
+		case reflect.Pointer:
 			if f.Type().Elem().Kind() == reflect.Struct {
 				walkAttachments(f, out)
 			}

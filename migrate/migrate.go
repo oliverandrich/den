@@ -187,8 +187,7 @@ func (r *Registry) Down(ctx context.Context, db *den.DB) error {
 		return err
 	}
 
-	for i := len(applied) - 1; i >= 0; i-- {
-		version := applied[i]
+	for _, version := range slices.Backward(applied) {
 		m, ok := r.findMigration(version)
 		if !ok {
 			return fmt.Errorf("den: migration %q not found in registry", version)

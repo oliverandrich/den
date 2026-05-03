@@ -36,6 +36,12 @@ var (
 	// the caller mixed cursor pagination (After/Before) with offset pagination
 	// (Skip). The two styles have no defined interaction — pick one.
 	ErrIncompatiblePagination = errors.New("den: cursor pagination (After/Before) cannot be combined with offset pagination (Skip)")
+	// ErrUnsupportedScheme is returned by OpenURL when no backend opener is
+	// registered for the DSN's scheme — typically because the caller forgot
+	// the side-effect import (e.g. `_ "github.com/oliverandrich/den/backend/sqlite"`).
+	// Wrapped with the actual scheme via fmt.Errorf so callers can use
+	// errors.Is to detect this case without scraping error strings.
+	ErrUnsupportedScheme = errors.New("den: unsupported database scheme")
 )
 
 // InsertFailure pairs a failed document's position in the input slice with

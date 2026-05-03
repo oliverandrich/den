@@ -117,7 +117,8 @@ func TestOpenURL_MissingScheme(t *testing.T) {
 func TestOpenURL_UnregisteredScheme(t *testing.T) {
 	_, err := den.OpenURL(context.Background(), "nosuch_scheme_"+regTestPrefix(t)+"://x")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported database scheme")
+	require.ErrorIs(t, err, den.ErrUnsupportedScheme,
+		"unregistered-scheme error must wrap ErrUnsupportedScheme so callers can match via errors.Is")
 	assert.Contains(t, err.Error(), "did you import the backend package?",
 		"error should nudge callers toward the side-effect import")
 }

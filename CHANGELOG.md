@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.11.2 — 2026-05-03
+
 ### Added
 
 - **`SeekableStorage`** optional Storage capability. Backends with cheap random access can additionally implement `OpenSeekable(ctx, att) (io.ReadSeekCloser, error)` so callers (e.g. an HTTP handler using `http.ServeContent`) can serve Range and conditional-GET requests directly. The file backend implements it (it returns `*os.File` either way); S3 deliberately doesn't, because every Seek would round-trip another HTTP GET — remote-storage Range support belongs at the URL layer (pre-signed URLs).

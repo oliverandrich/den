@@ -325,6 +325,7 @@ type EagerMiddle struct {
 
 type EagerOuter struct {
 	document.Base
+	Note   string                `json:"note"`
 	Middle den.Link[EagerMiddle] `json:"middle" den:"eager"`
 }
 
@@ -381,6 +382,111 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
 			"FindByID hydrates one level only — same single-level contract as Iter "+
 				"(use NewQuery[T].WithFetchLinks().All for transitive hydration)")
+	})
+}
+
+// TestEagerLink_HydrationDepthByTerminal pins the actual hydration-depth
+// contract per terminal. The asymmetry isn't strictly "per-row vs batched":
+// it's "does the terminal route through a QuerySet.All before returning".
+//
+//   - Iter, Refresh, FetchAllLinks call fetchAllLinksOnDoc directly →
+//     single-level.
+//   - FindOneAndUpdate, FindOneAndUpsert (update branch) call findOneStrict
+//     which uses NewQuery.All — that runs the batched resolver and
+//     recurses up to defaultNestingDepth. The trailing fetchAllLinksOnDoc
+//     in those paths is a no-op for already-loaded links.
+//   - FindOneAndUpsert (insert branch) does not go through findOneStrict —
+//     it Insert()s user-supplied defaults and then runs fetchAllLinksOnDoc
+//     → single-level.
+//
+// FindByID is pinned by TestEagerLink_NestedDepth (single-level).
+func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
+	db := dentest.MustOpen(t, &EagerInner{}, &EagerMiddle{}, &EagerOuter{})
+	ctx := context.Background()
+
+	inner := &EagerInner{Label: "leaf"}
+	require.NoError(t, den.Insert(ctx, db, inner))
+	mid := &EagerMiddle{Inner: den.NewLink(inner)}
+	require.NoError(t, den.Insert(ctx, db, mid))
+	outer := &EagerOuter{Note: "initial", Middle: den.NewLink(mid)}
+	require.NoError(t, den.Insert(ctx, db, outer))
+
+	t.Run("Iter caps at first level under WithNestingDepth(2)", func(t *testing.T) {
+		var got *EagerOuter
+		for doc, err := range den.NewQuery[EagerOuter](db,
+			where.Field("_id").Eq(outer.ID),
+		).WithFetchLinks().WithNestingDepth(2).Iter(ctx) {
+			require.NoError(t, err)
+			got = doc
+		}
+		require.NotNil(t, got)
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires on Iter")
+		require.NotNil(t, got.Middle.Value)
+		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
+			"Iter is single-level per-row; WithNestingDepth(2) must not recurse")
+	})
+
+	t.Run("Refresh caps at first level", func(t *testing.T) {
+		doc := &EagerOuter{}
+		doc.ID = outer.ID
+		require.NoError(t, den.Refresh(ctx, db, doc))
+		require.True(t, doc.Middle.IsLoaded(), "first eager level fires on Refresh")
+		require.NotNil(t, doc.Middle.Value)
+		assert.False(t, doc.Middle.Value.Inner.IsLoaded(),
+			"Refresh is single-level per-row; defaultNestingDepth must not recurse")
+	})
+
+	t.Run("FindOneAndUpdate recurses (routes through findOneStrict→All)", func(t *testing.T) {
+		got, err := den.FindOneAndUpdate[EagerOuter](ctx, db,
+			den.SetFields{"note": "after-update"},
+			[]where.Condition{where.Field("_id").Eq(outer.ID)},
+		)
+		require.NoError(t, err)
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
+		require.NotNil(t, got.Middle.Value)
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"findOneStrict runs the batched resolver with defaultNestingDepth — both levels load")
+	})
+
+	t.Run("FindOneAndUpsert update branch recurses (findOneStrict path)", func(t *testing.T) {
+		got, inserted, err := den.FindOneAndUpsert[EagerOuter](ctx, db,
+			&EagerOuter{Note: "should-not-apply"},
+			den.SetFields{"note": "via-upsert"},
+			[]where.Condition{where.Field("_id").Eq(outer.ID)},
+		)
+		require.NoError(t, err)
+		require.False(t, inserted, "row exists — must take update branch")
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
+		require.NotNil(t, got.Middle.Value)
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"update branch goes through findOneStrict.All → batched resolver recurses")
+	})
+
+	t.Run("FindOneAndUpsert insert branch caps at first level", func(t *testing.T) {
+		freshInner := &EagerInner{Label: "leaf-2"}
+		require.NoError(t, den.Insert(ctx, db, freshInner))
+		freshMid := &EagerMiddle{Inner: den.NewLink(freshInner)}
+		require.NoError(t, den.Insert(ctx, db, freshMid))
+
+		// Construct the link by ID only — den.NewLink(freshMid) would carry
+		// freshMid.Inner's pre-loaded state into the defaults and mask what
+		// the system actually hydrates.
+		defaults := &EagerOuter{
+			Note:   "fresh",
+			Middle: den.Link[EagerMiddle]{ID: freshMid.ID},
+		}
+
+		got, inserted, err := den.FindOneAndUpsert[EagerOuter](ctx, db,
+			defaults,
+			den.SetFields{},
+			[]where.Condition{where.Field("note").Eq("does-not-exist-yet")},
+		)
+		require.NoError(t, err)
+		require.True(t, inserted, "no match — must take insert branch")
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires post-insert")
+		require.NotNil(t, got.Middle.Value)
+		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
+			"insert branch does not route through findOneStrict — fetchAllLinksOnDoc is single-level")
 	})
 }
 
@@ -540,6 +646,37 @@ func TestFetchAllLinks(t *testing.T) {
 	require.Len(t, found.Windows, 1)
 	assert.True(t, found.Windows[0].IsLoaded())
 	assert.Equal(t, 10, found.Windows[0].Value.X)
+}
+
+// TestFetchAllLinks_SingleLevel pins FetchAllLinks' single-level contract.
+// It hydrates the direct link fields on the doc it is called with, but
+// does not recurse into the loaded targets — Mid is loaded, Mid.Value.Leaf
+// stays unloaded. Callers needing transitive hydration should reach for a
+// QuerySet terminal that routes through the batched resolver.
+//
+// Reuses the non-eager NestLeaf/NestMid/NestRoot chain so we observe what
+// FetchAllLinks itself does, free of eager auto-hydration interference.
+func TestFetchAllLinks_SingleLevel(t *testing.T) {
+	db := dentest.MustOpen(t, &NestLeaf{}, &NestMid{}, &NestRoot{})
+	ctx := context.Background()
+
+	leaf := &NestLeaf{Label: "leaf"}
+	require.NoError(t, den.Insert(ctx, db, leaf))
+	mid := &NestMid{Leaf: den.NewLink(leaf)}
+	require.NoError(t, den.Insert(ctx, db, mid))
+	root := &NestRoot{Mid: den.NewLink(mid)}
+	require.NoError(t, den.Insert(ctx, db, root))
+
+	found, err := den.FindByID[NestRoot](ctx, db, root.ID)
+	require.NoError(t, err)
+	require.False(t, found.Mid.IsLoaded(),
+		"baseline: non-eager link must not be auto-hydrated by FindByID")
+
+	require.NoError(t, den.FetchAllLinks(ctx, db, found))
+	require.True(t, found.Mid.IsLoaded(), "FetchAllLinks loads the direct link")
+	require.NotNil(t, found.Mid.Value)
+	assert.False(t, found.Mid.Value.Leaf.IsLoaded(),
+		"FetchAllLinks is single-level; it does not recurse into the loaded target")
 }
 
 func TestWithFetchLinks_Eager(t *testing.T) {

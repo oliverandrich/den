@@ -16,10 +16,10 @@ import (
 )
 
 // TestAllWithCount_WithFetchLinks_SmallPool reproduces den-1c7s: AllWithCount
-// opens a read TX for the iterator, but fetchAllLinksOnDoc routes the linked
-// reads through db.backend.Get — a separate pool connection. With a tight
-// pool and a few concurrent callers, every connection is consumed by an
-// active iterator plus its link fetches and the test times out.
+// opens a read TX for the iterator, but link resolution used to route the
+// linked reads through db.backend.Get — a separate pool connection. With a
+// tight pool and a few concurrent callers, every connection was consumed by
+// an active iterator plus its link fetches and the test timed out.
 //
 // After the fix, link resolution reuses the iterator's transaction
 // connection and the test completes well inside the deadline.

@@ -182,7 +182,7 @@ func FindByID[T any](ctx context.Context, s Scope, id string, opts ...CRUDOption
 	captureSnapshot(data, result)
 
 	o := applyCRUDOpts(opts)
-	if err := fetchAllLinksOnDoc(ctx, db, rw, result, defaultNestingDepth, crudFetchMode(o)); err != nil {
+	if err := batchResolveLinks(ctx, db, rw, []*T{result}, defaultNestingDepth, crudFetchMode(o)); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -358,7 +358,7 @@ func Refresh[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOptio
 	captureSnapshot(data, document)
 
 	o := applyCRUDOpts(opts)
-	return fetchAllLinksOnDoc(ctx, db, rw, document, defaultNestingDepth, crudFetchMode(o))
+	return batchResolveLinks(ctx, db, rw, []*T{document}, defaultNestingDepth, crudFetchMode(o))
 }
 
 // SetFields is a map of field names (as they appear in the `json` struct
@@ -412,7 +412,7 @@ func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, con
 		if err := Update(ctx, tx, doc); err != nil {
 			return nil, err
 		}
-		if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), doc, defaultNestingDepth, crudFetchMode(o)); err != nil {
+		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, defaultNestingDepth, crudFetchMode(o)); err != nil {
 			return nil, err
 		}
 		return doc, nil
@@ -515,7 +515,7 @@ func findOneAndUpsertImpl[T any](
 			if err := Update(ctx, tx, existing); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), existing, defaultNestingDepth, crudFetchMode(o)); err != nil {
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, defaultNestingDepth, crudFetchMode(o)); err != nil {
 				return upsertResult[T]{}, err
 			}
 			return upsertResult[T]{doc: existing, inserted: false}, nil
@@ -527,7 +527,7 @@ func findOneAndUpsertImpl[T any](
 			if err := Insert(ctx, tx, defaults); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := fetchAllLinksOnDoc(ctx, db, tx.readWriter(), defaults, defaultNestingDepth, crudFetchMode(o)); err != nil {
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, defaultNestingDepth, crudFetchMode(o)); err != nil {
 				return upsertResult[T]{}, err
 			}
 			return upsertResult[T]{doc: defaults, inserted: true}, nil

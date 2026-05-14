@@ -254,8 +254,8 @@ func TestEagerLink_WithoutFetchLinksSuppressesEager(t *testing.T) {
 	assert.Nil(t, got.Door.Value)
 }
 
-// TestEagerLink_IterRespectsEager pins that the per-row Iter path
-// also respects eager tags (single-row hydration; no batching).
+// TestEagerLink_IterRespectsEager pins that Iter respects eager tags on
+// each streamed row.
 func TestEagerLink_IterRespectsEager(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &EagerOwner{}, &EagerHouse{})
 	ctx := context.Background()
@@ -330,12 +330,10 @@ type EagerOuter struct {
 }
 
 // TestEagerLink_NestedDepth pins the depth contract for recursive eager
-// hydration. The batched path (.All) recurses up to nestDepth, so under
-// the default depth both levels of eager links resolve. The per-row
-// path (FindByID and Iter) is strictly single-level — it hydrates the
-// direct eager fields but does not descend into the loaded targets'
-// own eager fields, even when nestDepth would allow it. WithNestingDepth(1)
-// caps the batched path at the first level.
+// hydration. Both All (the batched terminal) and FindByID (the single-doc
+// CRUD read) route through the same resolver, so both recurse up to
+// nestDepth — the default depth resolves both levels. WithNestingDepth(1)
+// caps recursion at the first level.
 func TestEagerLink_NestedDepth(t *testing.T) {
 	db := dentest.MustOpen(t, &EagerInner{}, &EagerMiddle{}, &EagerOuter{})
 	ctx := context.Background()
@@ -373,34 +371,23 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 			"WithNestingDepth(1) must stop before recursing into the second level")
 	})
 
-	t.Run("FindByID per-row path is single-level only", func(t *testing.T) {
+	t.Run("FindByID recurses uniformly with the batched terminals", func(t *testing.T) {
 		got, err := den.FindByID[EagerOuter](ctx, db, outer.ID)
 		require.NoError(t, err)
-		require.True(t, got.Middle.IsLoaded(),
-			"first eager level fires on the per-row path too")
+		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
-		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
-			"FindByID hydrates one level only — same single-level contract as Iter "+
-				"(use NewQuery[T].WithFetchLinks().All for transitive hydration)")
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"FindByID routes through the same batched resolver as All — both levels load up to defaultNestingDepth")
 	})
 }
 
-// TestEagerLink_HydrationDepthByTerminal pins the actual hydration-depth
-// contract per terminal. The asymmetry isn't strictly "per-row vs batched":
-// it's "does the terminal route through a QuerySet.All before returning".
-//
-//   - Iter, Refresh, FetchAllLinks call fetchAllLinksOnDoc directly →
-//     single-level.
-//   - FindOneAndUpdate, FindOneAndUpsert (update branch) call findOneStrict
-//     which uses NewQuery.All — that runs the batched resolver and
-//     recurses up to defaultNestingDepth. The trailing fetchAllLinksOnDoc
-//     in those paths is a no-op for already-loaded links.
-//   - FindOneAndUpsert (insert branch) does not go through findOneStrict —
-//     it Insert()s user-supplied defaults and then runs fetchAllLinksOnDoc
-//     → single-level.
-//
-// FindByID is pinned by TestEagerLink_NestedDepth (single-level).
-func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
+// TestEagerLink_AllReadTerminalsRecurse pins that every read terminal
+// routes through the same batched resolver, so every terminal recurses up
+// to nestDepth (or defaultNestingDepth for the non-QuerySet CRUD reads).
+// FindByID is covered by TestEagerLink_NestedDepth. FetchAllLinks is the
+// exception (fixed at depth=1 by API design) and is pinned by
+// TestFetchAllLinks_SingleLevel.
+func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	db := dentest.MustOpen(t, &EagerInner{}, &EagerMiddle{}, &EagerOuter{})
 	ctx := context.Background()
 
@@ -411,7 +398,7 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 	outer := &EagerOuter{Note: "initial", Middle: den.NewLink(mid)}
 	require.NoError(t, den.Insert(ctx, db, outer))
 
-	t.Run("Iter caps at first level under WithNestingDepth(2)", func(t *testing.T) {
+	t.Run("Iter recurses with WithNestingDepth(2)", func(t *testing.T) {
 		var got *EagerOuter
 		for doc, err := range den.NewQuery[EagerOuter](db,
 			where.Field("_id").Eq(outer.ID),
@@ -422,21 +409,21 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 		require.NotNil(t, got)
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires on Iter")
 		require.NotNil(t, got.Middle.Value)
-		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
-			"Iter is single-level per-row; WithNestingDepth(2) must not recurse")
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"Iter routes per-row through the batched resolver — WithNestingDepth(2) recurses")
 	})
 
-	t.Run("Refresh caps at first level", func(t *testing.T) {
+	t.Run("Refresh recurses up to defaultNestingDepth", func(t *testing.T) {
 		doc := &EagerOuter{}
 		doc.ID = outer.ID
 		require.NoError(t, den.Refresh(ctx, db, doc))
 		require.True(t, doc.Middle.IsLoaded(), "first eager level fires on Refresh")
 		require.NotNil(t, doc.Middle.Value)
-		assert.False(t, doc.Middle.Value.Inner.IsLoaded(),
-			"Refresh is single-level per-row; defaultNestingDepth must not recurse")
+		assert.True(t, doc.Middle.Value.Inner.IsLoaded(),
+			"Refresh uses the same batched resolver path — both levels load")
 	})
 
-	t.Run("FindOneAndUpdate recurses (routes through findOneStrict→All)", func(t *testing.T) {
+	t.Run("FindOneAndUpdate recurses", func(t *testing.T) {
 		got, err := den.FindOneAndUpdate[EagerOuter](ctx, db,
 			den.SetFields{"note": "after-update"},
 			[]where.Condition{where.Field("_id").Eq(outer.ID)},
@@ -445,10 +432,10 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
 		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
-			"findOneStrict runs the batched resolver with defaultNestingDepth — both levels load")
+			"second eager level must load via the batched resolver path")
 	})
 
-	t.Run("FindOneAndUpsert update branch recurses (findOneStrict path)", func(t *testing.T) {
+	t.Run("FindOneAndUpsert update branch recurses", func(t *testing.T) {
 		got, inserted, err := den.FindOneAndUpsert[EagerOuter](ctx, db,
 			&EagerOuter{Note: "should-not-apply"},
 			den.SetFields{"note": "via-upsert"},
@@ -459,10 +446,10 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
 		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
-			"update branch goes through findOneStrict.All → batched resolver recurses")
+			"second eager level must load via the batched resolver path")
 	})
 
-	t.Run("FindOneAndUpsert insert branch caps at first level", func(t *testing.T) {
+	t.Run("FindOneAndUpsert insert branch recurses", func(t *testing.T) {
 		freshInner := &EagerInner{Label: "leaf-2"}
 		require.NoError(t, den.Insert(ctx, db, freshInner))
 		freshMid := &EagerMiddle{Inner: den.NewLink(freshInner)}
@@ -470,7 +457,7 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 
 		// Construct the link by ID only — den.NewLink(freshMid) would carry
 		// freshMid.Inner's pre-loaded state into the defaults and mask what
-		// the system actually hydrates.
+		// the system actually hydrates post-insert.
 		defaults := &EagerOuter{
 			Note:   "fresh",
 			Middle: den.Link[EagerMiddle]{ID: freshMid.ID},
@@ -483,10 +470,10 @@ func TestEagerLink_HydrationDepthByTerminal(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.True(t, inserted, "no match — must take insert branch")
-		require.True(t, got.Middle.IsLoaded(), "first eager level fires post-insert")
+		require.True(t, got.Middle.IsLoaded())
 		require.NotNil(t, got.Middle.Value)
-		assert.False(t, got.Middle.Value.Inner.IsLoaded(),
-			"insert branch does not route through findOneStrict — fetchAllLinksOnDoc is single-level")
+		assert.True(t, got.Middle.Value.Inner.IsLoaded(),
+			"insert branch hydrates post-Insert through the same batched resolver — recurses")
 	})
 }
 

@@ -198,12 +198,18 @@ func FetchLinkField[T any](ctx context.Context, s Scope, link *Link[T]) error {
 	return nil
 }
 
-// FetchAllLinks resolves all link fields on a document. See FetchLink for
-// the scope semantics. The eager / lazy tag on each Link field is ignored
-// here — calling FetchAllLinks is itself the explicit ask for full
-// hydration.
+// FetchAllLinks resolves the direct link fields on doc — single-level, the
+// loaded targets' own links stay untouched. See FetchLink for the scope
+// semantics. The eager / lazy tag on each field is ignored; calling
+// FetchAllLinks is itself the explicit ask for hydration.
+//
+// For transitive hydration use a QuerySet terminal (All / AllWithCount /
+// First / Search), which honors WithNestingDepth. Internally this routes
+// through the same batched resolver — a one-element batch — so depth
+// recursion is available; FetchAllLinks fixes it at one hop because the
+// API has no place to thread a depth knob.
 func FetchAllLinks[T any](ctx context.Context, s Scope, doc *T) error {
-	return fetchAllLinksOnDoc(ctx, s.db(), s.readWriter(), doc, 1, fetchAll)
+	return batchResolveLinks(ctx, s.db(), s.readWriter(), []*T{doc}, 1, fetchAll)
 }
 
 // fetchLinkByName resolves one named link field. The rw parameter carries
@@ -241,19 +247,6 @@ func fetchLinkByName(ctx context.Context, db *DB, rw ReadWriter, doc any, fieldN
 		return resolveSingleLink(ctx, db, rw, fv, lf)
 	}
 	return fmt.Errorf("den: link field %q not found", fieldName)
-}
-
-func fetchAllLinksOnDoc(ctx context.Context, db *DB, rw ReadWriter, doc any, depth int, mode fetchMode) error {
-	if depth <= 0 || mode == fetchNone {
-		return nil
-	}
-
-	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
-		if lf.skipForMode(mode) {
-			return nil
-		}
-		return resolveSingleLink(ctx, db, rw, elem, lf)
-	})
 }
 
 func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal reflect.Value, lf linkFieldInfo) error {
@@ -745,12 +738,11 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 	if err := iter.Close(); err != nil {
 		return err
 	}
-	// Preserve the per-row path's strictness: a dangling link (ID referenced
-	// in a parent but with no corresponding row in the target collection)
-	// surfaces as ErrNotFound. Without this, callers migrating from the
-	// old implementation would silently see Loaded=false for broken links.
-	// Returns the typed *DanglingLinkError so callers that need to act on
-	// the broken (collection, id) can errors.As without parsing the message.
+	// A dangling link (ID referenced in a parent but with no corresponding
+	// row in the target collection) surfaces as *DanglingLinkError. The
+	// concrete type exposes (collection, id) for callers that need to act
+	// on the broken link without parsing the message; it unwraps to
+	// ErrNotFound so existing errors.Is(...) checks keep working.
 	for id := range slotsByID {
 		if _, ok := matched[id]; !ok {
 			return &DanglingLinkError{Collection: col.meta.Name, ID: id}

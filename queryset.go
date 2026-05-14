@@ -182,11 +182,17 @@ func (qs QuerySet[T]) shouldHydrate() bool {
 
 // WithNestingDepth caps recursive link resolution. Meaningful for any
 // query that hydrates links — `den:"eager"`-tagged fields under the
-// default mode, or every link field under WithFetchLinks. Honored by
-// the batched terminals (All, AllWithCount, Search) which actually
-// recurse; ignored by terminals that don't return *T values and by
-// the per-row Iter path (which is single-level by construction —
-// streaming can't recurse without buffering).
+// default mode, or every link field under WithFetchLinks.
+//
+// Honored uniformly by every terminal that returns *T values: All,
+// AllWithCount, First, Search, and Iter all route through the same
+// batched resolver, which recurses level-by-level up to depth. Terminals
+// that don't return *T values (Count, Exists, scalar aggregates,
+// GroupBy.Into, bulk Update) ignore the setting because they have no
+// documents to attach resolved links to.
+//
+// depth <= 0 disables link hydration entirely, regardless of fetchMode.
+// Prefer WithoutFetchLinks if that's the intent.
 func (qs QuerySet[T]) WithNestingDepth(depth int) QuerySet[T] {
 	qs.nestDepth = depth
 	return qs

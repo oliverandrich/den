@@ -29,6 +29,10 @@ func NewID() string {
 // their last-saved state. Embed document.Tracked to satisfy this interface;
 // den uses it to populate the snapshot after a load and to detect changes
 // (IsChanged, GetChanges, Revert).
+//
+// SetSnapshot implementations may retain data directly without copying —
+// the bytes passed in are caller-owned and stable per Den's Backend
+// byte-ownership contract. Callers do not mutate the slice afterwards.
 type Trackable interface {
 	SetSnapshot(data []byte)
 	Snapshot() []byte

@@ -3,14 +3,10 @@ package den
 import "github.com/oliverandrich/den/document"
 
 // decodeIterRow decodes iterBytes into doc and, if doc is Trackable,
-// stores iterBytes as its change-tracking snapshot.
-//
-// Both backend iterators return a freshly-allocated []byte per row
-// (pgx Scan and database/sql Scan both document that *[]byte targets
-// receive a copy owned by the caller), so the slice is stable beyond
-// the next iterator.Next() call and can be used directly — no extra
-// make+copy is needed. Non-Trackable types skip the snapshot entirely
-// and incur zero rowbuf overhead.
+// stores iterBytes as its change-tracking snapshot. Per the Backend
+// byte-ownership contract, iterBytes is caller-owned and stable beyond
+// the next iterator.Next() call, so it can be used directly without a
+// defensive copy. Non-Trackable types skip the snapshot entirely.
 func decodeIterRow[T any](db *DB, iterBytes []byte, doc *T) error {
 	if err := db.decode(iterBytes, doc); err != nil {
 		return err

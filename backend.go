@@ -7,6 +7,25 @@ import (
 )
 
 // Backend defines the contract that all storage engines must implement.
+//
+// # Byte-ownership contract
+//
+// Any []byte returned from a Backend method (Get, Iterator.Bytes,
+// Transaction.GetForUpdate, …) MUST be caller-owned: implementations must
+// return a fresh slice that does not alias any internal scratch buffer, and
+// must not retain a reference to it after returning. Callers may keep the
+// slice indefinitely and may mutate it without affecting backend state.
+//
+// Conversely, any []byte argument passed INTO a Backend method (Put's data,
+// …) is borrowed for the duration of the call only: implementations must
+// not retain a reference past return. Callers may reuse or mutate the
+// slice afterwards.
+//
+// Den relies on these guarantees to skip defensive copies in change
+// tracking and link hydration. Both bundled backends (SQLite via
+// database/sql.Rows.Scan, PostgreSQL via pgx.Rows.Scan) honor the
+// contract — Scan into a *[]byte target is documented by both libraries
+// to allocate a fresh caller-owned slice per call.
 type Backend interface {
 	Get(ctx context.Context, collection, id string) ([]byte, error)
 	Put(ctx context.Context, collection, id string, data []byte) error
@@ -125,6 +144,12 @@ const (
 )
 
 // Iterator provides sequential access to query results.
+//
+// Bytes returns the current row's document bytes. The returned slice is
+// caller-owned per the Backend byte-ownership contract — implementations
+// must allocate a fresh slice per row (typically via Scan into a *[]byte
+// target). Callers may retain the slice beyond the next Next() call;
+// Next() does not invalidate or mutate previously returned slices.
 type Iterator interface {
 	Next() bool
 	Bytes() []byte

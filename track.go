@@ -14,12 +14,14 @@ type FieldChange struct {
 	After  any
 }
 
-// captureSnapshot injects the raw JSON bytes into doc if it implements Trackable.
+// captureSnapshot stores data as doc's change-tracking snapshot when doc
+// implements Trackable. data is retained directly (no defensive copy) —
+// the Backend byte-ownership contract guarantees that bytes returned from
+// Get / Iterator.Bytes / GetForUpdate are caller-owned, and bytes produced
+// by db.encode are fresh per call.
 func captureSnapshot(data []byte, doc any) {
 	if t, ok := doc.(document.Trackable); ok {
-		snapshot := make([]byte, len(data))
-		copy(snapshot, data)
-		t.SetSnapshot(snapshot)
+		t.SetSnapshot(data)
 	}
 }
 

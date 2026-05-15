@@ -9,7 +9,7 @@ import (
 	json "github.com/goccy/go-json"
 
 	"github.com/oliverandrich/den/document"
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 	"github.com/oliverandrich/den/validate"
 )
 
@@ -114,7 +114,7 @@ type upsertResult[T any] struct {
 func (db *DB) encode(v any) ([]byte, error)    { return json.Marshal(v) }
 func (db *DB) decode(data []byte, v any) error { return json.Unmarshal(data, v) }
 
-func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, isInsert bool) {
+func setBaseFields(v reflect.Value, info *util.StructInfo, now time.Time, isInsert bool) {
 	if idField := info.BaseID; idField != nil {
 		fv := v.FieldByIndex(idField.Index)
 		if fv.String() == "" {
@@ -138,7 +138,7 @@ func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, is
 	}
 }
 
-func getID(v reflect.Value, info *internal.StructInfo) string {
+func getID(v reflect.Value, info *util.StructInfo) string {
 	idField := info.BaseID
 	if idField == nil {
 		return ""

@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/oliverandrich/den"
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 	"github.com/oliverandrich/den/where"
 )
 
-var sanitizeFieldName = internal.SanitizeFieldName
+var sanitizeFieldName = util.SanitizeFieldName
 
 // buildSelectSQL translates a den.Query into a SQLite SELECT statement.
 func buildSelectSQL(collection string, q *den.Query) (string, []any) {
@@ -368,7 +368,7 @@ func (it *rowsIterator) Next() bool {
 	return true
 }
 
-var escapeLike = internal.EscapeLike
+var escapeLike = util.EscapeLike
 
 func (it *rowsIterator) Bytes() []byte { return it.data }
 func (it *rowsIterator) ID() string    { return it.id }

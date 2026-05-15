@@ -61,7 +61,7 @@ func NewLink[T any](doc *T) Link[T] {
 
 // extractBaseID walks v's anonymous-embed chain and returns the ID of the
 // first document.Base it finds. Recursion follows the same rule as
-// internal.AnalyzeStruct's collectFields — only anonymous struct fields
+// util.AnalyzeStruct's collectFields — only anonymous struct fields
 // are descended — so this function and the StructInfo.BaseID lookup
 // always agree on what counts as an ID-bearing Base. Returns ("", false)
 // when no document.Base is reachable through anonymous embeds.

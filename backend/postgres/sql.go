@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oliverandrich/den"
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -26,7 +26,7 @@ func toJSONBParam(v any) []byte {
 	return b
 }
 
-var sanitizeFieldName = internal.SanitizeFieldName
+var sanitizeFieldName = util.SanitizeFieldName
 
 // jsonbPath returns a typed JSONB extraction expression that preserves the
 // original JSON type (number, string, boolean). Supports nested fields via
@@ -454,7 +454,7 @@ type rowsIterator struct {
 	err  error
 }
 
-var escapeLike = internal.EscapeLike
+var escapeLike = util.EscapeLike
 
 func (it *rowsIterator) Next() bool {
 	if !it.rows.Next() {

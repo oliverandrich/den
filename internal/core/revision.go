@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // IgnoreRevision returns a CRUDOption that skips revision checking.
@@ -23,7 +23,7 @@ func newRevision() string {
 	return hex.EncodeToString(b)
 }
 
-func setRevision(v reflect.Value, info *internal.StructInfo, rev string) {
+func setRevision(v reflect.Value, info *util.StructInfo, rev string) {
 	revField := info.BaseRev
 	if revField == nil {
 		return
@@ -31,7 +31,7 @@ func setRevision(v reflect.Value, info *internal.StructInfo, rev string) {
 	v.FieldByIndex(revField.Index).SetString(rev)
 }
 
-func getRevision(v reflect.Value, info *internal.StructInfo) string {
+func getRevision(v reflect.Value, info *util.StructInfo) string {
 	revField := info.BaseRev
 	if revField == nil {
 		return ""

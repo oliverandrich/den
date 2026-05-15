@@ -7,7 +7,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // NewID generates a new ULID string. ULIDs are lexicographically sortable
@@ -35,7 +35,7 @@ type DB struct {
 // collectionInfo is the internal registry entry for a registered type.
 type collectionInfo struct {
 	meta       CollectionMeta
-	structInfo *internal.StructInfo
+	structInfo *util.StructInfo
 	settings   Settings
 }
 

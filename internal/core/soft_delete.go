@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // HardDelete returns a CRUDOption that makes Delete permanently remove a
@@ -104,7 +104,7 @@ func softDelete(ctx context.Context, db *DB, b ReadWriter, rv reflect.Value, doc
 	return nil
 }
 
-func setSoftDeletedAt(v reflect.Value, info *internal.StructInfo, t *time.Time) {
+func setSoftDeletedAt(v reflect.Value, info *util.StructInfo, t *time.Time) {
 	field := info.BaseDeletedAt
 	if field == nil {
 		return
@@ -121,7 +121,7 @@ func setSoftDeletedAt(v reflect.Value, info *internal.StructInfo, t *time.Time) 
 // SoftDeleteBy / SoftDeleteReason. Documents without the corresponding
 // fields (hand-rolled soft-delete types that omit them) silently skip —
 // consistent with the structural soft-delete detection.
-func setSoftDeleteAuditFields(v reflect.Value, info *internal.StructInfo, by, reason string) {
+func setSoftDeleteAuditFields(v reflect.Value, info *util.StructInfo, by, reason string) {
 	if by != "" {
 		if f := info.FieldByName("_deleted_by"); f != nil {
 			v.FieldByIndex(f.Index).SetString(by)

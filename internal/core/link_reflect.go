@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // linkFieldInfo describes a single Link or []Link field in a struct,
@@ -72,7 +72,7 @@ func loadLinkFieldsBundle(t reflect.Type) linkFieldsBundle {
 		// Best-effort tag parse: an unknown den-tag option here would be
 		// rejected at Register time anyway, so a parse error is silently
 		// dropped (the eager flag stays false).
-		opts, _ := internal.ParseDenTag(f.Tag.Get("den"))
+		opts, _ := util.ParseDenTag(f.Tag.Get("den"))
 		if opts.Eager {
 			anyEager = true
 		}
@@ -109,7 +109,7 @@ func hasEagerLinkFields(t reflect.Type) bool {
 // fts on a non-string) are caught at Register time the same way; eager
 // follows the pattern so a misplaced tag fails loud at startup instead
 // of being silently ignored.
-func validateEagerTags(info *internal.StructInfo) error {
+func validateEagerTags(info *util.StructInfo) error {
 	for _, f := range info.Fields {
 		if !f.Options.Eager {
 			continue
@@ -177,5 +177,5 @@ func forEachLinkField(ctx context.Context, doc any, fn func(elem reflect.Value, 
 	return nil
 }
 
-// parseJSONTagName delegates to internal.ParseJSONTagName.
-var parseJSONTagName = internal.ParseJSONTagName
+// parseJSONTagName delegates to util.ParseJSONTagName.
+var parseJSONTagName = util.ParseJSONTagName

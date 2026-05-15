@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/oliverandrich/den/document"
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // Register analyzes the given document types and registers their
@@ -21,9 +21,9 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 			t = t.Elem()
 		}
 
-		info, err := internal.AnalyzeStruct(t)
+		info, err := util.AnalyzeStruct(t)
 		if err != nil {
-			if errors.Is(err, internal.ErrInvalidFieldName) {
+			if errors.Is(err, util.ErrInvalidFieldName) {
 				return fmt.Errorf("%w: analyze %s: %w", ErrValidation, t.Name(), err)
 			}
 			return fmt.Errorf("analyze %s: %w", t.Name(), err)
@@ -63,7 +63,7 @@ func Register(ctx context.Context, db *DB, types ...any) error {
 			structInfo: info,
 			settings:   settings,
 		}
-		derivedName := internal.CollectionName(t.Name())
+		derivedName := util.CollectionName(t.Name())
 		if derivedName != meta.Name {
 			db.typeToCollection[derivedName] = meta.Name
 		}
@@ -95,7 +95,7 @@ func collectionForType(db *DB, t reflect.Type) (*collectionInfo, error) {
 	}
 
 	// Slow path: resolve name and look up in registry
-	name := internal.CollectionName(t.Name())
+	name := util.CollectionName(t.Name())
 
 	db.mu.RLock()
 	if mapped, ok := db.typeToCollection[name]; ok {
@@ -140,7 +140,7 @@ func Collections(db *DB) []string {
 	return names
 }
 
-func buildCollectionMeta(info *internal.StructInfo) CollectionMeta {
+func buildCollectionMeta(info *util.StructInfo) CollectionMeta {
 	meta := CollectionMeta{
 		Name:              info.CollectionName,
 		HasSoftDelete:     info.HasDeletedAt,

@@ -201,10 +201,9 @@ func LockByID[T any](ctx context.Context, tx *Tx, id string, opts ...LockOption)
 	}
 
 	result := new(T)
-	if err := tx.parent.decode(data, result); err != nil {
+	if err := decodeWithSnapshot(tx.parent, data, result); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	captureSnapshot(data, result)
 
 	return result, nil
 }

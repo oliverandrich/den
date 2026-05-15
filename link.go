@@ -197,12 +197,11 @@ func FetchLinkField[T any](ctx context.Context, s Scope, link *Link[T]) error {
 		return err
 	}
 	target := new(T)
-	if err := db.decode(data, target); err != nil {
+	if err := decodeWithSnapshot(db, data, target); err != nil {
 		return fmt.Errorf("decode linked %s: %w", col.meta.Name, err)
 	}
 	link.Value = target
 	link.Loaded = true
-	captureSnapshot(data, target)
 	return nil
 }
 
@@ -291,10 +290,9 @@ func resolveSingleLink(ctx context.Context, db *DB, rw ReadWriter, linkVal refle
 
 	// Decode into a new instance of T
 	target := reflect.New(targetType)
-	if err := db.decode(data, target.Interface()); err != nil {
+	if err := decodeWithSnapshot(db, data, target.Interface()); err != nil {
 		return fmt.Errorf("decode linked %s: %w", colName, err)
 	}
-	captureSnapshot(data, target.Interface())
 
 	valueField.Set(target)
 	loadedField.SetBool(true)
@@ -673,11 +671,10 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 			continue
 		}
 		target := reflect.New(lf.targetType)
-		if err := db.decode(iter.Bytes(), target.Interface()); err != nil {
+		if err := decodeWithSnapshot(db, iter.Bytes(), target.Interface()); err != nil {
 			_ = iter.Close()
 			return fmt.Errorf("decode linked %s: %w", col.meta.Name, err)
 		}
-		captureSnapshot(iter.Bytes(), target.Interface())
 		for _, slot := range slots {
 			slot.FieldByIndex(lf.valueIdx).Set(target)
 			slot.FieldByIndex(lf.loadedIdx).SetBool(true)

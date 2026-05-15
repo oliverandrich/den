@@ -449,7 +449,7 @@ func drainIter[T any](ctx context.Context, db *DB, iter Iterator, capHint int) (
 			return nil, err
 		}
 		doc := new(T)
-		if err := decodeIterRow(db, iter.Bytes(), doc); err != nil {
+		if err := decodeWithSnapshot(db, iter.Bytes(), doc); err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
 		}
 		results = append(results, doc)

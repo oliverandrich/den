@@ -19,10 +19,29 @@ type FieldChange struct {
 // the Backend byte-ownership contract guarantees that bytes returned from
 // Get / Iterator.Bytes / GetForUpdate are caller-owned, and bytes produced
 // by db.encode are fresh per call.
+//
+// Use captureSnapshot when you already have encoded bytes in hand (typical
+// post-encode-then-Put path). Use decodeWithSnapshot when you have raw
+// bytes from a backend read and need to decode them into the doc too.
 func captureSnapshot(data []byte, doc any) {
 	if t, ok := doc.(document.Trackable); ok {
 		t.SetSnapshot(data)
 	}
+}
+
+// decodeWithSnapshot decodes data into doc and, if doc is Trackable,
+// stores the same bytes as its change-tracking snapshot. The bytes are
+// retained directly — Backend.Get, Iterator.Bytes, and Transaction.GetForUpdate
+// all return caller-owned slices per the Backend byte-ownership contract.
+//
+// One-call replacement for the common pair `db.decode(data, doc)` followed
+// by `captureSnapshot(data, doc)` on a freshly-read document.
+func decodeWithSnapshot(db *DB, data []byte, doc any) error {
+	if err := db.decode(data, doc); err != nil {
+		return err
+	}
+	captureSnapshot(data, doc)
+	return nil
 }
 
 // IsChanged reports whether the document has changed since it was loaded.

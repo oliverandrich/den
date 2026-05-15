@@ -232,10 +232,9 @@ func FindByID[T any](ctx context.Context, s Scope, id string, opts ...CRUDOption
 	}
 
 	result := new(T)
-	if err := db.decode(data, result); err != nil {
+	if err := decodeWithSnapshot(db, data, result); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	captureSnapshot(data, result)
 
 	o := applyCRUDOpts(opts)
 	if err := batchResolveLinks(ctx, db, rw, []*T{result}, defaultNestingDepth, crudFetchMode(o)); err != nil {
@@ -394,10 +393,9 @@ func Refresh[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOptio
 		return err
 	}
 
-	if err := db.decode(data, document); err != nil {
+	if err := decodeWithSnapshot(db, data, document); err != nil {
 		return err
 	}
-	captureSnapshot(data, document)
 
 	o := applyCRUDOpts(opts)
 	return batchResolveLinks(ctx, db, rw, []*T{document}, defaultNestingDepth, crudFetchMode(o))
@@ -821,7 +819,7 @@ func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Conditio
 				return err
 			}
 			doc := new(T)
-			if err := decodeIterRow(db, it.Bytes(), doc); err != nil {
+			if err := decodeWithSnapshot(db, it.Bytes(), doc); err != nil {
 				return fmt.Errorf("decode: %w", err)
 			}
 			if err := Delete(ctx, tx, doc, opts...); err != nil {

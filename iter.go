@@ -51,7 +51,7 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 			}
 
 			doc := new(T)
-			if err := decodeIterRow(qs.scope.db(), it.Bytes(), doc); err != nil {
+			if err := decodeWithSnapshot(qs.scope.db(), it.Bytes(), doc); err != nil {
 				yield(nil, fmt.Errorf("decode: %w", err))
 				return
 			}

@@ -1,35 +1,35 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTxQuery_All(t *testing.T) {
-	dbs := map[string]*den.DB{
+	dbs := map[string]*core.DB{
 		"sqlite":   dentest.MustOpen(t, &Product{}),
 		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{}),
 	}
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.Save(ctx, db, &Product{Name: "A", Price: 1}))
-			require.NoError(t, den.Save(ctx, db, &Product{Name: "B", Price: 2}))
-			require.NoError(t, den.Save(ctx, db, &Product{Name: "C", Price: 3}))
+			require.NoError(t, core.Save(ctx, db, &Product{Name: "A", Price: 1}))
+			require.NoError(t, core.Save(ctx, db, &Product{Name: "B", Price: 2}))
+			require.NoError(t, core.Save(ctx, db, &Product{Name: "C", Price: 3}))
 
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				items, err := den.NewQuery[Product](tx).
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				items, err := core.NewQuery[Product](tx).
 					Where(where.Field("price").Gte(2.0)).
-					Sort("price", den.Asc).
+					Sort("price", core.Asc).
 					All(ctx)
 				if err != nil {
 					return err
@@ -47,10 +47,10 @@ func TestNewTxQuery_All(t *testing.T) {
 func TestNewTxQuery_First(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "Only"}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "Only"}))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.NewQuery[Product](tx).First(ctx)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		found, err := core.NewQuery[Product](tx).First(ctx)
 		if err != nil {
 			return err
 		}
@@ -64,11 +64,11 @@ func TestNewTxQuery_First_NotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewQuery[Product](tx).First(ctx)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.NewQuery[Product](tx).First(ctx)
 		return err
 	})
-	require.ErrorIs(t, err, den.ErrNotFound)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestNewTxQuery_ForUpdate_SkipLocked(t *testing.T) {
@@ -77,17 +77,17 @@ func TestNewTxQuery_ForUpdate_SkipLocked(t *testing.T) {
 
 	p1 := &Product{Name: "Taken"}
 	p2 := &Product{Name: "Free"}
-	require.NoError(t, den.Save(ctx, db, p1))
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p1))
+	require.NoError(t, core.Save(ctx, db, p2))
 
 	locked, release := runContendedTx(t, db, p1.ID)
 	<-locked
 
 	start := time.Now()
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		items, err := den.NewQuery[Product](tx).
-			Sort("name", den.Asc).
-			ForUpdate(den.SkipLocked()).
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		items, err := core.NewQuery[Product](tx).
+			Sort("name", core.Asc).
+			ForUpdate(core.SkipLocked()).
 			All(ctx)
 		if err != nil {
 			return err
@@ -110,20 +110,20 @@ func TestNewTxQuery_ForUpdate_NoWait(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Contended"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	locked, release := runContendedTx(t, db, p.ID)
 	<-locked
 
 	start := time.Now()
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewQuery[Product](tx).
-			ForUpdate(den.NoWait()).
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.NewQuery[Product](tx).
+			ForUpdate(core.NoWait()).
 			All(ctx)
 		return err
 	})
 	elapsed := time.Since(start)
-	require.ErrorIs(t, err, den.ErrLocked)
+	require.ErrorIs(t, err, core.ErrLocked)
 	assert.Less(t, elapsed, 500*time.Millisecond,
 		"NoWait must not block; returned after %v", elapsed)
 
@@ -133,22 +133,22 @@ func TestNewTxQuery_ForUpdate_NoWait(t *testing.T) {
 func TestNewTxQuery_ForUpdate_ConflictingOptions(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "A"}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "A"}))
 
 	// The error is captured on the query set in ForUpdate and surfaces on
 	// the terminal method — verify both All() and First() report it.
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewQuery[Product](tx).
-			ForUpdate(den.SkipLocked(), den.NoWait()).
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.NewQuery[Product](tx).
+			ForUpdate(core.SkipLocked(), core.NoWait()).
 			All(ctx)
 		return err
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 
-	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.NewQuery[Product](tx).
-			ForUpdate(den.NoWait(), den.SkipLocked()).
+	err = core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.NewQuery[Product](tx).
+			ForUpdate(core.NoWait(), core.SkipLocked()).
 			First(ctx)
 		return err
 	})
@@ -171,7 +171,7 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 	// would cross → deadlock.
 	const N = 20
 	for i := range N {
-		require.NoError(t, den.Save(ctx, db, &Product{
+		require.NoError(t, core.Save(ctx, db, &Product{
 			Name:  "row",
 			Price: float64(i),
 		}))
@@ -190,8 +190,8 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-startA
-		errA = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.NewQuery[Product](tx).
+		errA = core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+			_, err := core.NewQuery[Product](tx).
 				Where(where.Field("price").Lte(15.0)).
 				ForUpdate().
 				All(ctx)
@@ -203,8 +203,8 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-startB
-		errB = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			_, err := den.NewQuery[Product](tx).
+		errB = core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+			_, err := core.NewQuery[Product](tx).
 				Where(where.Field("price").Gte(5.0)).
 				ForUpdate().
 				All(ctx)
@@ -222,19 +222,19 @@ func TestNewTxQuery_ForUpdate_OverlappingRowsNoDeadlock(t *testing.T) {
 	require.NoError(t, errA, "goroutine A")
 	require.NoError(t, errB, "goroutine B")
 	// And specifically neither should surface a deadlock.
-	require.NotErrorIs(t, errA, den.ErrDeadlock)
-	require.NotErrorIs(t, errB, den.ErrDeadlock)
+	require.NotErrorIs(t, errA, core.ErrDeadlock)
+	require.NotErrorIs(t, errB, core.ErrDeadlock)
 }
 
 func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "A"}))
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "B"}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "A"}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "B"}))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		items, err := den.NewQuery[Product](tx).
-			ForUpdate(den.SkipLocked()).
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		items, err := core.NewQuery[Product](tx).
+			ForUpdate(core.SkipLocked()).
 			All(ctx)
 		if err != nil {
 			return err
@@ -254,17 +254,17 @@ func TestNewTxQuery_ForUpdate_SQLiteNoop(t *testing.T) {
 func TestForUpdate_RequiresTransaction(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "A"}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "A"}))
 
-	_, err := den.NewQuery[Product](db).ForUpdate().All(ctx)
-	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
+	_, err := core.NewQuery[Product](db).ForUpdate().All(ctx)
+	require.ErrorIs(t, err, core.ErrLockRequiresTransaction)
 
-	_, err = den.NewQuery[Product](db).ForUpdate(den.SkipLocked()).First(ctx)
-	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
+	_, err = core.NewQuery[Product](db).ForUpdate(core.SkipLocked()).First(ctx)
+	require.ErrorIs(t, err, core.ErrLockRequiresTransaction)
 
 	// Count doesn't actually consult Lock at the SQL level, but the preflight
 	// should still surface the mismatch for callers who typed .Count(ctx)
 	// after .ForUpdate() by mistake.
-	_, err = den.NewQuery[Product](db).ForUpdate().Count(ctx)
-	require.ErrorIs(t, err, den.ErrLockRequiresTransaction)
+	_, err = core.NewQuery[Product](db).ForUpdate().Count(ctx)
+	require.ErrorIs(t, err, core.ErrLockRequiresTransaction)
 }

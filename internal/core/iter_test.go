@@ -1,30 +1,30 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIter(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.SaveAll(ctx, db, []*Product{
+	require.NoError(t, core.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
 	}))
 
 	var names []string
-	for p, err := range den.NewQuery[Product](db).Iter(ctx) {
+	for p, err := range core.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}
@@ -36,7 +36,7 @@ func TestIter_Empty(t *testing.T) {
 	ctx := context.Background()
 
 	count := 0
-	for _, err := range den.NewQuery[Product](db).Iter(ctx) {
+	for _, err := range core.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		count++
 	}
@@ -47,14 +47,14 @@ func TestIter_Break(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.SaveAll(ctx, db, []*Product{
+	require.NoError(t, core.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
 	}))
 
 	count := 0
-	for _, err := range den.NewQuery[Product](db).Iter(ctx) {
+	for _, err := range core.NewQuery[Product](db).Iter(ctx) {
 		require.NoError(t, err)
 		count++
 		if count == 1 {
@@ -72,11 +72,11 @@ func TestIter_ExcludesSoftDeleted(t *testing.T) {
 		{Name: "Keep", Price: 10.0},
 		{Name: "Delete", Price: 20.0},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, products))
-	require.NoError(t, den.Delete(ctx, db, products[1]))
+	require.NoError(t, core.SaveAll(ctx, db, products))
+	require.NoError(t, core.Delete(ctx, db, products[1]))
 
 	var names []string
-	for p, err := range den.NewQuery[SoftProduct](db).Iter(ctx) {
+	for p, err := range core.NewQuery[SoftProduct](db).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}
@@ -85,8 +85,8 @@ func TestIter_ExcludesSoftDeleted(t *testing.T) {
 
 type IterLinkedDoc struct {
 	document.Base
-	Name string                `json:"name"`
-	Ref  den.Link[IterRefItem] `json:"ref"`
+	Name string                 `json:"name"`
+	Ref  core.Link[IterRefItem] `json:"ref"`
 }
 
 type IterRefItem struct {
@@ -99,16 +99,16 @@ func TestIter_WithFetchLinks(t *testing.T) {
 	ctx := context.Background()
 
 	ref := &IterRefItem{Label: "Target"}
-	require.NoError(t, den.Save(ctx, db, ref))
+	require.NoError(t, core.Save(ctx, db, ref))
 
 	docs := []*IterLinkedDoc{
-		{Name: "A", Ref: den.NewLink(ref)},
-		{Name: "B", Ref: den.NewLink(ref)},
+		{Name: "A", Ref: core.NewLink(ref)},
+		{Name: "B", Ref: core.NewLink(ref)},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
 	count := 0
-	for d, err := range den.NewQuery[IterLinkedDoc](db).WithFetchLinks().Iter(ctx) {
+	for d, err := range core.NewQuery[IterLinkedDoc](db).WithFetchLinks().Iter(ctx) {
 		require.NoError(t, err)
 		require.True(t, d.Ref.IsLoaded())
 		assert.Equal(t, "Target", d.Ref.Value.Label)
@@ -125,18 +125,18 @@ func TestIter_WithFetchLinks_InsideTxSeesUncommittedTarget(t *testing.T) {
 	db := dentest.MustOpen(t, &IterLinkedDoc{}, &IterRefItem{})
 	ctx := context.Background()
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 		ref := &IterRefItem{Label: "in-tx"}
-		if err := den.Save(ctx, tx, ref); err != nil {
+		if err := core.Save(ctx, tx, ref); err != nil {
 			return err
 		}
-		doc := &IterLinkedDoc{Name: "A", Ref: den.NewLink(ref)}
-		if err := den.Save(ctx, tx, doc); err != nil {
+		doc := &IterLinkedDoc{Name: "A", Ref: core.NewLink(ref)}
+		if err := core.Save(ctx, tx, doc); err != nil {
 			return err
 		}
 
 		count := 0
-		for d, err := range den.NewQuery[IterLinkedDoc](tx).WithFetchLinks().Iter(ctx) {
+		for d, err := range core.NewQuery[IterLinkedDoc](tx).WithFetchLinks().Iter(ctx) {
 			require.NoError(t, err, "link fetch must see uncommitted target via tx scope")
 			require.True(t, d.Ref.IsLoaded())
 			assert.Equal(t, "in-tx", d.Ref.Value.Label)
@@ -153,24 +153,24 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	ctx := context.Background()
 
 	ref := &IterRefItem{Label: "ok"}
-	require.NoError(t, den.Save(ctx, db, ref))
+	require.NoError(t, core.Save(ctx, db, ref))
 
 	// Seed three rows with known IDs so iteration visits them in order.
 	// The middle row has a dangling link; the third must never be yielded.
-	good := &IterLinkedDoc{Name: "A", Ref: den.NewLink(ref)}
+	good := &IterLinkedDoc{Name: "A", Ref: core.NewLink(ref)}
 	good.ID = "01-good"
-	bad := &IterLinkedDoc{Name: "B", Ref: den.Link[IterRefItem]{ID: "does-not-exist"}}
+	bad := &IterLinkedDoc{Name: "B", Ref: core.Link[IterRefItem]{ID: "does-not-exist"}}
 	bad.ID = "02-bad"
-	last := &IterLinkedDoc{Name: "C", Ref: den.NewLink(ref)}
+	last := &IterLinkedDoc{Name: "C", Ref: core.NewLink(ref)}
 	last.ID = "03-last"
 
-	require.NoError(t, den.Save(ctx, db, good))
-	require.NoError(t, den.Save(ctx, db, bad))
-	require.NoError(t, den.Save(ctx, db, last))
+	require.NoError(t, core.Save(ctx, db, good))
+	require.NoError(t, core.Save(ctx, db, bad))
+	require.NoError(t, core.Save(ctx, db, last))
 
 	var errs []error
 	var names []string
-	for d, err := range den.NewQuery[IterLinkedDoc](db).Sort("_id", den.Asc).WithFetchLinks().Iter(ctx) {
+	for d, err := range core.NewQuery[IterLinkedDoc](db).Sort("_id", core.Asc).WithFetchLinks().Iter(ctx) {
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -179,7 +179,7 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	}
 
 	require.Len(t, errs, 1, "exactly one error (the dangling link) — iterator must terminate, not continue")
-	require.ErrorIs(t, errs[0], den.ErrNotFound)
+	require.ErrorIs(t, errs[0], core.ErrNotFound)
 	assert.Equal(t, []string{"A"}, names, "row after the error must not be yielded")
 }
 
@@ -194,7 +194,7 @@ func TestIter_HonorsCtxCancellation(t *testing.T) {
 		{Name: "d", Price: 4.0},
 		{Name: "e", Price: 5.0},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
 	iterCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -203,7 +203,7 @@ func TestIter_HonorsCtxCancellation(t *testing.T) {
 		seen    int
 		lastErr error
 	)
-	for _, err := range den.NewQuery[Product](db).Iter(iterCtx) {
+	for _, err := range core.NewQuery[Product](db).Iter(iterCtx) {
 		if err != nil {
 			lastErr = err
 			break
@@ -222,14 +222,14 @@ func TestIter_WithConditions(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.SaveAll(ctx, db, []*Product{
+	require.NoError(t, core.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 10.0},
 		{Name: "B", Price: 20.0},
 		{Name: "C", Price: 30.0},
 	}))
 
 	var names []string
-	for p, err := range den.NewQuery[Product](db, where.Field("price").Gt(15.0)).Iter(ctx) {
+	for p, err := range core.NewQuery[Product](db, where.Field("price").Gt(15.0)).Iter(ctx) {
 		require.NoError(t, err)
 		names = append(names, p.Name)
 	}

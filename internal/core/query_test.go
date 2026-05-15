@@ -1,19 +1,19 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"fmt"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type QueryProduct struct {
@@ -23,7 +23,7 @@ type QueryProduct struct {
 	Category string  `json:"category"`
 }
 
-func seedQueryProducts(t *testing.T, db *den.DB) {
+func seedQueryProducts(t *testing.T, db *core.DB) {
 	t.Helper()
 	ctx := context.Background()
 	products := []QueryProduct{
@@ -34,7 +34,7 @@ func seedQueryProducts(t *testing.T, db *den.DB) {
 		{Name: "Epsilon", Price: 25.0, Category: "A"},
 	}
 	for i := range products {
-		require.NoError(t, den.Save(ctx, db, &products[i]))
+		require.NoError(t, core.Save(ctx, db, &products[i]))
 	}
 }
 
@@ -43,7 +43,7 @@ func TestFind_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -53,7 +53,7 @@ func TestFind_WithCondition(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 	for _, r := range results {
@@ -66,7 +66,7 @@ func TestFind_SortAsc(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).Sort("price", core.Asc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
 	assert.InDelta(t, 10.0, results[0].Price, 0.001)
@@ -78,7 +78,7 @@ func TestFind_SortDesc(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Desc).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).Sort("price", core.Desc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
 	assert.InDelta(t, 30.0, results[0].Price, 0.001)
@@ -90,7 +90,7 @@ func TestFind_Limit(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).Limit(3).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).Sort("price", core.Asc).Limit(3).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 }
@@ -100,7 +100,7 @@ func TestFind_Skip(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).Sort("price", den.Asc).Skip(2).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).Sort("price", core.Asc).Skip(2).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 	assert.InDelta(t, 20.0, results[0].Price, 0.001)
@@ -111,7 +111,7 @@ func TestFind_RangeCondition(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db,
+	results, err := core.NewQuery[QueryProduct](db,
 		where.Field("price").Gte(15.0),
 		where.Field("price").Lte(25.0),
 	).All(ctx)
@@ -124,7 +124,7 @@ func TestFindOne(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	p, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Beta")).First(ctx)
+	p, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Beta")).First(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, "Beta", p.Name)
 }
@@ -134,8 +134,8 @@ func TestFindOne_NotFound(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).First(ctx)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).First(ctx)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestFindAll(t *testing.T) {
@@ -143,7 +143,7 @@ func TestFindAll(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -153,7 +153,7 @@ func TestCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).Count(ctx)
+	count, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }
@@ -163,7 +163,7 @@ func TestCount_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	count, err := core.NewQuery[QueryProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count)
 }
@@ -177,15 +177,15 @@ func TestCount_IgnoresLimitAndSkip(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db).Limit(2).Count(ctx)
+	count, err := core.NewQuery[QueryProduct](db).Limit(2).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count, "Count must ignore Limit")
 
-	count, err = den.NewQuery[QueryProduct](db).Skip(3).Count(ctx)
+	count, err = core.NewQuery[QueryProduct](db).Skip(3).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count, "Count must ignore Skip")
 
-	count, err = den.NewQuery[QueryProduct](db).Sort("name", den.Asc).Count(ctx)
+	count, err = core.NewQuery[QueryProduct](db).Sort("name", core.Asc).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), count, "Count must ignore Sort")
 }
@@ -198,7 +198,7 @@ func TestExists_IgnoresLimitSkipSort(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	exists, err := den.NewQuery[QueryProduct](db).Limit(0).Skip(99).Sort("name", den.Desc).Exists(ctx)
+	exists, err := core.NewQuery[QueryProduct](db).Limit(0).Skip(99).Sort("name", core.Desc).Exists(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists, "Exists must not honor Skip past the result set")
 }
@@ -208,11 +208,11 @@ func TestExists(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	exists, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).Exists(ctx)
+	exists, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).Exists(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	exists, err = den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).Exists(ctx)
+	exists, err = core.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).Exists(ctx)
 	require.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -222,20 +222,20 @@ func TestFind_CursorPagination(t *testing.T) {
 	ctx := context.Background()
 
 	p := &QueryProduct{Name: "Solo", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// After a very high ID should return nothing
-	results, err := den.NewQuery[QueryProduct](db).After("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).After("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	// Before a very low ID should return nothing
-	results, err = den.NewQuery[QueryProduct](db).Before("00000000000000000000000000").All(ctx)
+	results, err = core.NewQuery[QueryProduct](db).Before("00000000000000000000000000").All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	// After a very low ID should return all
-	results, err = den.NewQuery[QueryProduct](db).After("00000000000000000000000000").All(ctx)
+	results, err = core.NewQuery[QueryProduct](db).After("00000000000000000000000000").All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
 }
@@ -247,16 +247,16 @@ func TestQuerySet_AfterPlusSkip_ReturnsError(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).All(ctx)
-	require.ErrorIs(t, err, den.ErrIncompatiblePagination)
+	_, err := core.NewQuery[QueryProduct](db).After("x").Skip(5).All(ctx)
+	require.ErrorIs(t, err, core.ErrIncompatiblePagination)
 }
 
 func TestQuerySet_BeforePlusSkip_ReturnsError(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).Before("x").Skip(5).All(ctx)
-	require.ErrorIs(t, err, den.ErrIncompatiblePagination)
+	_, err := core.NewQuery[QueryProduct](db).Before("x").Skip(5).All(ctx)
+	require.ErrorIs(t, err, core.ErrIncompatiblePagination)
 }
 
 func TestQuerySet_AfterPlusSkip_SurfacesInIter(t *testing.T) {
@@ -264,13 +264,13 @@ func TestQuerySet_AfterPlusSkip_SurfacesInIter(t *testing.T) {
 	ctx := context.Background()
 
 	var gotErr error
-	for _, err := range den.NewQuery[QueryProduct](db).After("x").Skip(5).Iter(ctx) {
+	for _, err := range core.NewQuery[QueryProduct](db).After("x").Skip(5).Iter(ctx) {
 		if err != nil {
 			gotErr = err
 			break
 		}
 	}
-	require.ErrorIs(t, gotErr, den.ErrIncompatiblePagination,
+	require.ErrorIs(t, gotErr, core.ErrIncompatiblePagination,
 		"Iter must surface the incompatible-pagination error via its yield path")
 }
 
@@ -278,8 +278,8 @@ func TestQuerySet_AfterPlusSkip_SurfacesInCount(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).Count(ctx)
-	require.ErrorIs(t, err, den.ErrIncompatiblePagination,
+	_, err := core.NewQuery[QueryProduct](db).After("x").Skip(5).Count(ctx)
+	require.ErrorIs(t, err, core.ErrIncompatiblePagination,
 		"Count runs through preflight even though it ignores pagination")
 }
 
@@ -287,8 +287,8 @@ func TestQuerySet_AfterPlusSkip_SurfacesInAggregate(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(5).Sum(ctx, "price")
-	require.ErrorIs(t, err, den.ErrIncompatiblePagination,
+	_, err := core.NewQuery[QueryProduct](db).After("x").Skip(5).Sum(ctx, "price")
+	require.ErrorIs(t, err, core.ErrIncompatiblePagination,
 		"aggregate terminals (Avg/Sum/Min/Max) run through preflight")
 }
 
@@ -299,7 +299,7 @@ func TestQuerySet_SkipZeroWithAfter_OK(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).After("x").Skip(0).All(ctx)
+	_, err := core.NewQuery[QueryProduct](db).After("x").Skip(0).All(ctx)
 	require.NoError(t, err, "Skip(0) + After must not trip the incompatibility check")
 }
 
@@ -309,7 +309,7 @@ func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
 	ctx := context.Background()
 
 	// Get all products sorted by ID to have deterministic ordering
-	all, err := den.NewQuery[QueryProduct](db).All(ctx)
+	all, err := core.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(all), 3)
 
@@ -317,7 +317,7 @@ func TestFind_CursorPagination_AfterAndBefore(t *testing.T) {
 	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
 
 	// Both After and Before set — should exclude first and last
-	results, err := den.NewQuery[QueryProduct](db).
+	results, err := core.NewQuery[QueryProduct](db).
 		After(all[0].ID).
 		Before(all[len(all)-1].ID).
 		All(ctx)
@@ -330,8 +330,8 @@ func TestFindWithCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, total, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
-		Sort("price", den.Asc).
+	results, total, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
+		Sort("price", core.Asc).
 		Limit(2).
 		AllWithCount(ctx)
 	require.NoError(t, err)
@@ -346,7 +346,7 @@ func TestQuerySet_All(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 5)
 }
@@ -356,7 +356,7 @@ func TestQuerySet_Where(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).
+	results, err := core.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
 		All(ctx)
 	require.NoError(t, err)
@@ -368,8 +368,8 @@ func TestQuerySet_SortAndLimit(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db).
-		Sort("price", den.Asc).
+	results, err := core.NewQuery[QueryProduct](db).
+		Sort("price", core.Asc).
 		Limit(2).
 		All(ctx)
 	require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestQuerySet_First(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	p, err := den.NewQuery[QueryProduct](db).
+	p, err := core.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Beta")).
 		First(ctx)
 	require.NoError(t, err)
@@ -395,7 +395,7 @@ func TestQuerySet_CountChain(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db).
+	count, err := core.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
 		Count(ctx)
 	require.NoError(t, err)
@@ -407,13 +407,13 @@ func TestQuerySet_Exists(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	exists, err := den.NewQuery[QueryProduct](db).
+	exists, err := core.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Alpha")).
 		Exists(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	exists, err = den.NewQuery[QueryProduct](db).
+	exists, err = core.NewQuery[QueryProduct](db).
 		Where(where.Field("name").Eq("Nonexistent")).
 		Exists(ctx)
 	require.NoError(t, err)
@@ -425,9 +425,9 @@ func TestQuerySet_AllWithCount(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, total, err := den.NewQuery[QueryProduct](db).
+	results, total, err := core.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A")).
-		Sort("price", den.Asc).
+		Sort("price", core.Asc).
 		Limit(2).
 		AllWithCount(ctx)
 	require.NoError(t, err)
@@ -441,11 +441,11 @@ func TestQuerySet_Lazy(t *testing.T) {
 	ctx := context.Background()
 
 	// Base query — no execution yet
-	base := den.NewQuery[QueryProduct](db).
+	base := core.NewQuery[QueryProduct](db).
 		Where(where.Field("category").Eq("A"))
 
 	// Derive two different queries from the same base
-	sorted, err := base.Sort("price", den.Asc).All(ctx)
+	sorted, err := base.Sort("price", core.Asc).All(ctx)
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, sorted[0].Price, 0.001)
 
@@ -461,18 +461,18 @@ func TestQuerySet_Update(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
-		Update(ctx, den.SetFields{"category": "Z"})
+	count, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("A")).
+		Update(ctx, core.SetFields{"category": "Z"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 
 	// Verify the update
-	results, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("Z")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("Z")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 3)
 
 	// Original category B should be untouched
-	results, err = den.NewQuery[QueryProduct](db, where.Field("category").Eq("B")).All(ctx)
+	results, err = core.NewQuery[QueryProduct](db, where.Field("category").Eq("B")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 }
@@ -483,12 +483,12 @@ func TestStringContains(t *testing.T) {
 	ctx := context.Background()
 
 	// "Alpha" and "Gamma" both contain "a"
-	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StringContains("lpha")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("name").StringContains("lpha")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Alpha
 
 	// "elt" matches Delta and Epsilon? No — only Delta
-	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StringContains("elt")).All(ctx)
+	results, err = core.NewQuery[QueryProduct](db, where.Field("name").StringContains("elt")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Delta
 }
@@ -498,11 +498,11 @@ func TestStartsWith(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Al")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Al")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Alpha
 
-	results, err = den.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Ep")).All(ctx)
+	results, err = core.NewQuery[QueryProduct](db, where.Field("name").StartsWith("Ep")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 1) // Epsilon
 }
@@ -512,7 +512,7 @@ func TestEndsWith(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	results, err := den.NewQuery[QueryProduct](db, where.Field("name").EndsWith("ta")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("name").EndsWith("ta")).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, results, 2) // Beta, Delta
 }
@@ -521,8 +521,8 @@ func TestQuerySet_Update_NoMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
-		Update(ctx, den.SetFields{"price": 99.0})
+	count, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
+		Update(ctx, core.SetFields{"price": 99.0})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
 }
@@ -532,8 +532,8 @@ func TestQuerySet_Update_InvalidField(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).
-		Update(ctx, den.SetFields{"nonexistent": "x"})
+	_, err := core.NewQuery[QueryProduct](db).
+		Update(ctx, core.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -545,8 +545,8 @@ func TestQuerySet_Update_InvalidField_NoMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
-		Update(ctx, den.SetFields{"nonexistent": "x"})
+	_, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Nonexistent")).
+		Update(ctx, core.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -556,8 +556,8 @@ func TestQuerySet_Update_TypeMismatch(t *testing.T) {
 	seedQueryProducts(t, db)
 	ctx := context.Background()
 
-	_, err := den.NewQuery[QueryProduct](db).
-		Update(ctx, den.SetFields{"price": "not-a-float"})
+	_, err := core.NewQuery[QueryProduct](db).
+		Update(ctx, core.SetFields{"price": "not-a-float"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot assign")
 }
@@ -577,20 +577,20 @@ func TestQuerySet_Update_Postgres_NoDeadlock(t *testing.T) {
 	// Seed a result set big enough that the iterator streams.
 	for i := range 25 {
 		p := &QueryProduct{Name: fmt.Sprintf("bulk-%02d", i), Price: float64(i), Category: "bulk"}
-		require.NoError(t, den.Save(parent, db, p))
+		require.NoError(t, core.Save(parent, db, p))
 	}
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
-		Update(parent, den.SetFields{"category": "done"})
+	count, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
+		Update(parent, core.SetFields{"category": "done"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(25), count)
 
 	// Confirm the writes landed.
-	remaining, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Count(parent)
+	remaining, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Count(parent)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), remaining)
 
-	done, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("done")).Count(parent)
+	done, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("done")).Count(parent)
 	require.NoError(t, err)
 	assert.Equal(t, int64(25), done)
 }
@@ -605,15 +605,15 @@ func TestQuerySet_Update_HookFailureRollsBack(t *testing.T) {
 		{Name: "C"},
 	}
 	for _, d := range docs {
-		require.NoError(t, den.Save(ctx, db, d))
+		require.NoError(t, core.Save(ctx, db, d))
 	}
 
-	count, err := den.NewQuery[FailBeforeUpdateDoc](db).
-		Update(ctx, den.SetFields{"name": "X"})
+	count, err := core.NewQuery[FailBeforeUpdateDoc](db).
+		Update(ctx, core.SetFields{"name": "X"})
 	require.Error(t, err)
 	assert.Equal(t, int64(0), count, "fail-fast: tx rolled back, count is zero")
 
-	all, err := den.NewQuery[FailBeforeUpdateDoc](db).Sort("name", den.Asc).All(ctx)
+	all, err := core.NewQuery[FailBeforeUpdateDoc](db).Sort("name", core.Asc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 3)
 	assert.Equal(t, []string{"A", "B", "C"}, []string{all[0].Name, all[1].Name, all[2].Name},
@@ -624,21 +624,21 @@ func TestQuerySet_Update_OnTxScope_FailureRollsBackCallerTx(t *testing.T) {
 	db := dentest.MustOpen(t, &FailBeforeUpdateDoc{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &FailBeforeUpdateDoc{Name: "Seed"}))
+	require.NoError(t, core.Save(ctx, db, &FailBeforeUpdateDoc{Name: "Seed"}))
 
 	// A failing bulk Update inside an outer tx must roll back the whole tx,
 	// including any prior writes done in that same tx.
-	txErr := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.Save(ctx, tx, &FailBeforeUpdateDoc{Name: "TxOnly"}); err != nil {
+	txErr := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		if err := core.Save(ctx, tx, &FailBeforeUpdateDoc{Name: "TxOnly"}); err != nil {
 			return err
 		}
-		_, err := den.NewQuery[FailBeforeUpdateDoc](tx).
-			Update(ctx, den.SetFields{"name": "X"})
+		_, err := core.NewQuery[FailBeforeUpdateDoc](tx).
+			Update(ctx, core.SetFields{"name": "X"})
 		return err
 	})
 	require.Error(t, txErr)
 
-	count, err := den.NewQuery[FailBeforeUpdateDoc](db).Count(ctx)
+	count, err := core.NewQuery[FailBeforeUpdateDoc](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count, "only the pre-tx seed survives; TxOnly is rolled back")
 }
@@ -681,11 +681,11 @@ func TestQuerySet_Update_HooksFirePerRow(t *testing.T) {
 	})
 
 	for _, name := range []string{"A", "B", "C"} {
-		require.NoError(t, den.Save(ctx, db, &counterUpdateDoc{Name: name}))
+		require.NoError(t, core.Save(ctx, db, &counterUpdateDoc{Name: name}))
 	}
 
-	count, err := den.NewQuery[counterUpdateDoc](db).
-		Update(ctx, den.SetFields{"name": "X"})
+	count, err := core.NewQuery[counterUpdateDoc](db).
+		Update(ctx, core.SetFields{"name": "X"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 	assert.Equal(t, 3, updateHookCounter.beforeUpdate, "BeforeUpdate fires per row")
@@ -698,7 +698,7 @@ func TestQuerySet_Update_HonorsCtxCancellation(t *testing.T) {
 
 	// Seed enough rows that the cancel-before-start case is meaningful.
 	for i := range 5 {
-		require.NoError(t, den.Save(ctx, db, &QueryProduct{
+		require.NoError(t, core.Save(ctx, db, &QueryProduct{
 			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
 		}))
 	}
@@ -706,13 +706,13 @@ func TestQuerySet_Update_HonorsCtxCancellation(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
-		Update(cancelCtx, den.SetFields{"category": "updated"})
+	count, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
+		Update(cancelCtx, core.SetFields{"category": "updated"})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int64(0), count, "no rows updated when ctx is cancelled up front")
 
 	// The batch transaction must roll back — no row survives the attempt.
-	remaining, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("updated")).Count(ctx)
+	remaining, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("updated")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), remaining)
 }
@@ -741,7 +741,7 @@ func TestQuerySet_Update_HonorsCtxCancellation_MidLoop(t *testing.T) {
 	db := dentest.MustOpen(t, &cancelOnBeforeUpdate{})
 	ctx := context.Background()
 	for i := range 5 {
-		require.NoError(t, den.Save(ctx, db, &cancelOnBeforeUpdate{
+		require.NoError(t, core.Save(ctx, db, &cancelOnBeforeUpdate{
 			Name: fmt.Sprintf("p%d", i), Category: "bulk",
 		}))
 	}
@@ -751,12 +751,12 @@ func TestQuerySet_Update_HonorsCtxCancellation_MidLoop(t *testing.T) {
 	midLoopCancelFn = cancel
 	t.Cleanup(func() { midLoopCancelFn = nil })
 
-	count, err := den.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("bulk")).
-		Update(cancelCtx, den.SetFields{"category": "updated"})
+	count, err := core.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("bulk")).
+		Update(cancelCtx, core.SetFields{"category": "updated"})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int64(0), count, "outer return is (0, err) when body returns an error")
 
-	updated, err := den.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("updated")).Count(ctx)
+	updated, err := core.NewQuery[cancelOnBeforeUpdate](db, where.Field("category").Eq("updated")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), updated,
 		"mid-loop cancellation rolls the whole batch back — no row carries the new category")
@@ -772,8 +772,8 @@ var linkUpdateHook struct {
 
 type linkUpdateDoc struct {
 	document.Base
-	Name  string         `json:"name"`
-	Owner den.Link[Door] `json:"owner"`
+	Name  string          `json:"name"`
+	Owner core.Link[Door] `json:"owner"`
 }
 
 func (d *linkUpdateDoc) BeforeUpdate(_ context.Context) error {
@@ -796,9 +796,9 @@ func TestQuerySet_Update_FetchModifiers_AreNoOp(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
-	require.NoError(t, den.Save(ctx, db, &linkUpdateDoc{
-		Name: "v1", Owner: den.NewLink(door),
+	require.NoError(t, core.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, &linkUpdateDoc{
+		Name: "v1", Owner: core.NewLink(door),
 	}))
 
 	linkUpdateHook = struct {
@@ -812,10 +812,10 @@ func TestQuerySet_Update_FetchModifiers_AreNoOp(t *testing.T) {
 		}{}
 	})
 
-	count, err := den.NewQuery[linkUpdateDoc](db).
+	count, err := core.NewQuery[linkUpdateDoc](db).
 		WithFetchLinks().
 		WithNestingDepth(3).
-		Update(ctx, den.SetFields{"name": "v2"})
+		Update(ctx, core.SetFields{"name": "v2"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 	assert.Equal(t, 1, linkUpdateHook.fires, "BeforeUpdate must run for the matched row")
@@ -828,7 +828,7 @@ func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 5 {
-		require.NoError(t, den.Save(ctx, db, &QueryProduct{
+		require.NoError(t, core.Save(ctx, db, &QueryProduct{
 			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
 		}))
 	}
@@ -836,11 +836,11 @@ func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Delete(cancelCtx)
+	count, err := core.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Delete(cancelCtx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int64(0), count, "no rows deleted when ctx is cancelled up front")
 
-	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	remaining, err := core.NewQuery[QueryProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), remaining, "batch tx rolled back — all rows survive")
 }
@@ -851,11 +851,11 @@ func TestQuerySet_Update_NilValue(t *testing.T) {
 	ctx := context.Background()
 
 	// nil value should set the zero value, not panic
-	_, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).
-		Update(ctx, den.SetFields{"category": nil})
+	_, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).
+		Update(ctx, core.SetFields{"category": nil})
 	require.NoError(t, err)
 
-	results, err := den.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).All(ctx)
+	results, err := core.NewQuery[QueryProduct](db, where.Field("name").Eq("Alpha")).All(ctx)
 	require.NoError(t, err)
 	for _, r := range results {
 		assert.Empty(t, r.Category)
@@ -868,19 +868,19 @@ func TestQuerySet_Delete(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.SaveAll(ctx, db, []*QueryProduct{
+	require.NoError(t, core.SaveAll(ctx, db, []*QueryProduct{
 		{Name: "Keep", Price: 5},
 		{Name: "Drop1", Price: 15},
 		{Name: "Drop2", Price: 25},
 	}))
 
-	count, err := den.NewQuery[QueryProduct](db,
+	count, err := core.NewQuery[QueryProduct](db,
 		where.Field("price").Gt(10.0),
 	).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
-	remaining, err := den.NewQuery[QueryProduct](db).All(ctx)
+	remaining, err := core.NewQuery[QueryProduct](db).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "Keep", remaining[0].Name)
@@ -900,15 +900,15 @@ func TestQuerySet_Delete_MultiChunk(t *testing.T) {
 	for i := range N {
 		docs[i] = &QueryProduct{Name: fmt.Sprintf("p%04d", i), Price: float64(i)}
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
-	count, err := den.NewQuery[QueryProduct](db,
+	count, err := core.NewQuery[QueryProduct](db,
 		where.Field("price").Lt(900.0),
 	).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(900), count, "must delete every row matching the predicate across chunk boundaries")
 
-	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	remaining, err := core.NewQuery[QueryProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(200), remaining, "non-matching rows untouched, chunk tail does not over-delete")
 }
@@ -925,13 +925,13 @@ func TestQuerySet_Delete_HonorsLimit(t *testing.T) {
 	for i := range N {
 		docs[i] = &QueryProduct{Name: fmt.Sprintf("p%04d", i), Price: float64(i)}
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
-	count, err := den.NewQuery[QueryProduct](db).Limit(1200).Delete(ctx)
+	count, err := core.NewQuery[QueryProduct](db).Limit(1200).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1200), count, "Limit(1200) caps the chunked delete loop after one full + one partial chunk")
 
-	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	remaining, err := core.NewQuery[QueryProduct](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(300), remaining)
 }
@@ -940,11 +940,11 @@ func TestQuerySet_UpdateOne(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Widget", Price: 10}))
+	require.NoError(t, core.Save(ctx, db, &QueryProduct{Name: "Widget", Price: 10}))
 
-	updated, err := den.NewQuery[QueryProduct](db,
+	updated, err := core.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Widget"),
-	).UpdateOne(ctx, den.SetFields{"price": 42.0})
+	).UpdateOne(ctx, core.SetFields{"price": 42.0})
 	require.NoError(t, err)
 	assert.InDelta(t, 42.0, updated.Price, 0.001)
 }
@@ -953,11 +953,11 @@ func TestQuerySet_UpsertOne_InsertBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.NewQuery[QueryProduct](db,
+	doc, inserted, err := core.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Fresh"),
 	).UpsertOne(ctx,
 		&QueryProduct{Name: "Fresh", Price: 1},
-		den.SetFields{"price": 7.0},
+		core.SetFields{"price": 7.0},
 	)
 	require.NoError(t, err)
 	assert.True(t, inserted)
@@ -969,13 +969,13 @@ func TestQuerySet_UpsertOne_UpdateBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+	require.NoError(t, core.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
 
-	doc, inserted, err := den.NewQuery[QueryProduct](db,
+	doc, inserted, err := core.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Existing"),
 	).UpsertOne(ctx,
 		&QueryProduct{Name: "should-not-apply", Price: 999}, // defaults ignored on hit
-		den.SetFields{"price": 11.0},
+		core.SetFields{"price": 11.0},
 	)
 	require.NoError(t, err)
 	assert.False(t, inserted)
@@ -987,7 +987,7 @@ func TestQuerySet_GetOrCreate_InsertBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.NewQuery[QueryProduct](db,
+	doc, inserted, err := core.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("New"),
 	).GetOrCreate(ctx, &QueryProduct{Name: "New", Price: 3})
 	require.NoError(t, err)
@@ -999,9 +999,9 @@ func TestQuerySet_GetOrCreate_FindBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+	require.NoError(t, core.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
 
-	doc, inserted, err := den.NewQuery[QueryProduct](db,
+	doc, inserted, err := core.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Existing"),
 	).GetOrCreate(ctx, &QueryProduct{Name: "should-not-apply", Price: 999})
 	require.NoError(t, err)
@@ -1016,17 +1016,17 @@ func TestQuerySet_BackLinks(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	houses := []*House{
-		{Name: "Cottage", Door: den.NewLink(door)},
-		{Name: "Manor", Door: den.NewLink(door)},
+		{Name: "Cottage", Door: core.NewLink(door)},
+		{Name: "Manor", Door: core.NewLink(door)},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, houses))
+	require.NoError(t, core.SaveAll(ctx, db, houses))
 
-	results, err := den.NewQuery[House](db).
+	results, err := core.NewQuery[House](db).
 		BackLinks("door", door.ID).
-		Sort("name", den.Asc).
+		Sort("name", core.Asc).
 		All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 2)

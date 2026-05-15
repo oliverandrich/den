@@ -1,17 +1,17 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type Door struct {
@@ -28,16 +28,16 @@ type Window struct {
 
 type House struct {
 	document.Base
-	Name    string             `json:"name"`
-	Door    den.Link[Door]     `json:"door"`
-	Windows []den.Link[Window] `json:"windows"`
+	Name    string              `json:"name"`
+	Door    core.Link[Door]     `json:"door"`
+	Windows []core.Link[Window] `json:"windows"`
 }
 
 func TestNewLink(t *testing.T) {
 	d := &Door{Height: 200, Width: 80}
 	d.ID = "door-1"
 
-	link := den.NewLink(d)
+	link := core.NewLink(d)
 	assert.Equal(t, "door-1", link.ID)
 	assert.Equal(t, d, link.Value)
 	assert.True(t, link.IsLoaded())
@@ -49,7 +49,7 @@ func TestNewLink(t *testing.T) {
 // This must not panic.
 func TestNewLink_EmptyIDAllowed(t *testing.T) {
 	d := &Door{Height: 200, Width: 80} // no ID set
-	link := den.NewLink(d)
+	link := core.NewLink(d)
 	assert.Empty(t, link.ID)
 	assert.Equal(t, d, link.Value)
 	assert.True(t, link.IsLoaded())
@@ -72,7 +72,7 @@ func TestNewLink_NestedEmbed(t *testing.T) {
 	d := &nestedBaseDoc{Name: "x"}
 	d.ID = "nested-1"
 
-	link := den.NewLink(d)
+	link := core.NewLink(d)
 	assert.Equal(t, "nested-1", link.ID,
 		"NewLink must find document.Base through nested embeds, not just top-level promotion")
 }
@@ -88,8 +88,8 @@ type noBaseDoc struct {
 func TestNewLink_PanicsWithoutBase(t *testing.T) {
 	d := &noBaseDoc{Name: "no-base"}
 	assert.PanicsWithValue(t,
-		"den: NewLink: type den_test.noBaseDoc does not embed document.Base",
-		func() { _ = den.NewLink(d) },
+		"den: NewLink: type core_test.noBaseDoc does not embed document.Base",
+		func() { _ = core.NewLink(d) },
 		"NewLink on a type without document.Base must fail loudly, not silently produce a broken Link",
 	)
 }
@@ -108,14 +108,14 @@ func TestNewLink_PanicsOnNamedBase(t *testing.T) {
 	d := &namedBaseDoc{Name: "named"}
 	d.Embedded.ID = "should-not-be-found"
 	assert.PanicsWithValue(t,
-		"den: NewLink: type den_test.namedBaseDoc does not embed document.Base",
-		func() { _ = den.NewLink(d) },
+		"den: NewLink: type core_test.namedBaseDoc does not embed document.Base",
+		func() { _ = core.NewLink(d) },
 		"a named document.Base field is not an embed — extractBaseID and AnalyzeStruct must agree on this",
 	)
 }
 
 func TestLink_ZeroValue(t *testing.T) {
-	var link den.Link[Door]
+	var link core.Link[Door]
 	assert.Empty(t, link.ID)
 	assert.Nil(t, link.Value)
 	assert.False(t, link.IsLoaded())
@@ -126,22 +126,22 @@ func TestLink_Serialization(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	w1 := &Window{X: 100, Y: 50}
 	w2 := &Window{X: 200, Y: 50}
-	require.NoError(t, den.Save(ctx, db, w1))
-	require.NoError(t, den.Save(ctx, db, w2))
+	require.NoError(t, core.Save(ctx, db, w1))
+	require.NoError(t, core.Save(ctx, db, w2))
 
 	house := &House{
 		Name:    "Lakehouse",
-		Door:    den.NewLink(door),
-		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+		Door:    core.NewLink(door),
+		Windows: []core.Link[Window]{core.NewLink(w1), core.NewLink(w2)},
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
 	// Retrieve — links should contain only IDs (lazy by default)
-	found, err := den.FindByID[House](ctx, db, house.ID)
+	found, err := core.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
 	assert.Equal(t, door.ID, found.Door.ID)
 	assert.Nil(t, found.Door.Value, "lazy load should not resolve value")
@@ -156,19 +156,19 @@ func TestFetchLink(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Cottage",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	found, err := den.FindByID[House](ctx, db, house.ID)
+	found, err := core.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
 	assert.False(t, found.Door.IsLoaded())
 
-	require.NoError(t, den.FetchLink(ctx, db, found, "door"))
+	require.NoError(t, core.FetchLink(ctx, db, found, "door"))
 	assert.True(t, found.Door.IsLoaded())
 	require.NotNil(t, found.Door.Value)
 	assert.Equal(t, 200, found.Door.Value.Height)
@@ -186,9 +186,9 @@ type EagerOwner struct {
 
 type EagerHouse struct {
 	document.Base
-	Name  string               `json:"name"`
-	Door  den.Link[Door]       `json:"door"  den:"eager"`
-	Owner den.Link[EagerOwner] `json:"owner"`
+	Name  string                `json:"name"`
+	Door  core.Link[Door]       `json:"door"  den:"eager"`
+	Owner core.Link[EagerOwner] `json:"owner"`
 }
 
 // TestEagerLink_DefaultHydratesEagerField pins the new default mode:
@@ -199,18 +199,18 @@ func TestEagerLink_DefaultHydratesEagerField(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Alice"}
-	require.NoError(t, den.Save(ctx, db, owner))
+	require.NoError(t, core.Save(ctx, db, owner))
 
 	h := &EagerHouse{
 		Name:  "EagerCottage",
-		Door:  den.NewLink(door),
-		Owner: den.NewLink(owner),
+		Door:  core.NewLink(door),
+		Owner: core.NewLink(owner),
 	}
-	require.NoError(t, den.Save(ctx, db, h))
+	require.NoError(t, core.Save(ctx, db, h))
 
-	results, err := den.NewQuery[EagerHouse](db).All(ctx)
+	results, err := core.NewQuery[EagerHouse](db).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	got := results[0]
@@ -233,14 +233,14 @@ func TestEagerLink_WithFetchLinksHydratesEverything(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Bob"}
-	require.NoError(t, den.Save(ctx, db, owner))
-	require.NoError(t, den.Save(ctx, db, &EagerHouse{
-		Name: "FullCottage", Door: den.NewLink(door), Owner: den.NewLink(owner),
+	require.NoError(t, core.Save(ctx, db, owner))
+	require.NoError(t, core.Save(ctx, db, &EagerHouse{
+		Name: "FullCottage", Door: core.NewLink(door), Owner: core.NewLink(owner),
 	}))
 
-	results, err := den.NewQuery[EagerHouse](db).WithFetchLinks().All(ctx)
+	results, err := core.NewQuery[EagerHouse](db).WithFetchLinks().All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	got := results[0]
@@ -258,12 +258,12 @@ func TestEagerLink_WithoutFetchLinksSuppressesEager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
-	require.NoError(t, den.Save(ctx, db, &EagerHouse{
-		Name: "Bare", Door: den.NewLink(door),
+	require.NoError(t, core.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, &EagerHouse{
+		Name: "Bare", Door: core.NewLink(door),
 	}))
 
-	results, err := den.NewQuery[EagerHouse](db).WithoutFetchLinks().All(ctx)
+	results, err := core.NewQuery[EagerHouse](db).WithoutFetchLinks().All(ctx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	got := results[0]
@@ -281,12 +281,12 @@ func TestEagerLink_IterRespectsEager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
-	require.NoError(t, den.Save(ctx, db, &EagerHouse{
-		Name: "IterCottage", Door: den.NewLink(door),
+	require.NoError(t, core.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, &EagerHouse{
+		Name: "IterCottage", Door: core.NewLink(door),
 	}))
 
-	for got, err := range den.NewQuery[EagerHouse](db).Iter(ctx) {
+	for got, err := range core.NewQuery[EagerHouse](db).Iter(ctx) {
 		require.NoError(t, err)
 		assert.True(t, got.Door.IsLoaded(),
 			"Iter must hydrate eager-tagged links per row")
@@ -300,8 +300,8 @@ func TestEagerLink_IterRespectsEager(t *testing.T) {
 // predicate as the scalar case.
 type EagerSliceHouse struct {
 	document.Base
-	Name    string             `json:"name"`
-	Windows []den.Link[Window] `json:"windows" den:"eager"`
+	Name    string              `json:"name"`
+	Windows []core.Link[Window] `json:"windows" den:"eager"`
 }
 
 // TestEagerLink_SliceField pins that the slice-link path hydrates an
@@ -313,15 +313,15 @@ func TestEagerLink_SliceField(t *testing.T) {
 
 	w1 := &Window{X: 100, Y: 50}
 	w2 := &Window{X: 200, Y: 60}
-	require.NoError(t, den.Save(ctx, db, w1))
-	require.NoError(t, den.Save(ctx, db, w2))
+	require.NoError(t, core.Save(ctx, db, w1))
+	require.NoError(t, core.Save(ctx, db, w2))
 	h := &EagerSliceHouse{
 		Name:    "SlicedCottage",
-		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+		Windows: []core.Link[Window]{core.NewLink(w1), core.NewLink(w2)},
 	}
-	require.NoError(t, den.Save(ctx, db, h))
+	require.NoError(t, core.Save(ctx, db, h))
 
-	got, err := den.FindByID[EagerSliceHouse](ctx, db, h.ID)
+	got, err := core.FindByID[EagerSliceHouse](ctx, db, h.ID)
 	require.NoError(t, err)
 	require.Len(t, got.Windows, 2)
 	for i, link := range got.Windows {
@@ -340,13 +340,13 @@ type EagerInner struct {
 
 type EagerMiddle struct {
 	document.Base
-	Inner den.Link[EagerInner] `json:"inner" den:"eager"`
+	Inner core.Link[EagerInner] `json:"inner" den:"eager"`
 }
 
 type EagerOuter struct {
 	document.Base
-	Note   string                `json:"note"`
-	Middle den.Link[EagerMiddle] `json:"middle" den:"eager"`
+	Note   string                 `json:"note"`
+	Middle core.Link[EagerMiddle] `json:"middle" den:"eager"`
 }
 
 // TestEagerLink_NestedDepth pins the depth contract for recursive eager
@@ -359,14 +359,14 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 	ctx := context.Background()
 
 	inner := &EagerInner{Label: "leaf"}
-	require.NoError(t, den.Save(ctx, db, inner))
-	mid := &EagerMiddle{Inner: den.NewLink(inner)}
-	require.NoError(t, den.Save(ctx, db, mid))
-	outer := &EagerOuter{Middle: den.NewLink(mid)}
-	require.NoError(t, den.Save(ctx, db, outer))
+	require.NoError(t, core.Save(ctx, db, inner))
+	mid := &EagerMiddle{Inner: core.NewLink(inner)}
+	require.NoError(t, core.Save(ctx, db, mid))
+	outer := &EagerOuter{Middle: core.NewLink(mid)}
+	require.NoError(t, core.Save(ctx, db, outer))
 
 	t.Run("All recurses through nested eager under default depth", func(t *testing.T) {
-		results, err := den.NewQuery[EagerOuter](db,
+		results, err := core.NewQuery[EagerOuter](db,
 			where.Field("_id").Eq(outer.ID),
 		).All(ctx)
 		require.NoError(t, err)
@@ -379,7 +379,7 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 	})
 
 	t.Run("All with WithNestingDepth(1) caps at first level", func(t *testing.T) {
-		results, err := den.NewQuery[EagerOuter](db,
+		results, err := core.NewQuery[EagerOuter](db,
 			where.Field("_id").Eq(outer.ID),
 		).WithNestingDepth(1).All(ctx)
 		require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 	})
 
 	t.Run("FindByID recurses uniformly with the batched terminals", func(t *testing.T) {
-		got, err := den.FindByID[EagerOuter](ctx, db, outer.ID)
+		got, err := core.FindByID[EagerOuter](ctx, db, outer.ID)
 		require.NoError(t, err)
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
@@ -412,15 +412,15 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	ctx := context.Background()
 
 	inner := &EagerInner{Label: "leaf"}
-	require.NoError(t, den.Save(ctx, db, inner))
-	mid := &EagerMiddle{Inner: den.NewLink(inner)}
-	require.NoError(t, den.Save(ctx, db, mid))
-	outer := &EagerOuter{Note: "initial", Middle: den.NewLink(mid)}
-	require.NoError(t, den.Save(ctx, db, outer))
+	require.NoError(t, core.Save(ctx, db, inner))
+	mid := &EagerMiddle{Inner: core.NewLink(inner)}
+	require.NoError(t, core.Save(ctx, db, mid))
+	outer := &EagerOuter{Note: "initial", Middle: core.NewLink(mid)}
+	require.NoError(t, core.Save(ctx, db, outer))
 
 	t.Run("Iter recurses with WithNestingDepth(2)", func(t *testing.T) {
 		var got *EagerOuter
-		for doc, err := range den.NewQuery[EagerOuter](db,
+		for doc, err := range core.NewQuery[EagerOuter](db,
 			where.Field("_id").Eq(outer.ID),
 		).WithFetchLinks().WithNestingDepth(2).Iter(ctx) {
 			require.NoError(t, err)
@@ -436,7 +436,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	t.Run("Refresh recurses up to defaultNestingDepth", func(t *testing.T) {
 		doc := &EagerOuter{}
 		doc.ID = outer.ID
-		require.NoError(t, den.Refresh(ctx, db, doc))
+		require.NoError(t, core.Refresh(ctx, db, doc))
 		require.True(t, doc.Middle.IsLoaded(), "first eager level fires on Refresh")
 		require.NotNil(t, doc.Middle.Value)
 		assert.True(t, doc.Middle.Value.Inner.IsLoaded(),
@@ -444,7 +444,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	})
 
 	t.Run("FindOneAndUpdate recurses", func(t *testing.T) {
-		got, err := den.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpdateOne(ctx, den.SetFields{"note": "after-update"})
+		got, err := core.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpdateOne(ctx, core.SetFields{"note": "after-update"})
 		require.NoError(t, err)
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
@@ -453,7 +453,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	})
 
 	t.Run("FindOneAndUpsert update branch recurses", func(t *testing.T) {
-		got, inserted, err := den.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpsertOne(ctx, &EagerOuter{Note: "should-not-apply"}, den.SetFields{"note": "via-upsert"})
+		got, inserted, err := core.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpsertOne(ctx, &EagerOuter{Note: "should-not-apply"}, core.SetFields{"note": "via-upsert"})
 		require.NoError(t, err)
 		require.False(t, inserted, "row exists — must take update branch")
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
@@ -464,19 +464,19 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 
 	t.Run("FindOneAndUpsert insert branch recurses", func(t *testing.T) {
 		freshInner := &EagerInner{Label: "leaf-2"}
-		require.NoError(t, den.Save(ctx, db, freshInner))
-		freshMid := &EagerMiddle{Inner: den.NewLink(freshInner)}
-		require.NoError(t, den.Save(ctx, db, freshMid))
+		require.NoError(t, core.Save(ctx, db, freshInner))
+		freshMid := &EagerMiddle{Inner: core.NewLink(freshInner)}
+		require.NoError(t, core.Save(ctx, db, freshMid))
 
-		// Construct the link by ID only — den.NewLink(freshMid) would carry
+		// Construct the link by ID only — core.NewLink(freshMid) would carry
 		// freshMid.Inner's pre-loaded state into the defaults and mask what
 		// the system actually hydrates post-insert.
 		defaults := &EagerOuter{
 			Note:   "fresh",
-			Middle: den.Link[EagerMiddle]{ID: freshMid.ID},
+			Middle: core.Link[EagerMiddle]{ID: freshMid.ID},
 		}
 
-		got, inserted, err := den.NewQuery[EagerOuter](db, where.Field("note").Eq("does-not-exist-yet")).UpsertOne(ctx, defaults, den.SetFields{})
+		got, inserted, err := core.NewQuery[EagerOuter](db, where.Field("note").Eq("does-not-exist-yet")).UpsertOne(ctx, defaults, core.SetFields{})
 		require.NoError(t, err)
 		require.True(t, inserted, "no match — must take insert branch")
 		require.True(t, got.Middle.IsLoaded())
@@ -497,8 +497,8 @@ type SoftDeletableTarget struct {
 
 type HouseWithSoftLink struct {
 	document.Base
-	Name string                        `json:"name"`
-	Ref  den.Link[SoftDeletableTarget] `json:"ref" den:"eager"`
+	Name string                         `json:"name"`
+	Ref  core.Link[SoftDeletableTarget] `json:"ref" den:"eager"`
 }
 
 // TestEagerLink_SoftDeletedTarget pins the actual behavior for an eager
@@ -513,13 +513,13 @@ func TestEagerLink_SoftDeletedTarget(t *testing.T) {
 	ctx := context.Background()
 
 	target := &SoftDeletableTarget{Name: "doomed"}
-	require.NoError(t, den.Save(ctx, db, target))
-	h := &HouseWithSoftLink{Name: "House", Ref: den.NewLink(target)}
-	require.NoError(t, den.Save(ctx, db, h))
+	require.NoError(t, core.Save(ctx, db, target))
+	h := &HouseWithSoftLink{Name: "House", Ref: core.NewLink(target)}
+	require.NoError(t, core.Save(ctx, db, h))
 
-	require.NoError(t, den.Delete(ctx, db, target))
+	require.NoError(t, core.Delete(ctx, db, target))
 
-	got, err := den.FindByID[HouseWithSoftLink](ctx, db, h.ID)
+	got, err := core.FindByID[HouseWithSoftLink](ctx, db, h.ID)
 	require.NoError(t, err, "the holder is fine; only the target was soft-deleted")
 	assert.Equal(t, target.ID, got.Ref.ID, "ID survives even when target is soft-deleted")
 	assert.True(t, got.Ref.IsLoaded(),
@@ -540,16 +540,16 @@ func TestFetchLinkField(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	house := &House{Name: "Cottage", Door: den.NewLink(door)}
-	require.NoError(t, den.Save(ctx, db, house))
+	house := &House{Name: "Cottage", Door: core.NewLink(door)}
+	require.NoError(t, core.Save(ctx, db, house))
 
-	found, err := den.FindByID[House](ctx, db, house.ID)
+	found, err := core.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
 	assert.False(t, found.Door.IsLoaded(), "Link should start unloaded after FindByID")
 
-	require.NoError(t, den.FetchLinkField(ctx, db, &found.Door))
+	require.NoError(t, core.FetchLinkField(ctx, db, &found.Door))
 	assert.True(t, found.Door.IsLoaded())
 	require.NotNil(t, found.Door.Value)
 	assert.Equal(t, 200, found.Door.Value.Height)
@@ -562,11 +562,11 @@ func TestFetchLinkField_AlreadyLoaded(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	link := den.NewLink(door) // Loaded=true, Value=door
+	link := core.NewLink(door) // Loaded=true, Value=door
 	require.True(t, link.IsLoaded())
-	require.NoError(t, den.FetchLinkField(ctx, db, &link))
+	require.NoError(t, core.FetchLinkField(ctx, db, &link))
 	assert.Same(t, door, link.Value, "FetchLinkField on a loaded Link must not replace Value")
 }
 
@@ -576,8 +576,8 @@ func TestFetchLinkField_EmptyID(t *testing.T) {
 	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
 	ctx := context.Background()
 
-	var link den.Link[Door]
-	require.NoError(t, den.FetchLinkField(ctx, db, &link))
+	var link core.Link[Door]
+	require.NoError(t, core.FetchLinkField(ctx, db, &link))
 	assert.False(t, link.IsLoaded())
 	assert.Nil(t, link.Value)
 }
@@ -588,19 +588,19 @@ func TestFetchLink_SliceLink(t *testing.T) {
 
 	w1 := &Window{X: 10, Y: 20}
 	w2 := &Window{X: 30, Y: 40}
-	require.NoError(t, den.Save(ctx, db, w1))
-	require.NoError(t, den.Save(ctx, db, w2))
+	require.NoError(t, core.Save(ctx, db, w1))
+	require.NoError(t, core.Save(ctx, db, w2))
 
 	house := &House{
 		Name:    "Villa",
-		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+		Windows: []core.Link[Window]{core.NewLink(w1), core.NewLink(w2)},
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	found, err := den.FindByID[House](ctx, db, house.ID)
+	found, err := core.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, den.FetchLink(ctx, db, found, "windows"))
+	require.NoError(t, core.FetchLink(ctx, db, found, "windows"))
 	require.Len(t, found.Windows, 2)
 	assert.True(t, found.Windows[0].IsLoaded())
 	assert.True(t, found.Windows[1].IsLoaded())
@@ -611,9 +611,9 @@ func TestFetchLink_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	house := &House{Name: "Empty"}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	err := den.FetchLink(ctx, db, house, "nonexistent")
+	err := core.FetchLink(ctx, db, house, "nonexistent")
 	require.Error(t, err)
 }
 
@@ -623,20 +623,20 @@ func TestFetchAllLinks(t *testing.T) {
 
 	door := &Door{Height: 200, Width: 80}
 	w1 := &Window{X: 10, Y: 20}
-	require.NoError(t, den.Save(ctx, db, door))
-	require.NoError(t, den.Save(ctx, db, w1))
+	require.NoError(t, core.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, w1))
 
 	house := &House{
 		Name:    "Villa",
-		Door:    den.NewLink(door),
-		Windows: []den.Link[Window]{den.NewLink(w1)},
+		Door:    core.NewLink(door),
+		Windows: []core.Link[Window]{core.NewLink(w1)},
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	found, err := den.FindByID[House](ctx, db, house.ID)
+	found, err := core.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
 
-	require.NoError(t, den.FetchAllLinks(ctx, db, found))
+	require.NoError(t, core.FetchAllLinks(ctx, db, found))
 	assert.True(t, found.Door.IsLoaded())
 	assert.Equal(t, 200, found.Door.Value.Height)
 	require.Len(t, found.Windows, 1)
@@ -657,18 +657,18 @@ func TestFetchAllLinks_SingleLevel(t *testing.T) {
 	ctx := context.Background()
 
 	leaf := &NestLeaf{Label: "leaf"}
-	require.NoError(t, den.Save(ctx, db, leaf))
-	mid := &NestMid{Leaf: den.NewLink(leaf)}
-	require.NoError(t, den.Save(ctx, db, mid))
-	root := &NestRoot{Mid: den.NewLink(mid)}
-	require.NoError(t, den.Save(ctx, db, root))
+	require.NoError(t, core.Save(ctx, db, leaf))
+	mid := &NestMid{Leaf: core.NewLink(leaf)}
+	require.NoError(t, core.Save(ctx, db, mid))
+	root := &NestRoot{Mid: core.NewLink(mid)}
+	require.NoError(t, core.Save(ctx, db, root))
 
-	found, err := den.FindByID[NestRoot](ctx, db, root.ID)
+	found, err := core.FindByID[NestRoot](ctx, db, root.ID)
 	require.NoError(t, err)
 	require.False(t, found.Mid.IsLoaded(),
 		"baseline: non-eager link must not be auto-hydrated by FindByID")
 
-	require.NoError(t, den.FetchAllLinks(ctx, db, found))
+	require.NoError(t, core.FetchAllLinks(ctx, db, found))
 	require.True(t, found.Mid.IsLoaded(), "FetchAllLinks loads the direct link")
 	require.NotNil(t, found.Mid.Value)
 	assert.False(t, found.Mid.Value.Leaf.IsLoaded(),
@@ -680,15 +680,15 @@ func TestWithFetchLinks_Eager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Bungalow",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	results, err := den.NewQuery[House](db,
+	results, err := core.NewQuery[House](db,
 		where.Field("name").Eq("Bungalow"),
 	).WithFetchLinks().All(ctx)
 	require.NoError(t, err)
@@ -708,17 +708,17 @@ func TestWithFetchLinks_BatchDedup(t *testing.T) {
 
 	door1 := &Door{Height: 200, Width: 80}
 	door2 := &Door{Height: 210, Width: 85}
-	require.NoError(t, den.Save(ctx, db, door1))
-	require.NoError(t, den.Save(ctx, db, door2))
+	require.NoError(t, core.Save(ctx, db, door1))
+	require.NoError(t, core.Save(ctx, db, door2))
 
-	cabinA := &House{Name: "BatchA", Door: den.NewLink(door1)}
-	cabinB := &House{Name: "BatchB", Door: den.NewLink(door2)}
-	cabinC := &House{Name: "BatchC", Door: den.NewLink(door1)}
-	require.NoError(t, den.SaveAll(ctx, db, []*House{cabinA, cabinB, cabinC}))
+	cabinA := &House{Name: "BatchA", Door: core.NewLink(door1)}
+	cabinB := &House{Name: "BatchB", Door: core.NewLink(door2)}
+	cabinC := &House{Name: "BatchC", Door: core.NewLink(door1)}
+	require.NoError(t, core.SaveAll(ctx, db, []*House{cabinA, cabinB, cabinC}))
 
-	results, err := den.NewQuery[House](db).
+	results, err := core.NewQuery[House](db).
 		Where(where.Field("name").In("BatchA", "BatchB", "BatchC")).
-		Sort("name", den.Asc).
+		Sort("name", core.Asc).
 		WithFetchLinks().
 		All(ctx)
 	require.NoError(t, err)
@@ -743,22 +743,22 @@ func TestWithFetchLinks_SliceField(t *testing.T) {
 
 	w1 := &Window{X: 1, Y: 1}
 	w2 := &Window{X: 2, Y: 2}
-	require.NoError(t, den.Save(ctx, db, w1))
-	require.NoError(t, den.Save(ctx, db, w2))
+	require.NoError(t, core.Save(ctx, db, w1))
+	require.NoError(t, core.Save(ctx, db, w2))
 
 	house1 := &House{
 		Name:    "SliceA",
-		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
+		Windows: []core.Link[Window]{core.NewLink(w1), core.NewLink(w2)},
 	}
 	house2 := &House{
 		Name:    "SliceB",
-		Windows: []den.Link[Window]{den.NewLink(w1)}, // shares w1 with house1
+		Windows: []core.Link[Window]{core.NewLink(w1)}, // shares w1 with house1
 	}
-	require.NoError(t, den.SaveAll(ctx, db, []*House{house1, house2}))
+	require.NoError(t, core.SaveAll(ctx, db, []*House{house1, house2}))
 
-	results, err := den.NewQuery[House](db).
+	results, err := core.NewQuery[House](db).
 		Where(where.Field("name").In("SliceA", "SliceB")).
-		Sort("name", den.Asc).
+		Sort("name", core.Asc).
 		WithFetchLinks().
 		All(ctx)
 	require.NoError(t, err)
@@ -782,14 +782,14 @@ type NestLeaf struct {
 
 type NestMid struct {
 	document.Base
-	Tag  string             `json:"tag"`
-	Leaf den.Link[NestLeaf] `json:"leaf"`
+	Tag  string              `json:"tag"`
+	Leaf core.Link[NestLeaf] `json:"leaf"`
 }
 
 type NestRoot struct {
 	document.Base
-	Name string            `json:"name"`
-	Mid  den.Link[NestMid] `json:"mid"`
+	Name string             `json:"name"`
+	Mid  core.Link[NestMid] `json:"mid"`
 }
 
 func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
@@ -804,19 +804,19 @@ func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	good := &House{Name: "Good", Door: den.NewLink(door)}
-	bad := &House{Name: "Dangling", Door: den.Link[Door]{ID: "does-not-exist"}}
-	require.NoError(t, den.SaveAll(ctx, db, []*House{good, bad}))
+	good := &House{Name: "Good", Door: core.NewLink(door)}
+	bad := &House{Name: "Dangling", Door: core.Link[Door]{ID: "does-not-exist"}}
+	require.NoError(t, core.SaveAll(ctx, db, []*House{good, bad}))
 
-	_, err := den.NewQuery[House](db).
+	_, err := core.NewQuery[House](db).
 		Where(where.Field("name").In("Good", "Dangling")).
 		WithFetchLinks().
 		All(ctx)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	require.ErrorIs(t, err, core.ErrNotFound)
 
-	var dle *den.DanglingLinkError
+	var dle *core.DanglingLinkError
 	require.ErrorAs(t, err, &dle, "must surface as the typed *DanglingLinkError")
 	assert.Equal(t, "door", dle.Collection)
 	assert.Equal(t, "does-not-exist", dle.ID)
@@ -827,15 +827,15 @@ func TestWithFetchLinks_NestedDepthTwo(t *testing.T) {
 	ctx := context.Background()
 
 	leaf := &NestLeaf{Label: "bottom"}
-	require.NoError(t, den.Save(ctx, db, leaf))
+	require.NoError(t, core.Save(ctx, db, leaf))
 
-	mid := &NestMid{Tag: "middle", Leaf: den.NewLink(leaf)}
-	require.NoError(t, den.Save(ctx, db, mid))
+	mid := &NestMid{Tag: "middle", Leaf: core.NewLink(leaf)}
+	require.NoError(t, core.Save(ctx, db, mid))
 
-	root := &NestRoot{Name: "top", Mid: den.NewLink(mid)}
-	require.NoError(t, den.Save(ctx, db, root))
+	root := &NestRoot{Name: "top", Mid: core.NewLink(mid)}
+	require.NoError(t, core.Save(ctx, db, root))
 
-	results, err := den.NewQuery[NestRoot](db).
+	results, err := core.NewQuery[NestRoot](db).
 		Where(where.Field("name").Eq("top")).
 		WithFetchLinks().
 		WithNestingDepth(2).
@@ -858,16 +858,16 @@ func TestWithLinkRule_Write(t *testing.T) {
 	door := &Door{Height: 300, Width: 100}
 	house := &House{
 		Name: "Mansion",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
 
 	// Door has no ID yet — LinkWrite should cascade insert
-	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, core.Save(ctx, db, house, core.WithLinkRule(core.LinkWrite)))
 
 	assert.NotEmpty(t, door.ID, "door should have been inserted")
 
 	// Verify door was persisted
-	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
+	foundDoor, err := core.FindByID[Door](ctx, db, door.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 300, foundDoor.Height)
 }
@@ -879,12 +879,12 @@ func TestWithLinkRule_Write_TransactionRollback(t *testing.T) {
 	door := &Door{Height: 200, Width: 80}
 	house := &House{
 		Name: "TxCascade",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
 
 	// Insert with cascade inside a transaction that rolls back
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.Save(ctx, tx, house, den.WithLinkRule(den.LinkWrite)); err != nil {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		if err := core.Save(ctx, tx, house, core.WithLinkRule(core.LinkWrite)); err != nil {
 			return err
 		}
 		return errors.New("force rollback")
@@ -892,12 +892,12 @@ func TestWithLinkRule_Write_TransactionRollback(t *testing.T) {
 	require.Error(t, err)
 
 	// Neither house nor door should exist after rollback
-	_, err = den.FindByID[House](ctx, db, house.ID)
-	require.ErrorIs(t, err, den.ErrNotFound, "house should not exist after rollback")
+	_, err = core.FindByID[House](ctx, db, house.ID)
+	require.ErrorIs(t, err, core.ErrNotFound, "house should not exist after rollback")
 
 	if door.ID != "" {
-		_, err = den.FindByID[Door](ctx, db, door.ID)
-		require.ErrorIs(t, err, den.ErrNotFound, "cascaded door should not exist after rollback")
+		_, err = core.FindByID[Door](ctx, db, door.ID)
+		require.ErrorIs(t, err, core.ErrNotFound, "cascaded door should not exist after rollback")
 	}
 }
 
@@ -908,12 +908,12 @@ func TestWithLinkRule_Write_SetsTimestamps(t *testing.T) {
 	door := &Door{Height: 200, Width: 80}
 	house := &House{
 		Name: "Timestamps",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, core.Save(ctx, db, house, core.WithLinkRule(core.LinkWrite)))
 
 	// Linked door should have timestamps set
-	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
+	foundDoor, err := core.FindByID[Door](ctx, db, door.ID)
 	require.NoError(t, err)
 	assert.False(t, foundDoor.CreatedAt.IsZero(), "cascade-written doc should have CreatedAt")
 	assert.False(t, foundDoor.UpdatedAt.IsZero(), "cascade-written doc should have UpdatedAt")
@@ -940,8 +940,8 @@ func (d *InsertHookedPart) AfterInsert(_ context.Context) error {
 
 type InsertHookedAssembly struct {
 	document.Base
-	Name string                     `json:"name"`
-	Part den.Link[InsertHookedPart] `json:"part"`
+	Name string                      `json:"name"`
+	Part core.Link[InsertHookedPart] `json:"part"`
 }
 
 func TestWithLinkRule_Write_RunsInsertHooks(t *testing.T) {
@@ -951,13 +951,13 @@ func TestWithLinkRule_Write_RunsInsertHooks(t *testing.T) {
 	part := &InsertHookedPart{Label: "Engine"}
 	assembly := &InsertHookedAssembly{
 		Name: "Car",
-		Part: den.NewLink(part),
+		Part: core.NewLink(part),
 	}
 
 	insertHookedPartBeforeInsertCalled = false
 	insertHookedPartAfterInsertCalled = false
 
-	require.NoError(t, den.Save(ctx, db, assembly, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, core.Save(ctx, db, assembly, core.WithLinkRule(core.LinkWrite)))
 
 	assert.True(t, insertHookedPartBeforeInsertCalled, "BeforeInsert should fire on cascade-written linked part")
 	assert.True(t, insertHookedPartAfterInsertCalled, "AfterInsert should fire on cascade-written linked part")
@@ -968,23 +968,23 @@ func TestWithLinkRule_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Demolish",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, house, core.WithLinkRule(core.LinkDelete)))
 
 	// House gone
-	_, err := den.FindByID[House](ctx, db, house.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[House](ctx, db, house.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 
 	// Door also gone
-	_, err = den.FindByID[Door](ctx, db, door.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err = core.FindByID[Door](ctx, db, door.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestWithNestingDepth(t *testing.T) {
@@ -992,12 +992,12 @@ func TestWithNestingDepth(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	house := &House{Name: "Depth", Door: den.NewLink(door)}
-	require.NoError(t, den.Save(ctx, db, house))
+	house := &House{Name: "Depth", Door: core.NewLink(door)}
+	require.NoError(t, core.Save(ctx, db, house))
 
-	results, err := den.NewQuery[House](db,
+	results, err := core.NewQuery[House](db,
 		where.Field("name").Eq("Depth"),
 	).WithFetchLinks().WithNestingDepth(1).All(ctx)
 	require.NoError(t, err)
@@ -1006,7 +1006,7 @@ func TestWithNestingDepth(t *testing.T) {
 }
 
 func TestLink_MarshalJSON(t *testing.T) {
-	link := den.NewLink(&Door{})
+	link := core.NewLink(&Door{})
 	link.ID = "door-1"
 
 	data, err := link.MarshalJSON()
@@ -1015,7 +1015,7 @@ func TestLink_MarshalJSON(t *testing.T) {
 }
 
 func TestLink_UnmarshalJSON(t *testing.T) {
-	var link den.Link[Door]
+	var link core.Link[Door]
 	err := link.UnmarshalJSON([]byte(`"door-42"`))
 	require.NoError(t, err)
 	assert.Equal(t, "door-42", link.ID)
@@ -1032,8 +1032,8 @@ type SoftDoor struct {
 
 type SoftHouse struct {
 	document.Base
-	Name string             `json:"name"`
-	Door den.Link[SoftDoor] `json:"door"`
+	Name string              `json:"name"`
+	Door core.Link[SoftDoor] `json:"door"`
 }
 
 func TestWithLinkRule_Delete_SoftDeleteLinked(t *testing.T) {
@@ -1041,23 +1041,23 @@ func TestWithLinkRule_Delete_SoftDeleteLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftDoor{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &SoftHouse{
 		Name: "SoftCascade",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
 	// Cascade delete should soft-delete the linked door, not hard-delete it
-	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, house, core.WithLinkRule(core.LinkDelete)))
 
 	// House is hard-deleted (no SoftDelete embed)
-	_, err := den.FindByID[SoftHouse](ctx, db, house.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[SoftHouse](ctx, db, house.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 
 	// Door should still exist but be soft-deleted
-	found, err := den.FindByID[SoftDoor](ctx, db, door.ID)
+	found, err := core.FindByID[SoftDoor](ctx, db, door.ID)
 	require.NoError(t, err)
 	assert.True(t, found.IsDeleted(), "linked door should be soft-deleted, not hard-deleted")
 }
@@ -1083,8 +1083,8 @@ func (d *HookedPart) AfterDelete(_ context.Context) error {
 
 type HookedAssembly struct {
 	document.Base
-	Name string               `json:"name"`
-	Part den.Link[HookedPart] `json:"part"`
+	Name string                `json:"name"`
+	Part core.Link[HookedPart] `json:"part"`
 }
 
 func TestWithLinkRule_Delete_HooksOnLinked(t *testing.T) {
@@ -1092,22 +1092,22 @@ func TestWithLinkRule_Delete_HooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	part := &HookedPart{Label: "Motor"}
-	require.NoError(t, den.Save(ctx, db, part))
+	require.NoError(t, core.Save(ctx, db, part))
 
 	assembly := &HookedAssembly{
 		Name: "Machine",
-		Part: den.NewLink(part),
+		Part: core.NewLink(part),
 	}
-	require.NoError(t, den.Save(ctx, db, assembly))
+	require.NoError(t, core.Save(ctx, db, assembly))
 
 	hookedPartBeforeDeleteCalled = false
 	hookedPartAfterDeleteCalled = false
 
-	require.NoError(t, den.Delete(ctx, db, assembly, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, assembly, core.WithLinkRule(core.LinkDelete)))
 
 	// Part is hard-deleted
-	_, err := den.FindByID[HookedPart](ctx, db, part.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[HookedPart](ctx, db, part.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 
 	// Hooks fired on the linked document
 	assert.True(t, hookedPartBeforeDeleteCalled, "BeforeDelete should fire on cascaded linked part")
@@ -1138,8 +1138,8 @@ func (d *SoftHookedDoor) AfterSoftDelete(_ context.Context) error {
 
 type SoftHookedHouse struct {
 	document.Base
-	Name string                   `json:"name"`
-	Door den.Link[SoftHookedDoor] `json:"door"`
+	Name string                    `json:"name"`
+	Door core.Link[SoftHookedDoor] `json:"door"`
 }
 
 func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
@@ -1147,15 +1147,15 @@ func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftHookedDoor{Label: "Main"}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	house := &SoftHookedHouse{Name: "H", Door: den.NewLink(door)}
-	require.NoError(t, den.Save(ctx, db, house))
+	house := &SoftHookedHouse{Name: "H", Door: core.NewLink(door)}
+	require.NoError(t, core.Save(ctx, db, house))
 
 	softHookedBeforeSoftDeleteCalled = false
 	softHookedAfterSoftDeleteCalled = false
 
-	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, house, core.WithLinkRule(core.LinkDelete)))
 
 	assert.True(t, softHookedBeforeSoftDeleteCalled, "BeforeSoftDelete must fire on cascade soft-deleted linked doc")
 	assert.True(t, softHookedAfterSoftDeleteCalled, "AfterSoftDelete must fire on cascade soft-deleted linked doc")
@@ -1167,7 +1167,7 @@ func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
 // document.SoftDelete remained as soft-deleted ghost rows. Both backends
 // share the cascade code, so a single parity test pins both ends.
 func TestParity_WithLinkRule_HardDelete_CascadeHardDeletesSoftLinked(t *testing.T) {
-	dbs := map[string]*den.DB{
+	dbs := map[string]*core.DB{
 		"sqlite":   dentest.MustOpen(t, &SoftDoor{}, &SoftHouse{}),
 		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &SoftDoor{}, &SoftHouse{}),
 	}
@@ -1177,22 +1177,22 @@ func TestParity_WithLinkRule_HardDelete_CascadeHardDeletesSoftLinked(t *testing.
 			ctx := context.Background()
 
 			door := &SoftDoor{Height: 200, Width: 80}
-			require.NoError(t, den.Save(ctx, db, door))
+			require.NoError(t, core.Save(ctx, db, door))
 
-			house := &SoftHouse{Name: "HardCascade", Door: den.NewLink(door)}
-			require.NoError(t, den.Save(ctx, db, house))
+			house := &SoftHouse{Name: "HardCascade", Door: core.NewLink(door)}
+			require.NoError(t, core.Save(ctx, db, house))
 
-			require.NoError(t, den.Delete(ctx, db, house,
-				den.HardDelete(),
-				den.WithLinkRule(den.LinkDelete),
+			require.NoError(t, core.Delete(ctx, db, house,
+				core.HardDelete(),
+				core.WithLinkRule(core.LinkDelete),
 			))
 
 			// House gone (it has no SoftDelete embed, hard always anyway).
-			_, err := den.FindByID[SoftHouse](ctx, db, house.ID)
-			require.ErrorIs(t, err, den.ErrNotFound)
+			_, err := core.FindByID[SoftHouse](ctx, db, house.ID)
+			require.ErrorIs(t, err, core.ErrNotFound)
 
 			// Door must be physically gone — not findable even with IncludeDeleted.
-			results, err := den.NewQuery[SoftDoor](db).IncludeDeleted().All(ctx)
+			results, err := core.NewQuery[SoftDoor](db).IncludeDeleted().All(ctx)
 			require.NoError(t, err)
 			assert.Empty(t, results,
 				"linked SoftDoor should be hard-deleted; IncludeDeleted must not return it")
@@ -1238,8 +1238,8 @@ func (d *SoftSkipHookedDoor) AfterDelete(_ context.Context) error {
 
 type SoftSkipHouse struct {
 	document.Base
-	Name string                       `json:"name"`
-	Door den.Link[SoftSkipHookedDoor] `json:"door"`
+	Name string                        `json:"name"`
+	Door core.Link[SoftSkipHookedDoor] `json:"door"`
 }
 
 // TestWithLinkRule_HardDelete_SkipsSoftDeleteHooksOnLinked pins the contract
@@ -1251,19 +1251,19 @@ func TestWithLinkRule_HardDelete_SkipsSoftDeleteHooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftSkipHookedDoor{Label: "Main"}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	house := &SoftSkipHouse{Name: "H", Door: den.NewLink(door)}
-	require.NoError(t, den.Save(ctx, db, house))
+	house := &SoftSkipHouse{Name: "H", Door: core.NewLink(door)}
+	require.NoError(t, core.Save(ctx, db, house))
 
 	softSkipBeforeSoftDeleteCalled = false
 	softSkipAfterSoftDeleteCalled = false
 	softSkipBeforeDeleteCalled = false
 	softSkipAfterDeleteCalled = false
 
-	require.NoError(t, den.Delete(ctx, db, house,
-		den.HardDelete(),
-		den.WithLinkRule(den.LinkDelete),
+	require.NoError(t, core.Delete(ctx, db, house,
+		core.HardDelete(),
+		core.WithLinkRule(core.LinkDelete),
 	))
 
 	assert.True(t, softSkipBeforeDeleteCalled, "BeforeDelete must fire on hard-cascade target")
@@ -1277,20 +1277,20 @@ func TestWithLinkRule_Write_OnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Home",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
 	// Update door via cascade write
 	house.Door.Value.Height = 250
-	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, core.Save(ctx, db, house, core.WithLinkRule(core.LinkWrite)))
 
 	// Door should be updated
-	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
+	foundDoor, err := core.FindByID[Door](ctx, db, door.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 250, foundDoor.Height)
 }
@@ -1300,22 +1300,22 @@ func TestWithLinkRule_DeleteIgnore(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
 	house := &House{
 		Name: "KeepDoor",
-		Door: den.NewLink(door),
+		Door: core.NewLink(door),
 	}
-	require.NoError(t, den.Save(ctx, db, house))
+	require.NoError(t, core.Save(ctx, db, house))
 
-	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkIgnore)))
+	require.NoError(t, core.Delete(ctx, db, house, core.WithLinkRule(core.LinkIgnore)))
 
 	// House gone
-	_, err := den.FindByID[House](ctx, db, house.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[House](ctx, db, house.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 
 	// Door still exists
-	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
+	foundDoor, err := core.FindByID[Door](ctx, db, door.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 200, foundDoor.Height)
 }
@@ -1335,9 +1335,9 @@ func (p *ValidatedPart) Validate(_ context.Context) error {
 
 type Machine struct {
 	document.Base
-	Label string                    `json:"label"`
-	Part  den.Link[ValidatedPart]   `json:"part"`
-	Parts []den.Link[ValidatedPart] `json:"parts"`
+	Label string                     `json:"label"`
+	Part  core.Link[ValidatedPart]   `json:"part"`
+	Parts []core.Link[ValidatedPart] `json:"parts"`
 }
 
 func TestWithLinkRule_Write_RunsValidation(t *testing.T) {
@@ -1348,19 +1348,19 @@ func TestWithLinkRule_Write_RunsValidation(t *testing.T) {
 	invalidPart := &ValidatedPart{Name: ""}
 	machine := &Machine{
 		Label: "Drill",
-		Part:  den.NewLink(invalidPart),
+		Part:  core.NewLink(invalidPart),
 	}
 
-	err := den.Save(ctx, db, machine, den.WithLinkRule(den.LinkWrite))
-	require.ErrorIs(t, err, den.ErrValidation)
+	err := core.Save(ctx, db, machine, core.WithLinkRule(core.LinkWrite))
+	require.ErrorIs(t, err, core.ErrValidation)
 
 	// Part with valid name should succeed
 	validPart := &ValidatedPart{Name: "Motor"}
 	machine2 := &Machine{
 		Label: "Saw",
-		Part:  den.NewLink(validPart),
+		Part:  core.NewLink(validPart),
 	}
 
-	require.NoError(t, den.Save(ctx, db, machine2, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, core.Save(ctx, db, machine2, core.WithLinkRule(core.LinkWrite)))
 	assert.NotEmpty(t, validPart.ID)
 }

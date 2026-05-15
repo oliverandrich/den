@@ -1,12 +1,13 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"bytes"
 	"context"
 	"io"
 	"testing"
 
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/storage/file"
@@ -38,7 +39,7 @@ func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 
-	db := dentest.MustOpenWith(t, []any{&mediaDoc{}}, []den.Option{den.WithStorage(fs)})
+	db := dentest.MustOpenWith(t, []any{&mediaDoc{}}, []core.Option{core.WithStorage(fs)})
 
 	att, err := fs.Store(ctx, bytes.NewReader([]byte("payload")), ".bin", "application/octet-stream")
 	require.NoError(t, err)
@@ -50,10 +51,10 @@ func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 	_ = f.Close()
 
 	m := &mediaDoc{Attachment: att, AltText: "test"}
-	require.NoError(t, den.Save(ctx, db, m))
+	require.NoError(t, core.Save(ctx, db, m))
 
 	// Hard-delete via the HardDelete option.
-	require.NoError(t, den.Delete(ctx, db, m, den.HardDelete()))
+	require.NoError(t, core.Delete(ctx, db, m, core.HardDelete()))
 
 	// Bytes are gone.
 	_, err = fs.Open(ctx, att)
@@ -66,7 +67,7 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 
-	db := dentest.MustOpenWith(t, []any{&productDoc{}}, []den.Option{den.WithStorage(fs)})
+	db := dentest.MustOpenWith(t, []any{&productDoc{}}, []core.Option{core.WithStorage(fs)})
 
 	hero, err := fs.Store(ctx, bytes.NewReader([]byte("hero-bytes")), ".jpg", "image/jpeg")
 	require.NoError(t, err)
@@ -74,9 +75,9 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	require.NoError(t, err)
 
 	p := &productDoc{Hero: hero, Thumbnail: thumb, Name: "Widget"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	require.NoError(t, den.Delete(ctx, db, p, den.HardDelete()))
+	require.NoError(t, core.Delete(ctx, db, p, core.HardDelete()))
 
 	for name, a := range map[string]document.Attachment{"hero": hero, "thumbnail": thumb} {
 		_, err := fs.Open(ctx, a)
@@ -89,8 +90,8 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 // top-level Delete path.
 type gallery struct {
 	document.Base
-	Name string             `json:"name"`
-	Hero den.Link[mediaDoc] `json:"hero"`
+	Name string              `json:"name"`
+	Hero core.Link[mediaDoc] `json:"hero"`
 }
 
 func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
@@ -101,22 +102,22 @@ func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
 
 	db := dentest.MustOpenWith(t,
 		[]any{&mediaDoc{}, &gallery{}},
-		[]den.Option{den.WithStorage(fs)},
+		[]core.Option{core.WithStorage(fs)},
 	)
 
 	att, err := fs.Store(ctx, bytes.NewReader([]byte("hero-bytes")), ".jpg", "image/jpeg")
 	require.NoError(t, err)
 	m := &mediaDoc{Attachment: att, AltText: "hero"}
-	require.NoError(t, den.Save(ctx, db, m))
+	require.NoError(t, core.Save(ctx, db, m))
 
-	g := &gallery{Name: "g", Hero: den.NewLink(m)}
-	require.NoError(t, den.Save(ctx, db, g))
+	g := &gallery{Name: "g", Hero: core.NewLink(m)}
+	require.NoError(t, core.Save(ctx, db, g))
 
 	// Reload g fresh so Hero.Value is nil — otherwise the outer
 	// cleanupAttachments walk on the parent discovers the child's
 	// attachment through the in-memory link value and hides the cascade
 	// bug. This test is about the cascade path itself.
-	reloaded, err := den.FindByID[gallery](ctx, db, g.ID)
+	reloaded, err := core.FindByID[gallery](ctx, db, g.ID)
 	require.NoError(t, err)
 	require.False(t, reloaded.Hero.IsLoaded(), "sanity: link must be lazy")
 
@@ -125,10 +126,10 @@ func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
 	require.NoError(t, err, "attachment must exist before cascade")
 	_ = f.Close()
 
-	require.NoError(t, den.Delete(ctx, db, reloaded, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, reloaded, core.WithLinkRule(core.LinkDelete)))
 
-	_, err = den.FindByID[mediaDoc](ctx, db, m.ID)
-	require.ErrorIs(t, err, den.ErrNotFound, "linked mediaDoc must be cascade-deleted")
+	_, err = core.FindByID[mediaDoc](ctx, db, m.ID)
+	require.ErrorIs(t, err, core.ErrNotFound, "linked mediaDoc must be cascade-deleted")
 
 	_, err = fs.Open(ctx, att)
 	assert.Error(t, err, "child attachment bytes must be cleaned up on cascade delete")
@@ -149,13 +150,13 @@ func TestHardDelete_WithoutStorage_Rejects(t *testing.T) {
 			SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
 		},
 	}
-	require.NoError(t, den.Save(ctx, db, m))
+	require.NoError(t, core.Save(ctx, db, m))
 
-	err := den.Delete(ctx, db, m, den.HardDelete())
-	require.ErrorIs(t, err, den.ErrValidation)
+	err := core.Delete(ctx, db, m, core.HardDelete())
+	require.ErrorIs(t, err, core.ErrValidation)
 
 	// Doc must still exist — the DB delete should not run when preflight rejects.
-	_, err = den.FindByID[mediaDoc](ctx, db, m.ID)
+	_, err = core.FindByID[mediaDoc](ctx, db, m.ID)
 	require.NoError(t, err, "preflight must reject before the DB delete")
 }
 
@@ -173,14 +174,14 @@ func TestHardDelete_Cascade_WithoutStorage_Rejects(t *testing.T) {
 			SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
 		},
 	}
-	require.NoError(t, den.Save(ctx, db, m))
+	require.NoError(t, core.Save(ctx, db, m))
 
-	g := &gallery{Name: "g", Hero: den.NewLink(m)}
-	require.NoError(t, den.Save(ctx, db, g))
+	g := &gallery{Name: "g", Hero: core.NewLink(m)}
+	require.NoError(t, core.Save(ctx, db, g))
 
-	reloaded, err := den.FindByID[gallery](ctx, db, g.ID)
+	reloaded, err := core.FindByID[gallery](ctx, db, g.ID)
 	require.NoError(t, err)
 
-	err = den.Delete(ctx, db, reloaded, den.WithLinkRule(den.LinkDelete))
-	require.ErrorIs(t, err, den.ErrValidation)
+	err = core.Delete(ctx, db, reloaded, core.WithLinkRule(core.LinkDelete))
+	require.ErrorIs(t, err, core.ErrValidation)
 }

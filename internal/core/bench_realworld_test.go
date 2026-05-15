@@ -1,12 +1,13 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
@@ -18,18 +19,18 @@ import (
 // than BenchProduct (which exercises the low-level hot paths).
 type BenchArticle struct {
 	document.Base
-	Title       string                `json:"title" den:"index"`
-	Slug        string                `json:"slug" den:"unique"`
-	Body        string                `json:"body" den:"fts"`
-	Summary     string                `json:"summary"`
-	Status      string                `json:"status" den:"index"`
-	Category    string                `json:"category" den:"index"`
-	Tags        []string              `json:"tags" den:"index"`
-	Price       float64               `json:"price" den:"index"`
-	Stock       int                   `json:"stock"`
-	PublishedAt time.Time             `json:"published_at" den:"index"`
-	Author      den.Link[BenchAuthor] `json:"author"`
-	Meta        map[string]any        `json:"meta"`
+	Title       string                 `json:"title" den:"index"`
+	Slug        string                 `json:"slug" den:"unique"`
+	Body        string                 `json:"body" den:"fts"`
+	Summary     string                 `json:"summary"`
+	Status      string                 `json:"status" den:"index"`
+	Category    string                 `json:"category" den:"index"`
+	Tags        []string               `json:"tags" den:"index"`
+	Price       float64                `json:"price" den:"index"`
+	Stock       int                    `json:"stock"`
+	PublishedAt time.Time              `json:"published_at" den:"index"`
+	Author      core.Link[BenchAuthor] `json:"author"`
+	Meta        map[string]any         `json:"meta"`
 }
 
 // BenchAuthor is the Link[T] target for WithFetchLinks benchmarks.
@@ -62,7 +63,7 @@ func makeBenchArticle(i int, authorID string) *BenchArticle {
 		Price:       float64(i%100) + 0.99,
 		Stock:       i % 1000,
 		PublishedAt: time.Unix(1700000000+int64(i*3600), 0),
-		Author:      den.Link[BenchAuthor]{ID: authorID},
+		Author:      core.Link[BenchAuthor]{ID: authorID},
 		Meta: map[string]any{
 			"views":    i * 17,
 			"featured": i%7 == 0,
@@ -71,33 +72,33 @@ func makeBenchArticle(i int, authorID string) *BenchArticle {
 	}
 }
 
-func rwBenchDB(b *testing.B) *den.DB {
+func rwBenchDB(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpen(b, &BenchArticle{}, &BenchAuthor{})
 }
 
-func rwBenchDBPostgres(b *testing.B) *den.DB {
+func rwBenchDBPostgres(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpenPostgres(b, dentest.PostgresURL(), &BenchArticle{}, &BenchAuthor{})
 }
 
-func seedAuthor(b *testing.B, db *den.DB) string {
+func seedAuthor(b *testing.B, db *core.DB) string {
 	b.Helper()
 	a := &BenchAuthor{Name: "Jane Author", Email: "jane@example.com", Bio: "Prolific writer."}
-	if err := den.Save(context.Background(), db, a); err != nil {
+	if err := core.Save(context.Background(), db, a); err != nil {
 		b.Fatal(err)
 	}
 	return a.ID
 }
 
-func seedArticles(b *testing.B, db *den.DB, n int, authorID string) []string {
+func seedArticles(b *testing.B, db *core.DB, n int, authorID string) []string {
 	b.Helper()
 	ctx := context.Background()
 	docs := make([]*BenchArticle, n)
 	for i := range n {
 		docs[i] = makeBenchArticle(i, authorID)
 	}
-	if err := den.SaveAll(ctx, db, docs); err != nil {
+	if err := core.SaveAll(ctx, db, docs); err != nil {
 		b.Fatal(err)
 	}
 	ids := make([]string, n)
@@ -109,7 +110,7 @@ func seedArticles(b *testing.B, db *den.DB, n int, authorID string) []string {
 
 // --- Insert ---
 
-func runRWInsert(b *testing.B, db *den.DB) {
+func runRWInsert(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	b.ResetTimer()
@@ -117,7 +118,7 @@ func runRWInsert(b *testing.B, db *den.DB) {
 	i := 0
 	for b.Loop() {
 		doc := makeBenchArticle(i, authorID)
-		if err := den.Save(ctx, db, doc); err != nil {
+		if err := core.Save(ctx, db, doc); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -129,7 +130,7 @@ func BenchmarkRW_Postgres_Insert(b *testing.B) { runRWInsert(b, rwBenchDBPostgre
 
 // --- InsertMany ---
 
-func runRWInsertMany(b *testing.B, db *den.DB, batch int) {
+func runRWInsertMany(b *testing.B, db *core.DB, batch int) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	b.ResetTimer()
@@ -140,7 +141,7 @@ func runRWInsertMany(b *testing.B, db *den.DB, batch int) {
 		for j := range batch {
 			docs[j] = makeBenchArticle(i*batch+j, authorID)
 		}
-		if err := den.SaveAll(ctx, db, docs); err != nil {
+		if err := core.SaveAll(ctx, db, docs); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -156,7 +157,7 @@ func BenchmarkRW_Postgres_InsertMany1000(b *testing.B) {
 
 // --- FindByID ---
 
-func runRWFindByID(b *testing.B, db *den.DB) {
+func runRWFindByID(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 1000, authorID)
@@ -164,7 +165,7 @@ func runRWFindByID(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		if _, err := den.FindByID[BenchArticle](ctx, db, ids[i%len(ids)]); err != nil {
+		if _, err := core.FindByID[BenchArticle](ctx, db, ids[i%len(ids)]); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -176,7 +177,7 @@ func BenchmarkRW_Postgres_FindByID(b *testing.B) { runRWFindByID(b, rwBenchDBPos
 
 // --- FindByIDs (10) ---
 
-func runRWFindByIDs(b *testing.B, db *den.DB) {
+func runRWFindByIDs(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 1000, authorID)
@@ -188,7 +189,7 @@ func runRWFindByIDs(b *testing.B, db *den.DB) {
 		for j := range 10 {
 			batch[j] = ids[(i*10+j)%len(ids)]
 		}
-		if _, err := den.FindByIDs[BenchArticle](ctx, db, batch); err != nil {
+		if _, err := core.FindByIDs[BenchArticle](ctx, db, batch); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -200,16 +201,16 @@ func BenchmarkRW_Postgres_FindByIDs10(b *testing.B) { runRWFindByIDs(b, rwBenchD
 
 // --- Query filtered (limit 10 / 100) ---
 
-func runRWQueryFiltered(b *testing.B, db *den.DB, limit int) {
+func runRWQueryFiltered(b *testing.B, db *core.DB, limit int) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 1000, authorID)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchArticle](db,
+		results, err := core.NewQuery[BenchArticle](db,
 			where.Field("status").Eq("published"),
-		).Sort("published_at", den.Desc).Limit(limit).All(ctx)
+		).Sort("published_at", core.Desc).Limit(limit).All(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -230,7 +231,7 @@ func BenchmarkRW_Postgres_QueryFiltered100(b *testing.B) {
 
 // --- Iter 1000 ---
 
-func runRWIter(b *testing.B, db *den.DB) {
+func runRWIter(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 1000, authorID)
@@ -238,7 +239,7 @@ func runRWIter(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	for b.Loop() {
 		count := 0
-		for _, err := range den.NewQuery[BenchArticle](db).Iter(ctx) {
+		for _, err := range core.NewQuery[BenchArticle](db).Iter(ctx) {
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -255,14 +256,14 @@ func BenchmarkRW_Postgres_Iter1000(b *testing.B) { runRWIter(b, rwBenchDBPostgre
 
 // --- Aggregate: Count with filter ---
 
-func runRWCount(b *testing.B, db *den.DB) {
+func runRWCount(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 1000, authorID)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := den.NewQuery[BenchArticle](db,
+		if _, err := core.NewQuery[BenchArticle](db,
 			where.Field("status").Eq("published"),
 		).Count(ctx); err != nil {
 			b.Fatal(err)
@@ -275,14 +276,14 @@ func BenchmarkRW_Postgres_CountFiltered(b *testing.B) { runRWCount(b, rwBenchDBP
 
 // --- Aggregate: Sum with filter ---
 
-func runRWSum(b *testing.B, db *den.DB) {
+func runRWSum(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 1000, authorID)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := den.NewQuery[BenchArticle](db,
+		if _, err := core.NewQuery[BenchArticle](db,
 			where.Field("status").Eq("published"),
 		).Sum(ctx, "price"); err != nil {
 			b.Fatal(err)
@@ -295,14 +296,14 @@ func BenchmarkRW_Postgres_SumFiltered(b *testing.B) { runRWSum(b, rwBenchDBPostg
 
 // --- FTS Search ---
 
-func runRWSearch(b *testing.B, db *den.DB) {
+func runRWSearch(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 1000, authorID)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchArticle](db).Limit(20).Search(ctx, "Cicero")
+		results, err := core.NewQuery[BenchArticle](db).Limit(20).Search(ctx, "Cicero")
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -317,16 +318,16 @@ func BenchmarkRW_Postgres_Search(b *testing.B) { runRWSearch(b, rwBenchDBPostgre
 
 // --- WithFetchLinks ---
 
-func runRWWithFetchLinks(b *testing.B, db *den.DB) {
+func runRWWithFetchLinks(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 100, authorID)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchArticle](db).
+		results, err := core.NewQuery[BenchArticle](db).
 			WithFetchLinks().
-			Sort("published_at", den.Desc).
+			Sort("published_at", core.Desc).
 			Limit(20).
 			All(ctx)
 		if err != nil {
@@ -343,7 +344,7 @@ func BenchmarkRW_Postgres_WithFetchLinks(b *testing.B) { runRWWithFetchLinks(b, 
 
 // --- Update (single) ---
 
-func runRWUpdate(b *testing.B, db *den.DB) {
+func runRWUpdate(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 100, authorID)
@@ -351,12 +352,12 @@ func runRWUpdate(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		doc, err := den.FindByID[BenchArticle](ctx, db, ids[i%len(ids)])
+		doc, err := core.FindByID[BenchArticle](ctx, db, ids[i%len(ids)])
 		if err != nil {
 			b.Fatal(err)
 		}
 		doc.Stock++
-		if err := den.Save(ctx, db, doc); err != nil {
+		if err := core.Save(ctx, db, doc); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -368,7 +369,7 @@ func BenchmarkRW_Postgres_Update(b *testing.B) { runRWUpdate(b, rwBenchDBPostgre
 
 // --- QuerySet.Update bulk 100 ---
 
-func runRWBulkUpdate(b *testing.B, db *den.DB) {
+func runRWBulkUpdate(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	_ = seedArticles(b, db, 100, authorID)
@@ -380,7 +381,7 @@ func runRWBulkUpdate(b *testing.B, db *den.DB) {
 		if i%2 == 0 {
 			newStatus = "published"
 		}
-		if _, err := den.NewQuery[BenchArticle](db).Update(ctx, den.SetFields{"status": newStatus}); err != nil {
+		if _, err := core.NewQuery[BenchArticle](db).Update(ctx, core.SetFields{"status": newStatus}); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -392,7 +393,7 @@ func BenchmarkRW_Postgres_BulkUpdate100(b *testing.B) { runRWBulkUpdate(b, rwBen
 
 // --- Transaction (read + write + commit) ---
 
-func runRWTransaction(b *testing.B, db *den.DB) {
+func runRWTransaction(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 100, authorID)
@@ -400,13 +401,13 @@ func runRWTransaction(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			doc, err := den.FindByID[BenchArticle](ctx, tx, ids[i%len(ids)])
+		err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+			doc, err := core.FindByID[BenchArticle](ctx, tx, ids[i%len(ids)])
 			if err != nil {
 				return err
 			}
 			doc.Stock++
-			return den.Save(ctx, tx, doc)
+			return core.Save(ctx, tx, doc)
 		})
 		if err != nil {
 			b.Fatal(err)

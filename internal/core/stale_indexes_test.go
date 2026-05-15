@@ -1,15 +1,15 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type staleDoc struct {
@@ -21,11 +21,11 @@ func TestDropStaleIndexes_DropsOrphan(t *testing.T) {
 	ctx := context.Background()
 	db := dentest.MustOpen(t, &staleDoc{})
 
-	require.NoError(t, db.Backend().EnsureIndex(ctx, "staledoc", den.IndexDefinition{
+	require.NoError(t, db.Backend().EnsureIndex(ctx, "staledoc", core.IndexDefinition{
 		Name: "idx_staledoc_orphan", Fields: []string{"orphan"},
 	}))
 
-	result, err := den.DropStaleIndexes(ctx, db)
+	result, err := core.DropStaleIndexes(ctx, db)
 	require.NoError(t, err)
 	require.Len(t, result.Dropped, 1)
 	assert.Equal(t, "idx_staledoc_orphan", result.Dropped[0].Name)
@@ -45,11 +45,11 @@ func TestDropStaleIndexes_DryRun(t *testing.T) {
 	ctx := context.Background()
 	db := dentest.MustOpen(t, &staleDoc{})
 
-	require.NoError(t, db.Backend().EnsureIndex(ctx, "staledoc", den.IndexDefinition{
+	require.NoError(t, db.Backend().EnsureIndex(ctx, "staledoc", core.IndexDefinition{
 		Name: "idx_staledoc_orphan", Fields: []string{"orphan"},
 	}))
 
-	result, err := den.DropStaleIndexes(ctx, db, den.DryRun())
+	result, err := core.DropStaleIndexes(ctx, db, core.DryRun())
 	require.NoError(t, err)
 	require.Len(t, result.Dropped, 1)
 	assert.Equal(t, "idx_staledoc_orphan", result.Dropped[0].Name)
@@ -63,7 +63,7 @@ func TestDropStaleIndexes_NoStale(t *testing.T) {
 	ctx := context.Background()
 	db := dentest.MustOpen(t, &staleDoc{})
 
-	result, err := den.DropStaleIndexes(ctx, db)
+	result, err := core.DropStaleIndexes(ctx, db)
 	require.NoError(t, err)
 	assert.Empty(t, result.Dropped)
 	require.Len(t, result.Kept, 1)

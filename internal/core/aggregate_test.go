@@ -1,16 +1,16 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type AggProduct struct {
@@ -21,7 +21,7 @@ type AggProduct struct {
 	Region   string  `json:"region,omitempty"`
 }
 
-func seedAggProducts(t *testing.T, db *den.DB) {
+func seedAggProducts(t *testing.T, db *core.DB) {
 	t.Helper()
 	ctx := context.Background()
 	products := []*AggProduct{
@@ -31,7 +31,7 @@ func seedAggProducts(t *testing.T, db *den.DB) {
 		{Name: "D", Price: 40.0, Category: "Y"},
 		{Name: "E", Price: 50.0, Category: "Y"},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, products))
+	require.NoError(t, core.SaveAll(ctx, db, products))
 }
 
 func TestAvg(t *testing.T) {
@@ -39,7 +39,7 @@ func TestAvg(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](db).Avg(ctx, "price")
+	avg, err := core.NewQuery[AggProduct](db).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 30.0, avg, 0.001) // (10+20+30+40+50)/5
 }
@@ -49,7 +49,7 @@ func TestAvg_WithFilter(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Avg(ctx, "price")
+	avg, err := core.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 15.0, avg, 0.001) // (10+20)/2
 }
@@ -59,7 +59,7 @@ func TestSum(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	sum, err := den.NewQuery[AggProduct](db).Sum(ctx, "price")
+	sum, err := core.NewQuery[AggProduct](db).Sum(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 150.0, sum, 0.001)
 }
@@ -69,7 +69,7 @@ func TestMin(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	min, err := den.NewQuery[AggProduct](db).Min(ctx, "price")
+	min, err := core.NewQuery[AggProduct](db).Min(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, min, 0.001)
 }
@@ -79,7 +79,7 @@ func TestMax(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	max, err := den.NewQuery[AggProduct](db).Max(ctx, "price")
+	max, err := core.NewQuery[AggProduct](db).Max(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 50.0, max, 0.001)
 }
@@ -93,7 +93,7 @@ func TestScalarAggregate_IgnoresLimitSkipSort(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	qs := den.NewQuery[AggProduct](db).Limit(2).Skip(1).Sort("price", den.Desc)
+	qs := core.NewQuery[AggProduct](db).Limit(2).Skip(1).Sort("price", core.Desc)
 
 	sum, err := qs.Sum(ctx, "price")
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestAvg_Empty(t *testing.T) {
 	db := dentest.MustOpen(t, &AggProduct{})
 	ctx := context.Background()
 
-	avg, err := den.NewQuery[AggProduct](db).Avg(ctx, "price")
+	avg, err := core.NewQuery[AggProduct](db).Avg(ctx, "price")
 	require.NoError(t, err)
 	assert.InDelta(t, 0.0, avg, 0.001)
 }
@@ -136,7 +136,7 @@ func TestGroupBy(t *testing.T) {
 	}
 
 	var stats []CatStats
-	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
 	require.NoError(t, err)
 	require.Len(t, stats, 2)
 
@@ -181,7 +181,7 @@ func TestGroupBy_MultiKey(t *testing.T) {
 		{Name: "d", Price: 40, Category: "Y", Region: "north"},
 	}
 	for i := range products {
-		require.NoError(t, den.Save(ctx, db, &products[i]))
+		require.NoError(t, core.Save(ctx, db, &products[i]))
 	}
 
 	type Stats struct {
@@ -192,7 +192,7 @@ func TestGroupBy_MultiKey(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
 	require.NoError(t, err)
 	require.Len(t, stats, 3)
 
@@ -227,7 +227,7 @@ func TestGroupBy_SingleKeyUnindexedTag(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
 	require.NoError(t, err)
 	assert.Len(t, stats, 2)
 }
@@ -245,7 +245,7 @@ func TestGroupBy_MissingKeyTag(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "group_key")
 }
@@ -263,7 +263,7 @@ func TestGroupBy_MixedTagForms(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "group_key")
 }
@@ -281,7 +281,7 @@ func TestGroupBy_DuplicateSlot(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category", "region").Into(ctx, &stats)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "group_key")
 }
@@ -302,7 +302,7 @@ func TestGroupBy_DuplicateAggregateTag(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
+	err := core.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "sum:price",
 		"error must name the duplicate tag so the user can find it")
@@ -321,7 +321,7 @@ func TestGroupBy_SortByKey(t *testing.T) {
 	}
 
 	var asc []Stats
-	err := den.NewQuery[AggProduct](db).Sort("category", den.Asc).
+	err := core.NewQuery[AggProduct](db).Sort("category", core.Asc).
 		GroupBy("category").Into(ctx, &asc)
 	require.NoError(t, err)
 	require.Len(t, asc, 2)
@@ -329,7 +329,7 @@ func TestGroupBy_SortByKey(t *testing.T) {
 	assert.Equal(t, "Y", asc[1].Category)
 
 	var desc []Stats
-	err = den.NewQuery[AggProduct](db).Sort("category", den.Desc).
+	err = core.NewQuery[AggProduct](db).Sort("category", core.Desc).
 		GroupBy("category").Into(ctx, &desc)
 	require.NoError(t, err)
 	require.Len(t, desc, 2)
@@ -349,9 +349,9 @@ func TestGroupBy_SortByAgg(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).
+	err := core.NewQuery[AggProduct](db).
 		GroupBy("category").
-		OrderByAgg(den.OpCount, "", den.Desc).
+		OrderByAgg(core.OpCount, "", core.Desc).
 		Into(ctx, &stats)
 	require.NoError(t, err)
 	require.Len(t, stats, 2)
@@ -374,7 +374,7 @@ func TestGroupBy_Limit(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).Sort("category", den.Asc).Limit(1).
+	err := core.NewQuery[AggProduct](db).Sort("category", core.Asc).Limit(1).
 		GroupBy("category").Into(ctx, &stats)
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
@@ -393,7 +393,7 @@ func TestGroupBy_SortByNonKey_Error(t *testing.T) {
 	}
 
 	var stats []Stats
-	err := den.NewQuery[AggProduct](db).Sort("price", den.Asc).
+	err := core.NewQuery[AggProduct](db).Sort("price", core.Asc).
 		GroupBy("category").Into(ctx, &stats)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "price")
@@ -411,7 +411,7 @@ func TestProject(t *testing.T) {
 	}
 
 	var summaries []Summary
-	err := den.NewQuery[AggProduct](db).Sort("price", den.Asc).Project(ctx, &summaries)
+	err := core.NewQuery[AggProduct](db).Sort("price", core.Asc).Project(ctx, &summaries)
 	require.NoError(t, err)
 	require.Len(t, summaries, 5)
 	assert.Equal(t, "A", summaries[0].Name)
@@ -428,7 +428,7 @@ func TestProject_WithFilter(t *testing.T) {
 	}
 
 	var summaries []Summary
-	err := den.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Project(ctx, &summaries)
+	err := core.NewQuery[AggProduct](db, where.Field("category").Eq("X")).Project(ctx, &summaries)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 2)
 }
@@ -445,12 +445,12 @@ func TestGroupBy_CacheHit(t *testing.T) {
 
 	// First call — populates cache
 	var stats1 []CatStats
-	require.NoError(t, den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats1))
+	require.NoError(t, core.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats1))
 	require.Len(t, stats1, 2)
 
 	// Second call with same target type — should hit cache
 	var stats2 []CatStats
-	require.NoError(t, den.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats2))
+	require.NoError(t, core.NewQuery[AggProduct](db).GroupBy("category").Into(ctx, &stats2))
 	require.Len(t, stats2, 2)
 }
 
@@ -461,7 +461,7 @@ func TestProject_InvalidTarget(t *testing.T) {
 
 	// Not a pointer to slice — should error
 	var single struct{ Name string }
-	err := den.NewQuery[AggProduct](db).Project(ctx, &single)
+	err := core.NewQuery[AggProduct](db).Project(ctx, &single)
 	require.Error(t, err)
 }
 
@@ -470,7 +470,7 @@ func TestQuerySet_Count(t *testing.T) {
 	seedAggProducts(t, db)
 	ctx := context.Background()
 
-	count, err := den.NewQuery[AggProduct](db, where.Field("category").Eq("Y")).Count(ctx)
+	count, err := core.NewQuery[AggProduct](db, where.Field("category").Eq("Y")).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 }

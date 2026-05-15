@@ -1,6 +1,8 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"errors"
 	"sync"
@@ -8,12 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunInTransaction_Commit(t *testing.T) {
@@ -21,19 +21,19 @@ func TestRunInTransaction_Commit(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.FindByID[Product](ctx, tx, p.ID)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		found, err := core.FindByID[Product](ctx, tx, p.ID)
 		if err != nil {
 			return err
 		}
 		found.Price = 99.0
-		return den.Save(ctx, tx, found)
+		return core.Save(ctx, tx, found)
 	})
 	require.NoError(t, err)
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, found.Price, 0.001)
 }
@@ -43,15 +43,15 @@ func TestRunInTransaction_Rollback(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		found, err := den.FindByID[Product](ctx, tx, p.ID)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		found, err := core.FindByID[Product](ctx, tx, p.ID)
 		if err != nil {
 			return err
 		}
 		found.Price = 99.0
-		if err := den.Save(ctx, tx, found); err != nil {
+		if err := core.Save(ctx, tx, found); err != nil {
 			return err
 		}
 		return errors.New("abort")
@@ -59,7 +59,7 @@ func TestRunInTransaction_Rollback(t *testing.T) {
 	require.Error(t, err)
 
 	// Price should be unchanged
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, found.Price, 0.001)
 }
@@ -69,9 +69,9 @@ func TestTxInsert(t *testing.T) {
 	ctx := context.Background()
 
 	var insertedID string
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 		p := &Product{Name: "InTx", Price: 42.0}
-		if err := den.Save(ctx, tx, p); err != nil {
+		if err := core.Save(ctx, tx, p); err != nil {
 			return err
 		}
 		insertedID = p.ID
@@ -79,7 +79,7 @@ func TestTxInsert(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	found, err := den.FindByID[Product](ctx, db, insertedID)
+	found, err := core.FindByID[Product](ctx, db, insertedID)
 	require.NoError(t, err)
 	assert.Equal(t, "InTx", found.Name)
 }
@@ -89,15 +89,15 @@ func TestTxDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "ToDelete", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Delete(ctx, tx, p)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Delete(ctx, tx, p)
 	})
 	require.NoError(t, err)
 
-	_, err = den.FindByID[Product](ctx, db, p.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err = core.FindByID[Product](ctx, db, p.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestTxDelete_SoftDelete(t *testing.T) {
@@ -105,10 +105,10 @@ func TestTxDelete_SoftDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "SoftInTx", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Delete(ctx, tx, p)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Delete(ctx, tx, p)
 	})
 	require.NoError(t, err)
 
@@ -116,12 +116,12 @@ func TestTxDelete_SoftDelete(t *testing.T) {
 	assert.True(t, p.IsDeleted())
 
 	// FindByID still returns the document
-	found, err := den.FindByID[SoftProduct](ctx, db, p.ID)
+	found, err := core.FindByID[SoftProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.True(t, found.IsDeleted())
 
 	// Should be hidden from normal queries
-	results, err := den.NewQuery[SoftProduct](db).All(ctx)
+	results, err := core.NewQuery[SoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -131,8 +131,8 @@ func TestTxInsert_AfterHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &AfterSaveDoc{Name: "InTx"}
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Save(ctx, tx, d)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Save(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "called", d.SavedAt)
@@ -143,11 +143,11 @@ func TestTxUpdate_AfterHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &UpdateHookDoc{Name: "Test"}
-	require.NoError(t, den.Save(ctx, db, d))
+	require.NoError(t, core.Save(ctx, db, d))
 
 	d.Name = "Updated"
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Save(ctx, tx, d)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Save(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.True(t, d.BeforeUpdated)
@@ -159,10 +159,10 @@ func TestTxDelete_AfterHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &DeleteHookDoc{Name: "Test"}
-	require.NoError(t, den.Save(ctx, db, d))
+	require.NoError(t, core.Save(ctx, db, d))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Delete(ctx, tx, d)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Delete(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.True(t, d.BeforeDeleted)
@@ -174,8 +174,8 @@ func TestTxInsert_Revision(t *testing.T) {
 	ctx := context.Background()
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Save(ctx, tx, p)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.Save(ctx, tx, p)
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, p.Rev, "revision should be set on TxInsert")
@@ -190,20 +190,20 @@ func TestDeleteMany_SoftDelete(t *testing.T) {
 		{Name: "Delete1", Price: 15.0},
 		{Name: "Delete2", Price: 25.0},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, products))
+	require.NoError(t, core.SaveAll(ctx, db, products))
 
-	count, err := den.NewQuery[SoftProduct](db, where.Field("price").Gt(10.0)).Delete(ctx)
+	count, err := core.NewQuery[SoftProduct](db, where.Field("price").Gt(10.0)).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
 	// Soft-deleted should be hidden from normal queries
-	remaining, err := den.NewQuery[SoftProduct](db).All(ctx)
+	remaining, err := core.NewQuery[SoftProduct](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1)
 	assert.Equal(t, "Keep", remaining[0].Name)
 
 	// But still accessible with IncludeDeleted
-	all, err := den.NewQuery[SoftProduct](db).IncludeDeleted().All(ctx)
+	all, err := core.NewQuery[SoftProduct](db).IncludeDeleted().All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 }
@@ -213,17 +213,17 @@ func TestRunInTransaction_PanicRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// RunInTransaction catches panics, rolls back, and re-panics
 	assert.Panics(t, func() {
-		_ = den.RunInTransaction(ctx, db, func(_ *den.Tx) error {
+		_ = core.RunInTransaction(ctx, db, func(_ *core.Tx) error {
 			panic("unexpected panic")
 		})
 	})
 
 	// Data should be unchanged after rollback
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 10.0, found.Price, 0.001)
 }
@@ -235,9 +235,9 @@ func TestTx_Transaction_RawRead(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 		data, err := tx.Transaction().Get(ctx, "product", p.ID)
 		if err != nil {
 			return err
@@ -256,15 +256,15 @@ func TestTx_Transaction_RawWrite(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 		return tx.Transaction().Put(ctx, "product", p.ID,
 			[]byte(`{"_id":"`+p.ID+`","name":"Replaced","price":42}`))
 	})
 	require.NoError(t, err)
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Replaced", found.Name)
 }
@@ -273,11 +273,11 @@ func TestTxFindByID_NotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.FindByID[Product](ctx, tx, "nonexistent")
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.FindByID[Product](ctx, tx, "nonexistent")
 		return err
 	})
-	require.ErrorIs(t, err, den.ErrNotFound)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestInsertMany_Rollback(t *testing.T) {
@@ -290,17 +290,17 @@ func TestInsertMany_Rollback(t *testing.T) {
 		{Name: "First"}, // BeforeInsert always fails
 		{Name: "Second"},
 	}
-	err := den.SaveAll(ctx, db, products)
+	err := core.SaveAll(ctx, db, products)
 	require.Error(t, err)
 
 	// No documents should persist after transaction rollback
-	all, err := den.NewQuery[FailBeforeDoc](db).All(ctx)
+	all, err := core.NewQuery[FailBeforeDoc](db).All(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, all, "no documents should persist after transaction rollback")
 }
 
 func TestTxLockByID(t *testing.T) {
-	dbs := map[string]*den.DB{
+	dbs := map[string]*core.DB{
 		"sqlite":   dentest.MustOpen(t, &Product{}),
 		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{}),
 	}
@@ -308,10 +308,10 @@ func TestTxLockByID(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &Product{Name: "Widget", Price: 10.0}
-			require.NoError(t, den.Save(ctx, db, p))
+			require.NoError(t, core.Save(ctx, db, p))
 
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				locked, err := den.LockByID[Product](ctx, tx, p.ID)
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				locked, err := core.LockByID[Product](ctx, tx, p.ID)
 				if err != nil {
 					return err
 				}
@@ -325,18 +325,18 @@ func TestTxLockByID(t *testing.T) {
 }
 
 func TestTxLockByID_NotFound(t *testing.T) {
-	dbs := map[string]*den.DB{
+	dbs := map[string]*core.DB{
 		"sqlite":   dentest.MustOpen(t, &Product{}),
 		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{}),
 	}
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				_, err := den.LockByID[Product](ctx, tx, "missing-id")
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				_, err := core.LockByID[Product](ctx, tx, "missing-id")
 				return err
 			})
-			assert.ErrorIs(t, err, den.ErrNotFound)
+			assert.ErrorIs(t, err, core.ErrNotFound)
 		})
 	}
 }
@@ -346,10 +346,10 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Contended", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *den.Tx) error {
-		_, err := den.LockByID[Product](ctx, tx, p.ID)
+	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *core.Tx) error {
+		_, err := core.LockByID[Product](ctx, tx, p.ID)
 		return err
 	})
 }
@@ -357,7 +357,7 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 // runContendedTx spawns a goroutine that holds a row lock until release is
 // signaled. The returned release function must be called (deferred) to let the
 // first transaction commit. locked is closed once tx1 has acquired the lock.
-func runContendedTx(t *testing.T, db *den.DB, id string) (locked <-chan struct{}, release func()) {
+func runContendedTx(t *testing.T, db *core.DB, id string) (locked <-chan struct{}, release func()) {
 	t.Helper()
 	lockedCh := make(chan struct{})
 	releaseCh := make(chan struct{})
@@ -366,8 +366,8 @@ func runContendedTx(t *testing.T, db *den.DB, id string) (locked <-chan struct{}
 	go func() {
 		defer close(done)
 		ctx := context.Background()
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			if _, err := den.LockByID[Product](ctx, tx, id); err != nil {
+		err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+			if _, err := core.LockByID[Product](ctx, tx, id); err != nil {
 				return err
 			}
 			close(lockedCh)
@@ -394,19 +394,19 @@ func TestTxLockByID_SkipLocked_ReturnsNotFoundOnContention(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "SkipLocked"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	locked, release := runContendedTx(t, db, p.ID)
 	<-locked
 
 	start := time.Now()
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.LockByID[Product](ctx, tx, p.ID, den.SkipLocked())
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.LockByID[Product](ctx, tx, p.ID, core.SkipLocked())
 		return err
 	})
 	elapsed := time.Since(start)
 
-	require.ErrorIs(t, err, den.ErrNotFound,
+	require.ErrorIs(t, err, core.ErrNotFound,
 		"SkipLocked on a contended row should return ErrNotFound immediately")
 	assert.Less(t, elapsed, 500*time.Millisecond,
 		"SkipLocked must not block; returned after %v", elapsed)
@@ -419,19 +419,19 @@ func TestTxLockByID_NoWait_ReturnsErrLockedOnContention(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "NoWait"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	locked, release := runContendedTx(t, db, p.ID)
 	<-locked
 
 	start := time.Now()
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.LockByID[Product](ctx, tx, p.ID, den.NoWait())
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.LockByID[Product](ctx, tx, p.ID, core.NoWait())
 		return err
 	})
 	elapsed := time.Since(start)
 
-	require.ErrorIs(t, err, den.ErrLocked,
+	require.ErrorIs(t, err, core.ErrLocked,
 		"NoWait on a contended row should return ErrLocked immediately")
 	assert.Less(t, elapsed, 500*time.Millisecond,
 		"NoWait must not block; returned after %v", elapsed)
@@ -444,15 +444,15 @@ func TestTxLockByID_Options_SQLiteNoop(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	for name, opt := range map[string]den.LockOption{
-		"SkipLocked": den.SkipLocked(),
-		"NoWait":     den.NoWait(),
+	for name, opt := range map[string]core.LockOption{
+		"SkipLocked": core.SkipLocked(),
+		"NoWait":     core.NoWait(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				locked, err := den.LockByID[Product](ctx, tx, p.ID, opt)
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				locked, err := core.LockByID[Product](ctx, tx, p.ID, opt)
 				if err != nil {
 					return err
 				}
@@ -469,19 +469,19 @@ func TestTxLockByID_ConflictingOptions_Rejected(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Conflict"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// SkipLocked and NoWait are mutually exclusive in PG; passing both used
 	// to silently let the second win. Now it must return a clear error.
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.LockByID[Product](ctx, tx, p.ID, den.SkipLocked(), den.NoWait())
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.LockByID[Product](ctx, tx, p.ID, core.SkipLocked(), core.NoWait())
 		return err
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 	// Order of options must not matter.
-	err = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		_, err := den.LockByID[Product](ctx, tx, p.ID, den.NoWait(), den.SkipLocked())
+	err = core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		_, err := core.LockByID[Product](ctx, tx, p.ID, core.NoWait(), core.SkipLocked())
 		return err
 	})
 	require.Error(t, err)
@@ -493,7 +493,7 @@ func TestLockByID_NGoroutines_ExactlyOneHolder(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "NWay"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	const N = 5
 	var currentHolders atomic.Int32
@@ -501,8 +501,8 @@ func TestLockByID_NGoroutines_ExactlyOneHolder(t *testing.T) {
 	var wg sync.WaitGroup
 	for range N {
 		wg.Go(func() {
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				if _, err := den.LockByID[Product](ctx, tx, p.ID); err != nil {
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				if _, err := core.LockByID[Product](ctx, tx, p.ID); err != nil {
 					return err
 				}
 				if holders := currentHolders.Add(1); holders > 1 {
@@ -530,7 +530,7 @@ const (
 // assertSerializesUnderContention runs acquire in two concurrent transactions
 // on db and verifies the second cannot proceed past acquire until the first
 // commits. Both calls must target the same lockable object so they contend.
-func assertSerializesUnderContention(t *testing.T, db *den.DB, acquire func(ctx context.Context, tx *den.Tx) error) {
+func assertSerializesUnderContention(t *testing.T, db *core.DB, acquire func(ctx context.Context, tx *core.Tx) error) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -541,7 +541,7 @@ func assertSerializesUnderContention(t *testing.T, db *den.DB, acquire func(ctx 
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		<-tx1Released
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 			if err := acquire(ctx, tx); err != nil {
 				return err
 			}
@@ -553,7 +553,7 @@ func assertSerializesUnderContention(t *testing.T, db *den.DB, acquire func(ctx 
 		assert.NoError(t, err)
 	})
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 		if err := acquire(ctx, tx); err != nil {
 			return err
 		}
@@ -571,8 +571,8 @@ func assertSerializesUnderContention(t *testing.T, db *den.DB, acquire func(ctx 
 
 func TestAdvisoryLock_SameKeySerializes(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &Product{})
-	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *den.Tx) error {
-		return den.AdvisoryLock(ctx, tx, advisoryKeySerialize)
+	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *core.Tx) error {
+		return core.AdvisoryLock(ctx, tx, advisoryKeySerialize)
 	})
 }
 
@@ -584,8 +584,8 @@ func TestAdvisoryLock_DifferentKeysParallel(t *testing.T) {
 
 	run := func(wg *sync.WaitGroup, key int64) {
 		wg.Go(func() {
-			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				if err := den.AdvisoryLock(ctx, tx, key); err != nil {
+			err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				if err := core.AdvisoryLock(ctx, tx, key); err != nil {
 					return err
 				}
 				time.Sleep(hold)
@@ -618,8 +618,8 @@ func TestAdvisoryLock_ReleasedOnRollback(t *testing.T) {
 	wg.Go(func() {
 		<-tx1Released
 		start := time.Now()
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-			return den.AdvisoryLock(ctx, tx, advisoryKeyRollback)
+		err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+			return core.AdvisoryLock(ctx, tx, advisoryKeyRollback)
 		})
 		elapsed := time.Since(start)
 		// Guard the timing check so it only runs when the tx itself succeeded;
@@ -630,8 +630,8 @@ func TestAdvisoryLock_ReleasedOnRollback(t *testing.T) {
 		}
 	})
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.AdvisoryLock(ctx, tx, advisoryKeyRollback); err != nil {
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		if err := core.AdvisoryLock(ctx, tx, advisoryKeyRollback); err != nil {
 			return err
 		}
 		close(tx1Released)
@@ -648,8 +648,8 @@ func TestAdvisoryLock_SQLiteNoop(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.AdvisoryLock(ctx, tx, 42)
+	err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+		return core.AdvisoryLock(ctx, tx, 42)
 	})
 	require.NoError(t, err,
 		"SQLite AdvisoryLock is a no-op — IMMEDIATE transactions already serialize writers")
@@ -662,26 +662,26 @@ func TestAdvisoryLock_SQLiteNoop(t *testing.T) {
 // would surface here. If this test ever breaks after a refactor, the
 // compile-time interface is not enough to enforce behavior parity.
 func TestScope_CRUDWorksWithBothDBAndTx(t *testing.T) {
-	run := func(t *testing.T, ctx context.Context, s den.Scope) {
+	run := func(t *testing.T, ctx context.Context, s core.Scope) {
 		t.Helper()
 		p := &Product{Name: "Scope", Price: 12.5}
-		require.NoError(t, den.Save(ctx, s, p))
+		require.NoError(t, core.Save(ctx, s, p))
 		require.NotEmpty(t, p.ID)
 
-		got, err := den.FindByID[Product](ctx, s, p.ID)
+		got, err := core.FindByID[Product](ctx, s, p.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "Scope", got.Name)
 
 		got.Price = 20
-		require.NoError(t, den.Save(ctx, s, got))
+		require.NoError(t, core.Save(ctx, s, got))
 
-		refreshed, err := den.FindByID[Product](ctx, s, p.ID)
+		refreshed, err := core.FindByID[Product](ctx, s, p.ID)
 		require.NoError(t, err)
 		assert.InDelta(t, 20.0, refreshed.Price, 0.001)
 
-		require.NoError(t, den.Delete(ctx, s, refreshed))
-		_, err = den.FindByID[Product](ctx, s, p.ID)
-		require.ErrorIs(t, err, den.ErrNotFound)
+		require.NoError(t, core.Delete(ctx, s, refreshed))
+		_, err = core.FindByID[Product](ctx, s, p.ID)
+		require.ErrorIs(t, err, core.ErrNotFound)
 	}
 
 	ctx := context.Background()
@@ -693,7 +693,7 @@ func TestScope_CRUDWorksWithBothDBAndTx(t *testing.T) {
 
 	t.Run("scope=*Tx", func(t *testing.T) {
 		db := dentest.MustOpen(t, &Product{})
-		err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
+		err := core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
 			run(t, ctx, tx)
 			return nil
 		})

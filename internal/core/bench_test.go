@@ -1,10 +1,11 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"testing"
 
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
@@ -17,17 +18,17 @@ type BenchProduct struct {
 	Category string  `json:"category"`
 }
 
-func benchDB(b *testing.B) *den.DB {
+func benchDB(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpen(b, &BenchProduct{})
 }
 
-func benchDBPostgres(b *testing.B) *den.DB {
+func benchDBPostgres(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpenPostgres(b, dentest.PostgresURL(), &BenchProduct{})
 }
 
-func seedBenchProducts(b *testing.B, db *den.DB, n int) []string {
+func seedBenchProducts(b *testing.B, db *core.DB, n int) []string {
 	b.Helper()
 	ctx := context.Background()
 	ids := make([]string, n)
@@ -37,7 +38,7 @@ func seedBenchProducts(b *testing.B, db *den.DB, n int) []string {
 			Price:    float64(i) * 1.5,
 			Category: "cat",
 		}
-		if err := den.Save(ctx, db, p); err != nil {
+		if err := core.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 		ids[i] = p.ID
@@ -45,19 +46,19 @@ func seedBenchProducts(b *testing.B, db *den.DB, n int) []string {
 	return ids
 }
 
-func runInsertBenchmark(b *testing.B, db *den.DB) {
+func runInsertBenchmark(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
 		p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-		if err := den.Save(ctx, db, p); err != nil {
+		if err := core.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func runFindByIDBenchmark(b *testing.B, db *den.DB) {
+func runFindByIDBenchmark(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	ids := seedBenchProducts(b, db, 100)
 	target := ids[50]
@@ -65,20 +66,20 @@ func runFindByIDBenchmark(b *testing.B, db *den.DB) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := den.FindByID[BenchProduct](ctx, db, target); err != nil {
+		if _, err := core.FindByID[BenchProduct](ctx, db, target); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func runQueryAllBenchmark(b *testing.B, db *den.DB, n int) {
+func runQueryAllBenchmark(b *testing.B, db *core.DB, n int) {
 	ctx := context.Background()
 	seedBenchProducts(b, db, n)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchProduct](db).All(ctx)
+		results, err := core.NewQuery[BenchProduct](db).All(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -88,7 +89,7 @@ func runQueryAllBenchmark(b *testing.B, db *den.DB, n int) {
 	}
 }
 
-func runQueryIterBenchmark(b *testing.B, db *den.DB, n int) {
+func runQueryIterBenchmark(b *testing.B, db *core.DB, n int) {
 	ctx := context.Background()
 	seedBenchProducts(b, db, n)
 
@@ -96,7 +97,7 @@ func runQueryIterBenchmark(b *testing.B, db *den.DB, n int) {
 	b.ReportAllocs()
 	for b.Loop() {
 		count := 0
-		for _, err := range den.NewQuery[BenchProduct](db).Iter(ctx) {
+		for _, err := range core.NewQuery[BenchProduct](db).Iter(ctx) {
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -108,10 +109,10 @@ func runQueryIterBenchmark(b *testing.B, db *den.DB, n int) {
 	}
 }
 
-func runUpdateBenchmark(b *testing.B, db *den.DB) {
+func runUpdateBenchmark(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-	if err := den.Save(ctx, db, p); err != nil {
+	if err := core.Save(ctx, db, p); err != nil {
 		b.Fatal(err)
 	}
 
@@ -119,13 +120,13 @@ func runUpdateBenchmark(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	for i := range b.N {
 		p.Price = float64(i)
-		if err := den.Save(ctx, db, p); err != nil {
+		if err := core.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func runDeleteBenchmark(b *testing.B, db *den.DB) {
+func runDeleteBenchmark(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -133,27 +134,27 @@ func runDeleteBenchmark(b *testing.B, db *den.DB) {
 	for b.Loop() {
 		b.StopTimer()
 		p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-		if err := den.Save(ctx, db, p); err != nil {
+		if err := core.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 		b.StartTimer()
 
-		if err := den.Delete(ctx, db, p); err != nil {
+		if err := core.Delete(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func runQueryWithConditionBenchmark(b *testing.B, db *den.DB) {
+func runQueryWithConditionBenchmark(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	seedBenchProducts(b, db, 100)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		results, err := den.NewQuery[BenchProduct](db,
+		results, err := core.NewQuery[BenchProduct](db,
 			where.Field("price").Gt(50.0),
-		).Sort("price", den.Asc).Limit(10).All(ctx)
+		).Sort("price", core.Asc).Limit(10).All(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -1,17 +1,17 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"errors"
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type RevProduct struct {
@@ -20,8 +20,8 @@ type RevProduct struct {
 	Price float64 `json:"price"`
 }
 
-func (p RevProduct) DenSettings() den.Settings {
-	return den.Settings{UseRevision: true}
+func (p RevProduct) DenSettings() core.Settings {
+	return core.Settings{UseRevision: true}
 }
 
 // SoftRevProduct combines revision tracking with soft-delete to exercise the
@@ -32,8 +32,8 @@ type SoftRevProduct struct {
 	Name string `json:"name"`
 }
 
-func (p SoftRevProduct) DenSettings() den.Settings {
-	return den.Settings{UseRevision: true}
+func (p SoftRevProduct) DenSettings() core.Settings {
+	return core.Settings{UseRevision: true}
 }
 
 func TestRevision_SetOnInsert(t *testing.T) {
@@ -41,7 +41,7 @@ func TestRevision_SetOnInsert(t *testing.T) {
 	ctx := context.Background()
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	assert.NotEmpty(t, p.Rev, "revision should be set on insert")
 }
 
@@ -50,11 +50,11 @@ func TestRevision_UpdatesOnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	firstRev := p.Rev
 
 	p.Price = 20.0
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	assert.NotEqual(t, firstRev, p.Rev, "revision should change on update")
 }
 
@@ -63,18 +63,18 @@ func TestRevision_Conflict(t *testing.T) {
 	ctx := context.Background()
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Simulate a concurrent update
-	p2, err := den.FindByID[RevProduct](ctx, db, p.ID)
+	p2, err := core.FindByID[RevProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	p2.Price = 30.0
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 
 	// p still has the old revision — should conflict
 	p.Price = 99.0
-	err = den.Save(ctx, db, p)
-	require.ErrorIs(t, err, den.ErrRevisionConflict)
+	err = core.Save(ctx, db, p)
+	require.ErrorIs(t, err, core.ErrRevisionConflict)
 }
 
 // TestRevision_BlindUpdateConflict reproduces den-b0mq: a caller constructs
@@ -87,18 +87,18 @@ func TestRevision_BlindUpdateConflict(t *testing.T) {
 	ctx := context.Background()
 
 	original := &RevProduct{Name: "v1", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, original))
+	require.NoError(t, core.Save(ctx, db, original))
 
 	blind := &RevProduct{Name: "blind overwrite", Price: 999.0}
 	blind.ID = original.ID
 	// blind.Rev is the zero value — intentionally not set
 
-	err := den.Save(ctx, db, blind)
-	require.ErrorIs(t, err, den.ErrRevisionConflict,
+	err := core.Save(ctx, db, blind)
+	require.ErrorIs(t, err, core.ErrRevisionConflict,
 		"update of a revisioned doc with an empty _rev must conflict, not silently overwrite")
 
 	// Confirm the write did not go through.
-	found, err := den.FindByID[RevProduct](ctx, db, original.ID)
+	found, err := core.FindByID[RevProduct](ctx, db, original.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "v1", found.Name, "original document must be untouched")
 }
@@ -113,15 +113,15 @@ func TestRevision_EmptyRevAfterLoad_Conflicts(t *testing.T) {
 	ctx := context.Background()
 
 	original := &RevProduct{Name: "v1", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, original))
+	require.NoError(t, core.Save(ctx, db, original))
 
-	loaded, err := den.FindByID[RevProduct](ctx, db, original.ID)
+	loaded, err := core.FindByID[RevProduct](ctx, db, original.ID)
 	require.NoError(t, err)
 	loaded.Rev = "" // manually clear after load
 	loaded.Price = 99.0
 
-	err = den.Save(ctx, db, loaded)
-	require.ErrorIs(t, err, den.ErrRevisionConflict,
+	err = core.Save(ctx, db, loaded)
+	require.ErrorIs(t, err, core.ErrRevisionConflict,
 		"clearing Rev after load must produce the same conflict as a fresh blind-update doc")
 }
 
@@ -134,7 +134,7 @@ func TestRevision_ConcurrentUpdates_ExactlyOneSucceeds(t *testing.T) {
 	ctx := context.Background()
 
 	original := &RevProduct{Name: "shared", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, original))
+	require.NoError(t, core.Save(ctx, db, original))
 
 	// Pre-load the same revision into N independent doc instances in the main
 	// goroutine, so every racer starts with the identical stale rev. Loading
@@ -143,7 +143,7 @@ func TestRevision_ConcurrentUpdates_ExactlyOneSucceeds(t *testing.T) {
 	const N = 2
 	docs := make([]*RevProduct, N)
 	for i := range N {
-		loaded, err := den.FindByID[RevProduct](ctx, db, original.ID)
+		loaded, err := core.FindByID[RevProduct](ctx, db, original.ID)
 		require.NoError(t, err)
 		require.Equal(t, original.Rev, loaded.Rev, "pre-load must see the insert rev")
 		docs[i] = loaded
@@ -156,7 +156,7 @@ func TestRevision_ConcurrentUpdates_ExactlyOneSucceeds(t *testing.T) {
 		wg.Go(func() {
 			<-start // barrier: release both goroutines simultaneously
 			docs[i].Price = float64(100 + i)
-			errs <- den.Save(ctx, db, docs[i])
+			errs <- core.Save(ctx, db, docs[i])
 		})
 	}
 	close(start)
@@ -168,7 +168,7 @@ func TestRevision_ConcurrentUpdates_ExactlyOneSucceeds(t *testing.T) {
 		switch {
 		case err == nil:
 			success++
-		case errors.Is(err, den.ErrRevisionConflict):
+		case errors.Is(err, core.ErrRevisionConflict):
 			conflicts++
 		default:
 			t.Fatalf("unexpected error: %v", err)
@@ -186,11 +186,11 @@ func TestRevision_SoftDeleteRestoreUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftRevProduct{Name: "v1"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	revInsert := p.Rev
 	require.NotEmpty(t, revInsert)
 
-	require.NoError(t, den.Delete(ctx, db, p)) // soft-delete
+	require.NoError(t, core.Delete(ctx, db, p)) // soft-delete
 	require.True(t, p.IsDeleted())
 	revDelete := p.Rev
 	assert.NotEqual(t, revInsert, revDelete,
@@ -198,13 +198,13 @@ func TestRevision_SoftDeleteRestoreUpdate(t *testing.T) {
 
 	p.DeletedAt = nil // restore
 	p.Name = "restored"
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	revRestore := p.Rev
 	assert.NotEqual(t, revDelete, revRestore,
 		"restore goes through Update and must bump Rev again")
 
 	p.Name = "v2"
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	assert.NotEqual(t, revRestore, p.Rev,
 		"subsequent Update must continue to bump Rev after restore")
 }
@@ -219,25 +219,25 @@ func TestRevision_ConcurrentSoftDeleteUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftRevProduct{Name: "v1"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Two independent loads, identical starting rev.
-	a, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	a, err := core.FindByID[SoftRevProduct](ctx, db, p.ID)
 	require.NoError(t, err)
-	b, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	b, err := core.FindByID[SoftRevProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	require.Equal(t, a.Rev, b.Rev)
 
 	// Soft-delete via a; b still holds the pre-delete revision.
-	require.NoError(t, den.Delete(ctx, db, a))
+	require.NoError(t, core.Delete(ctx, db, a))
 
 	b.Name = "would-clobber-deletion"
-	err = den.Save(ctx, db, b)
-	require.ErrorIs(t, err, den.ErrRevisionConflict,
+	err = core.Save(ctx, db, b)
+	require.ErrorIs(t, err, core.ErrRevisionConflict,
 		"stale Update after concurrent soft-delete must conflict, not overwrite DeletedAt")
 
 	// Stored state must still show the soft-deletion.
-	found, err := den.FindByID[SoftRevProduct](ctx, db, p.ID)
+	found, err := core.FindByID[SoftRevProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.True(t, found.IsDeleted(), "DeletedAt must survive the stale Update attempt")
 	assert.Equal(t, "v1", found.Name, "stale Update must not take effect")
@@ -247,8 +247,8 @@ func TestRevision_ConcurrentSoftDeleteUpdate(t *testing.T) {
 // soft-delete can be exercised against the revision chain.
 type SoftRevHouse struct {
 	document.Base
-	Name string                   `json:"name"`
-	Door den.Link[SoftRevProduct] `json:"door"`
+	Name string                    `json:"name"`
+	Door core.Link[SoftRevProduct] `json:"door"`
 }
 
 // TestRevision_CascadeSoftDeleteBumpsLinkedRevision pins that the
@@ -262,25 +262,25 @@ func TestRevision_CascadeSoftDeleteBumpsLinkedRevision(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftRevProduct{Name: "v1"}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	house := &SoftRevHouse{Name: "Home", Door: den.NewLink(door)}
-	require.NoError(t, den.Save(ctx, db, house))
+	house := &SoftRevHouse{Name: "Home", Door: core.NewLink(door)}
+	require.NoError(t, core.Save(ctx, db, house))
 
 	// Snapshot the door as a concurrent writer would have it.
 	stale := *door
 
 	// Cascade soft-delete via the parent.
-	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
+	require.NoError(t, core.Delete(ctx, db, house, core.WithLinkRule(core.LinkDelete)))
 
 	// The concurrent writer's stale-rev Update must conflict.
 	stale.Name = "would-clobber-deletion"
-	err := den.Save(ctx, db, &stale)
-	require.ErrorIs(t, err, den.ErrRevisionConflict,
+	err := core.Save(ctx, db, &stale)
+	require.ErrorIs(t, err, core.ErrRevisionConflict,
 		"cascade soft-delete must bump linked _rev so concurrent stale Update conflicts")
 
 	// Stored doc still soft-deleted, name unchanged.
-	found, err := den.NewQuery[SoftRevProduct](db).IncludeDeleted().First(ctx)
+	found, err := core.NewQuery[SoftRevProduct](db).IncludeDeleted().First(ctx)
 	require.NoError(t, err)
 	assert.True(t, found.IsDeleted(), "DeletedAt must survive the stale Update attempt")
 	assert.Equal(t, "v1", found.Name, "stale Update must not take effect")
@@ -294,11 +294,11 @@ func TestRevision_SoftDeleteIgnoreRevision(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftRevProduct{Name: "v1"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Mutate the in-memory rev so the check would fail without IgnoreRevision.
 	p.Rev = "stale"
-	require.NoError(t, den.Delete(ctx, db, p, den.IgnoreRevision()))
+	require.NoError(t, core.Delete(ctx, db, p, core.IgnoreRevision()))
 	assert.True(t, p.IsDeleted())
 }
 
@@ -307,18 +307,18 @@ func TestRevision_IgnoreRevision(t *testing.T) {
 	ctx := context.Background()
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Simulate stale revision
-	p2, _ := den.FindByID[RevProduct](ctx, db, p.ID)
+	p2, _ := core.FindByID[RevProduct](ctx, db, p.ID)
 	p2.Price = 30.0
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 
 	// Force write with stale revision
 	p.Price = 99.0
-	require.NoError(t, den.Save(ctx, db, p, den.IgnoreRevision()))
+	require.NoError(t, core.Save(ctx, db, p, core.IgnoreRevision()))
 
-	found, err := den.FindByID[RevProduct](ctx, db, p.ID)
+	found, err := core.FindByID[RevProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, found.Price, 0.001)
 }

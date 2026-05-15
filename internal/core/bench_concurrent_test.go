@@ -1,12 +1,13 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
 
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 )
@@ -20,12 +21,12 @@ type BenchJob struct {
 	Payload string `json:"payload"`
 }
 
-func conBenchDBPostgres(b *testing.B) *den.DB {
+func conBenchDBPostgres(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpenPostgres(b, dentest.PostgresURL(), &BenchArticle{}, &BenchAuthor{}, &BenchJob{})
 }
 
-func conBenchDBSQLite(b *testing.B) *den.DB {
+func conBenchDBSQLite(b *testing.B) *core.DB {
 	b.Helper()
 	return dentest.MustOpen(b, &BenchArticle{}, &BenchAuthor{}, &BenchJob{})
 }
@@ -36,7 +37,7 @@ func conBenchDBSQLite(b *testing.B) *den.DB {
 // scales with pool connections; on SQLite WAL readers don't block, so it
 // should scale up to the cost of opening the read.
 
-func runConFindByID(b *testing.B, db *den.DB) {
+func runConFindByID(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 1000, authorID)
@@ -47,7 +48,7 @@ func runConFindByID(b *testing.B, db *den.DB) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			idx := counter.Add(1)
-			if _, err := den.FindByID[BenchArticle](ctx, db, ids[int(idx)%len(ids)]); err != nil {
+			if _, err := core.FindByID[BenchArticle](ctx, db, ids[int(idx)%len(ids)]); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -63,7 +64,7 @@ func BenchmarkConcurrent_Postgres_FindByID(b *testing.B) { runConFindByID(b, con
 // around single-writer speed. On PG, MVCC lets writes run concurrently
 // so throughput should scale with the pool.
 
-func runConInsert(b *testing.B, db *den.DB) {
+func runConInsert(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 
@@ -76,7 +77,7 @@ func runConInsert(b *testing.B, db *den.DB) {
 			doc := makeBenchArticle(int(i), authorID)
 			// Ensure slug uniqueness under concurrency even if counter wraps
 			doc.Slug = doc.ID + "-" + doc.Slug
-			if err := den.Save(ctx, db, doc); err != nil {
+			if err := core.Save(ctx, db, doc); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -91,7 +92,7 @@ func BenchmarkConcurrent_Postgres_Insert(b *testing.B) { runConInsert(b, conBenc
 // Realistic web-service shape: lots of reads, a few writes. Each goroutine
 // decides per-iteration by counter modulo 5.
 
-func runConMixed(b *testing.B, db *den.DB) {
+func runConMixed(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 	authorID := seedAuthor(b, db)
 	ids := seedArticles(b, db, 1000, authorID)
@@ -103,16 +104,16 @@ func runConMixed(b *testing.B, db *den.DB) {
 		for pb.Next() {
 			i := counter.Add(1)
 			if i%5 == 0 {
-				doc, err := den.FindByID[BenchArticle](ctx, db, ids[int(i)%len(ids)])
+				doc, err := core.FindByID[BenchArticle](ctx, db, ids[int(i)%len(ids)])
 				if err != nil {
 					b.Fatal(err)
 				}
 				doc.Stock++
-				if err := den.Save(ctx, db, doc); err != nil {
+				if err := core.Save(ctx, db, doc); err != nil {
 					b.Fatal(err)
 				}
 			} else {
-				if _, err := den.FindByID[BenchArticle](ctx, db, ids[int(i)%len(ids)]); err != nil {
+				if _, err := core.FindByID[BenchArticle](ctx, db, ids[int(i)%len(ids)]); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -130,7 +131,7 @@ func BenchmarkConcurrent_Postgres_Mixed8020(b *testing.B) { runConMixed(b, conBe
 // (returning ErrNotFound on PG, treated as idle). On SQLite SkipLocked is
 // a no-op — writers serialize.
 
-func runConQueueConsumer(b *testing.B, db *den.DB) {
+func runConQueueConsumer(b *testing.B, db *core.DB) {
 	ctx := context.Background()
 
 	const jobCount = 5000
@@ -138,7 +139,7 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 	for i := range jobCount {
 		jobs[i] = &BenchJob{Status: "pending", Payload: "work item"}
 	}
-	if err := den.SaveAll(ctx, db, jobs); err != nil {
+	if err := core.SaveAll(ctx, db, jobs); err != nil {
 		b.Fatal(err)
 	}
 	ids := make([]string, jobCount)
@@ -152,17 +153,17 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			idx := int(counter.Add(1)) % len(ids)
-			_ = den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				job, err := den.LockByID[BenchJob](ctx, tx, ids[idx], den.SkipLocked())
+			_ = core.RunInTransaction(ctx, db, func(tx *core.Tx) error {
+				job, err := core.LockByID[BenchJob](ctx, tx, ids[idx], core.SkipLocked())
 				if err != nil {
-					if errors.Is(err, den.ErrNotFound) {
+					if errors.Is(err, core.ErrNotFound) {
 						// Another worker holds it (or it was already processed).
 						return nil
 					}
 					return err
 				}
 				job.Status = "processed"
-				return den.Save(ctx, tx, job)
+				return core.Save(ctx, tx, job)
 			})
 		}
 	})

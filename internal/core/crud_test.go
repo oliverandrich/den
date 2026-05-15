@@ -1,17 +1,17 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type Product struct {
@@ -25,14 +25,14 @@ func TestInsertAndFindByID(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 29.99}
-	err := den.Save(ctx, db, p)
+	err := core.Save(ctx, db, p)
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, p.ID, "ID should be auto-generated")
 	assert.NotZero(t, p.CreatedAt, "CreatedAt should be set")
 	assert.NotZero(t, p.UpdatedAt, "UpdatedAt should be set")
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, p.Name, found.Name)
 	assert.InDelta(t, p.Price, found.Price, 0.001)
@@ -47,11 +47,11 @@ func TestInsertWithCustomID(t *testing.T) {
 		Base: document.Base{ID: "custom-123"},
 		Name: "Custom",
 	}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	assert.Equal(t, "custom-123", p.ID)
 
-	found, err := den.FindByID[Product](ctx, db, "custom-123")
+	found, err := core.FindByID[Product](ctx, db, "custom-123")
 	require.NoError(t, err)
 	assert.Equal(t, "Custom", found.Name)
 }
@@ -60,8 +60,8 @@ func TestFindByID_NotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, err := den.FindByID[Product](ctx, db, "nonexistent")
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[Product](ctx, db, "nonexistent")
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestFindByIDs(t *testing.T) {
@@ -71,10 +71,10 @@ func TestFindByIDs(t *testing.T) {
 	p1 := &Product{Name: "A", Price: 1.0}
 	p2 := &Product{Name: "B", Price: 2.0}
 	p3 := &Product{Name: "C", Price: 3.0}
-	require.NoError(t, den.SaveAll(ctx, db, []*Product{p1, p2, p3}))
+	require.NoError(t, core.SaveAll(ctx, db, []*Product{p1, p2, p3}))
 
 	// Fetch two of three
-	docs, err := den.FindByIDs[Product](ctx, db, []string{p1.ID, p3.ID})
+	docs, err := core.FindByIDs[Product](ctx, db, []string{p1.ID, p3.ID})
 	require.NoError(t, err)
 	assert.Len(t, docs, 2)
 
@@ -91,10 +91,10 @@ func TestFindByIDs_MissingIDs(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Only", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// One real, one fake — should return only the real one
-	docs, err := den.FindByIDs[Product](ctx, db, []string{p.ID, "nonexistent"})
+	docs, err := core.FindByIDs[Product](ctx, db, []string{p.ID, "nonexistent"})
 	require.NoError(t, err)
 	assert.Len(t, docs, 1)
 	assert.Equal(t, "Only", docs[0].Name)
@@ -104,7 +104,7 @@ func TestFindByIDs_Empty(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	docs, err := den.FindByIDs[Product](ctx, db, nil)
+	docs, err := core.FindByIDs[Product](ctx, db, nil)
 	require.NoError(t, err)
 	assert.Empty(t, docs)
 }
@@ -114,18 +114,18 @@ func TestQuerySet_Update_BulkPriceUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.SaveAll(ctx, db, []*Product{
+	require.NoError(t, core.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 99.0},
 	}))
 
-	count, err := den.NewQuery[Product](db, where.Field("price").Lt(10.0)).
-		Update(ctx, den.SetFields{"price": 50.0})
+	count, err := core.NewQuery[Product](db, where.Field("price").Lt(10.0)).
+		Update(ctx, core.SetFields{"price": 50.0})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
-	updated, err := den.NewQuery[Product](db, where.Field("price").Eq(50.0)).All(ctx)
+	updated, err := core.NewQuery[Product](db, where.Field("price").Eq(50.0)).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, updated, 2)
 }
@@ -138,10 +138,10 @@ func TestSave_InsertWhenIDEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "FreshDoc", Price: 5.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	assert.NotEmpty(t, p.ID, "Save must set the ID via the Insert path")
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "FreshDoc", found.Name)
 }
@@ -154,14 +154,14 @@ func TestSave_UpdateWhenIDPresent(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Initial", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	originalID := p.ID
 
 	p.Price = 99.0
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	assert.Equal(t, originalID, p.ID, "Update must not change the ID")
 
-	found, err := den.FindByID[Product](ctx, db, originalID)
+	found, err := core.FindByID[Product](ctx, db, originalID)
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, found.Price, 0.001,
 		"Save must persist the in-memory state through the Update path")
@@ -172,17 +172,17 @@ func TestUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 	originalUpdatedAt := p.UpdatedAt
 
 	time.Sleep(2 * time.Millisecond)
 	p.Name = "Updated"
 	p.Price = 20.0
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	assert.True(t, p.UpdatedAt.After(originalUpdatedAt), "UpdatedAt should be bumped")
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", found.Name)
 	assert.InDelta(t, 20.0, found.Price, 0.001)
@@ -193,12 +193,12 @@ func TestDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "ToDelete"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	require.NoError(t, den.Delete(ctx, db, p))
+	require.NoError(t, core.Delete(ctx, db, p))
 
-	_, err := den.FindByID[Product](ctx, db, p.ID)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.FindByID[Product](ctx, db, p.ID)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestInsert_Upsert(t *testing.T) {
@@ -206,11 +206,11 @@ func TestInsert_Upsert(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "New"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	assert.NotEmpty(t, p.ID)
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "New", found.Name)
 }
@@ -220,12 +220,12 @@ func TestUpdate_ViaSave(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	p.Name = "Updated"
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", found.Name)
 }
@@ -235,7 +235,7 @@ func TestRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Simulate external change by directly updating
 	p2 := &Product{
@@ -243,13 +243,13 @@ func TestRefresh(t *testing.T) {
 		Name:  "Changed",
 		Price: 99.0,
 	}
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 
 	// p still has old values
 	assert.Equal(t, "Original", p.Name)
 
 	// Refresh picks up the change
-	require.NoError(t, den.Refresh(ctx, db, p))
+	require.NoError(t, core.Refresh(ctx, db, p))
 	assert.Equal(t, "Changed", p.Name)
 	assert.InDelta(t, 99.0, p.Price, 0.001)
 }
@@ -259,11 +259,11 @@ func TestRefresh_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "WillBeDeleted"}
-	require.NoError(t, den.Save(ctx, db, p))
-	require.NoError(t, den.Delete(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
+	require.NoError(t, core.Delete(ctx, db, p))
 
-	err := den.Refresh(ctx, db, p)
-	require.ErrorIs(t, err, den.ErrNotFound)
+	err := core.Refresh(ctx, db, p)
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestUnregisteredType(t *testing.T) {
@@ -271,8 +271,8 @@ func TestUnregisteredType(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Orphan"}
-	err := den.Save(ctx, db, p)
-	require.ErrorIs(t, err, den.ErrNotRegistered)
+	err := core.Save(ctx, db, p)
+	require.ErrorIs(t, err, core.ErrNotRegistered)
 }
 
 // --- Unique constraint tests ---
@@ -294,11 +294,11 @@ func TestUniqueConstraint(t *testing.T) {
 	ctx := context.Background()
 
 	p1 := &UniqueProduct{Name: "Widget A", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p1))
+	require.NoError(t, core.Save(ctx, db, p1))
 
 	p2 := &UniqueProduct{Name: "Widget B", SKU: "ABC123"}
-	err := den.Save(ctx, db, p2)
-	require.ErrorIs(t, err, den.ErrDuplicate)
+	err := core.Save(ctx, db, p2)
+	require.ErrorIs(t, err, core.ErrDuplicate)
 }
 
 func TestUniqueConstraint_DifferentValues(t *testing.T) {
@@ -306,10 +306,10 @@ func TestUniqueConstraint_DifferentValues(t *testing.T) {
 	ctx := context.Background()
 
 	p1 := &UniqueProduct{Name: "Widget A", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p1))
+	require.NoError(t, core.Save(ctx, db, p1))
 
 	p2 := &UniqueProduct{Name: "Widget B", SKU: "DEF456"}
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 }
 
 func TestUniqueConstraint_UpdateKeepsSameValue(t *testing.T) {
@@ -317,12 +317,12 @@ func TestUniqueConstraint_UpdateKeepsSameValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	p.Name = "Updated Widget"
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	found, err := den.FindByID[UniqueProduct](ctx, db, p.ID)
+	found, err := core.FindByID[UniqueProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Widget", found.Name)
 	assert.Equal(t, "ABC123", found.SKU)
@@ -333,14 +333,14 @@ func TestUniqueConstraint_UpdateChangesValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	p.SKU = "NEW456"
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
 	// Old unique value should be freed
 	p2 := &UniqueProduct{Name: "Other", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 }
 
 func TestUniqueConstraint_DeleteFreesValue(t *testing.T) {
@@ -348,12 +348,12 @@ func TestUniqueConstraint_DeleteFreesValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p))
-	require.NoError(t, den.Delete(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
+	require.NoError(t, core.Delete(ctx, db, p))
 
 	// Unique value should be available again
 	p2 := &UniqueProduct{Name: "New Widget", SKU: "ABC123"}
-	require.NoError(t, den.Save(ctx, db, p2))
+	require.NoError(t, core.Save(ctx, db, p2))
 }
 
 func ptr(s string) *string { return &s }
@@ -363,10 +363,10 @@ func TestNullableUnique_MultipleNils(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice"}
-	require.NoError(t, den.Save(ctx, db, u1))
+	require.NoError(t, core.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob"}
-	require.NoError(t, den.Save(ctx, db, u2))
+	require.NoError(t, core.Save(ctx, db, u2))
 }
 
 func TestNullableUnique_ConflictOnNonNil(t *testing.T) {
@@ -374,11 +374,11 @@ func TestNullableUnique_ConflictOnNonNil(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice", Email: ptr("alice@example.com")}
-	require.NoError(t, den.Save(ctx, db, u1))
+	require.NoError(t, core.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob", Email: ptr("alice@example.com")}
-	err := den.Save(ctx, db, u2)
-	require.ErrorIs(t, err, den.ErrDuplicate)
+	err := core.Save(ctx, db, u2)
+	require.ErrorIs(t, err, core.ErrDuplicate)
 }
 
 func TestNullableUnique_DifferentNonNil(t *testing.T) {
@@ -386,10 +386,10 @@ func TestNullableUnique_DifferentNonNil(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice", Email: ptr("alice@example.com")}
-	require.NoError(t, den.Save(ctx, db, u1))
+	require.NoError(t, core.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob", Email: ptr("bob@example.com")}
-	require.NoError(t, den.Save(ctx, db, u2))
+	require.NoError(t, core.Save(ctx, db, u2))
 }
 
 // --- Bulk operation tests ---
@@ -403,13 +403,13 @@ func TestInsertMany(t *testing.T) {
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, products))
+	require.NoError(t, core.SaveAll(ctx, db, products))
 
 	for _, p := range products {
 		assert.NotEmpty(t, p.ID)
 	}
 
-	all, err := den.NewQuery[Product](db).All(ctx)
+	all, err := core.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
 }
@@ -423,13 +423,13 @@ func TestDeleteMany(t *testing.T) {
 		{Name: "Delete1", Price: 15.0},
 		{Name: "Delete2", Price: 25.0},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, products))
+	require.NoError(t, core.SaveAll(ctx, db, products))
 
-	count, err := den.NewQuery[Product](db, where.Field("price").Gt(10.0)).Delete(ctx)
+	count, err := core.NewQuery[Product](db, where.Field("price").Gt(10.0)).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
-	remaining, err := den.NewQuery[Product](db).All(ctx)
+	remaining, err := core.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, remaining, 1)
 	assert.Equal(t, "Keep", remaining[0].Name)
@@ -442,15 +442,15 @@ func TestFindOneAndUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	updated, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"price": 99.0})
+	updated, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, core.SetFields{"price": 99.0})
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, updated.Price, 0.001)
 	assert.Equal(t, "Widget", updated.Name)
 
 	// Verify persisted
-	found, err := den.FindByID[Product](ctx, db, p.ID)
+	found, err := core.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, found.Price, 0.001)
 }
@@ -459,8 +459,8 @@ func TestFindOneAndUpdate_NotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Nonexistent")).UpdateOne(ctx, den.SetFields{"price": 99.0})
-	require.ErrorIs(t, err, den.ErrNotFound)
+	_, err := core.NewQuery[Product](db, where.Field("name").Eq("Nonexistent")).UpdateOne(ctx, core.SetFields{"price": 99.0})
+	require.ErrorIs(t, err, core.ErrNotFound)
 }
 
 func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
@@ -468,9 +468,9 @@ func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Save(ctx, db, p))
+	require.NoError(t, core.Save(ctx, db, p))
 
-	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"nonexistent": "x"})
+	_, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, core.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -484,9 +484,9 @@ func TestFindOneAndUpdate_FieldValidatedBeforeLookup(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, err := den.NewQuery[Product](db, where.Field("name").Eq("absent")).UpdateOne(ctx, den.SetFields{"nonexistent": "x"})
+	_, err := core.NewQuery[Product](db, where.Field("name").Eq("absent")).UpdateOne(ctx, core.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
-	require.NotErrorIs(t, err, den.ErrNotFound,
+	require.NotErrorIs(t, err, core.ErrNotFound,
 		"field validation must surface before findOneStrict runs")
 	assert.Contains(t, err.Error(), "nonexistent")
 }
@@ -495,13 +495,13 @@ func TestFindOneAndUpdate_MultipleMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 10.0}))
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 20.0}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "Widget", Price: 10.0}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "Widget", Price: 20.0}))
 
-	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"price": 99.0})
-	require.ErrorIs(t, err, den.ErrMultipleMatches)
+	_, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, core.SetFields{"price": 99.0})
+	require.ErrorIs(t, err, core.ErrMultipleMatches)
 
-	all, err := den.NewQuery[Product](db).Sort("price", den.Asc).All(ctx)
+	all, err := core.NewQuery[Product](db).Sort("price", core.Asc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 	assert.InDelta(t, 10.0, all[0].Price, 0.001)
@@ -516,7 +516,7 @@ func TestFindOrCreate_Insert(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).GetOrCreate(ctx, &Product{Name: "Widget", Price: 1.0})
+	doc, inserted, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).GetOrCreate(ctx, &Product{Name: "Widget", Price: 1.0})
 	require.NoError(t, err)
 	assert.True(t, inserted, "no existing match → must insert")
 	assert.Equal(t, "Widget", doc.Name)
@@ -533,9 +533,9 @@ func TestFindOrCreate_Existing(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Widget", Price: 99.0}
-	require.NoError(t, den.Save(ctx, db, existing))
+	require.NoError(t, core.Save(ctx, db, existing))
 
-	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).
+	doc, inserted, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).
 		GetOrCreate(ctx, &Product{Name: "Widget", Price: 1.0}) // defaults — must NOT overwrite the 99.0
 	require.NoError(t, err)
 	assert.False(t, inserted, "existing row → must not insert")
@@ -550,14 +550,14 @@ func TestFindOneAndUpsert_Insert(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget", Price: 1.0}, den.SetFields{"price": 5.0})
+	doc, inserted, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget", Price: 1.0}, core.SetFields{"price": 5.0})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.Equal(t, "Widget", doc.Name)
 	assert.InDelta(t, 5.0, doc.Price, 0.001)
 	assert.NotEmpty(t, doc.ID)
 
-	found, err := den.FindByID[Product](ctx, db, doc.ID)
+	found, err := core.FindByID[Product](ctx, db, doc.ID)
 	require.NoError(t, err)
 	assert.InDelta(t, 5.0, found.Price, 0.001)
 }
@@ -567,19 +567,19 @@ func TestFindOneAndUpsert_Update(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, existing))
+	require.NoError(t, core.Save(ctx, db, existing))
 
-	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).
+	doc, inserted, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).
 		UpsertOne(ctx,
 			&Product{Name: "Widget", Price: 999.0}, // defaults must NOT apply on hit
-			den.SetFields{"price": 5.0},
+			core.SetFields{"price": 5.0},
 		)
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t, existing.ID, doc.ID)
 	assert.InDelta(t, 5.0, doc.Price, 0.001)
 
-	count, err := den.NewQuery[Product](db).Count(ctx)
+	count, err := core.NewQuery[Product](db).Count(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
@@ -588,18 +588,18 @@ func TestFindOneAndUpsert_MultipleMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 1.0}))
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 2.0}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "Widget", Price: 1.0}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "Widget", Price: 2.0}))
 
-	_, _, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, den.SetFields{"price": 99.0})
-	require.ErrorIs(t, err, den.ErrMultipleMatches)
+	_, _, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, core.SetFields{"price": 99.0})
+	require.ErrorIs(t, err, core.ErrMultipleMatches)
 }
 
 func TestFindOneAndUpsert_FieldNotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, _, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, den.SetFields{"nonexistent": "x"})
+	_, _, err := core.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, core.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -609,10 +609,10 @@ func TestFindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
 	ctx := context.Background()
 
 	original := &SoftProduct{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, original))
-	require.NoError(t, den.Delete(ctx, db, original))
+	require.NoError(t, core.Save(ctx, db, original))
+	require.NoError(t, core.Delete(ctx, db, original))
 
-	doc, inserted, err := den.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
+	doc, inserted, err := core.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, core.SetFields{"price": 20.0})
 	require.NoError(t, err)
 	assert.True(t, inserted, "soft-deleted match should not satisfy upsert")
 	assert.NotEqual(t, original.ID, doc.ID)
@@ -624,12 +624,12 @@ func TestFindOneAndUpsert_IncludeDeletedUpdates(t *testing.T) {
 	ctx := context.Background()
 
 	original := &SoftProduct{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Save(ctx, db, original))
-	require.NoError(t, den.Delete(ctx, db, original))
+	require.NoError(t, core.Save(ctx, db, original))
+	require.NoError(t, core.Delete(ctx, db, original))
 
-	doc, inserted, err := den.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).
+	doc, inserted, err := core.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).
 		IncludeDeleted().
-		UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
+		UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, core.SetFields{"price": 20.0})
 	require.NoError(t, err)
 	assert.False(t, inserted, "soft-deleted match should be updated")
 	assert.Equal(t, original.ID, doc.ID)
@@ -642,7 +642,7 @@ func TestFindOneAndUpsert_HookOrder_InsertPath(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	_, inserted, err := den.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, den.SetFields{})
+	_, inserted, err := core.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, core.SetFields{})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.Equal(t,
@@ -656,10 +656,10 @@ func TestFindOneAndUpsert_HookOrder_UpdatePath(t *testing.T) {
 	db := dentest.MustOpen(t, &orderingDoc{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Save(ctx, db, &orderingDoc{Name: "Widget"}))
+	require.NoError(t, core.Save(ctx, db, &orderingDoc{Name: "Widget"}))
 	resetHookOrderCalls(t) // discard insert hooks from seed
 
-	_, inserted, err := den.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, den.SetFields{})
+	_, inserted, err := core.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, core.SetFields{})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t,
@@ -673,9 +673,9 @@ func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	err := den.Delete(ctx, db, &Product{Name: "NoID"})
+	err := core.Delete(ctx, db, &Product{Name: "NoID"})
 	require.Error(t, err)
-	require.ErrorIs(t, err, den.ErrValidation)
+	require.ErrorIs(t, err, core.ErrValidation)
 }
 
 // --- den:"eager" honored across CRUD-style read APIs ---
@@ -683,14 +683,14 @@ func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
 // seedEagerHouse inserts one Door + one EagerHouse pointing at it,
 // returning the persisted house. Used by the eager-CRUD tests below.
 // EagerHouse / Door / EagerOwner are defined in link_test.go.
-func seedEagerHouse(ctx context.Context, t *testing.T, db *den.DB, name string) *EagerHouse {
+func seedEagerHouse(ctx context.Context, t *testing.T, db *core.DB, name string) *EagerHouse {
 	t.Helper()
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Owner"}
-	require.NoError(t, den.Save(ctx, db, owner))
-	h := &EagerHouse{Name: name, Door: den.NewLink(door), Owner: den.NewLink(owner)}
-	require.NoError(t, den.Save(ctx, db, h))
+	require.NoError(t, core.Save(ctx, db, owner))
+	h := &EagerHouse{Name: name, Door: core.NewLink(door), Owner: core.NewLink(owner)}
+	require.NoError(t, core.Save(ctx, db, h))
 	return h
 }
 
@@ -700,7 +700,7 @@ func TestFindByID_HonorsEagerTag(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, err := den.FindByID[EagerHouse](ctx, db, h.ID)
+	got, err := core.FindByID[EagerHouse](ctx, db, h.ID)
 	require.NoError(t, err)
 	assert.True(t, got.Door.IsLoaded(), "FindByID must honor den:\"eager\" on Door")
 	assert.False(t, got.Owner.IsLoaded(), "untagged Owner stays lazy")
@@ -712,7 +712,7 @@ func TestFindByID_WithoutFetchLinksSuppressesEager(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, err := den.FindByID[EagerHouse](ctx, db, h.ID, den.WithoutFetchLinks())
+	got, err := core.FindByID[EagerHouse](ctx, db, h.ID, core.WithoutFetchLinks())
 	require.NoError(t, err)
 	assert.False(t, got.Door.IsLoaded(), "WithoutFetchLinks must override eager tag")
 	assert.NotEmpty(t, got.Door.ID, "ID still populated")
@@ -725,7 +725,7 @@ func TestFindByIDs_HonorsEagerTag(t *testing.T) {
 	h1 := seedEagerHouse(ctx, t, db, "A")
 	h2 := seedEagerHouse(ctx, t, db, "B")
 
-	got, err := den.FindByIDs[EagerHouse](ctx, db, []string{h1.ID, h2.ID})
+	got, err := core.FindByIDs[EagerHouse](ctx, db, []string{h1.ID, h2.ID})
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	for _, h := range got {
@@ -740,7 +740,7 @@ func TestRefresh_HonorsEagerTag(t *testing.T) {
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 	stale := &EagerHouse{Base: document.Base{ID: h.ID}}
 
-	require.NoError(t, den.Refresh(ctx, db, stale))
+	require.NoError(t, core.Refresh(ctx, db, stale))
 	assert.True(t, stale.Door.IsLoaded(), "Refresh must honor den:\"eager\"")
 }
 
@@ -750,7 +750,7 @@ func TestFindOneAndUpdate_HonorsEagerTag(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpdateOne(ctx, den.SetFields{"name": "Renamed"})
+	got, err := core.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpdateOne(ctx, core.SetFields{"name": "Renamed"})
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", got.Name)
 	assert.True(t, got.Door.IsLoaded(), "FindOneAndUpdate must honor den:\"eager\"")
@@ -762,7 +762,7 @@ func TestFindOneAndUpsert_HonorsEagerTag_HitPath(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpsertOne(ctx, &EagerHouse{Name: "should-not-insert"}, den.SetFields{"name": "Updated"})
+	got, inserted, err := core.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpsertOne(ctx, &EagerHouse{Name: "should-not-insert"}, core.SetFields{"name": "Updated"})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.True(t, got.Door.IsLoaded(), "Upsert hit path must honor den:\"eager\"")
@@ -773,10 +773,10 @@ func TestFindOneAndUpsert_HonorsEagerTag_MissPath(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, core.Save(ctx, db, door))
 
-	defaults := &EagerHouse{Name: "Fresh", Door: den.NewLink(door)}
-	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("name").Eq("Fresh")).UpsertOne(ctx, defaults, den.SetFields{})
+	defaults := &EagerHouse{Name: "Fresh", Door: core.NewLink(door)}
+	got, inserted, err := core.NewQuery[EagerHouse](db, where.Field("name").Eq("Fresh")).UpsertOne(ctx, defaults, core.SetFields{})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.True(t, got.Door.IsLoaded(),
@@ -789,7 +789,7 @@ func TestFindOrCreate_HonorsEagerTag(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).GetOrCreate(ctx, &EagerHouse{Name: "should-not-insert"})
+	got, inserted, err := core.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).GetOrCreate(ctx, &EagerHouse{Name: "should-not-insert"})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.True(t, got.Door.IsLoaded(),
@@ -800,7 +800,7 @@ func TestFindOrCreate_HonorsEagerTag(t *testing.T) {
 
 func TestSaveAll_EmptyInput(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
-	require.NoError(t, den.SaveAll[Product](context.Background(), db, nil))
+	require.NoError(t, core.SaveAll[Product](context.Background(), db, nil))
 }
 
 func TestSaveAll_MixedInsertAndUpdate(t *testing.T) {
@@ -808,7 +808,7 @@ func TestSaveAll_MixedInsertAndUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Existing", Price: 1}
-	require.NoError(t, den.Save(ctx, db, existing))
+	require.NoError(t, core.Save(ctx, db, existing))
 
 	// One new, one updating the existing.
 	existing.Price = 99
@@ -816,9 +816,9 @@ func TestSaveAll_MixedInsertAndUpdate(t *testing.T) {
 		{Name: "Fresh", Price: 5}, // empty ID → Insert
 		existing,                  // has ID → Update
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
-	all, err := den.NewQuery[Product](db).Sort("name", den.Asc).All(ctx)
+	all, err := core.NewQuery[Product](db).Sort("name", core.Asc).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 	assert.Equal(t, "Existing", all[0].Name)
@@ -836,18 +836,18 @@ func TestSaveAll_FailFastRollsBack(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-seed a doc that will collide with the second batch entry.
-	require.NoError(t, den.Save(ctx, db, &uniqueNameDoc{Name: "Bad"}))
+	require.NoError(t, core.Save(ctx, db, &uniqueNameDoc{Name: "Bad"}))
 
 	docs := []*uniqueNameDoc{
 		{Name: "Good"},
 		{Name: "Bad"}, // duplicate of the pre-seeded row → ErrDuplicate on Insert
 	}
-	err := den.SaveAll(ctx, db, docs)
+	err := core.SaveAll(ctx, db, docs)
 	require.Error(t, err, "duplicate name on the second doc must error")
-	require.ErrorIs(t, err, den.ErrDuplicate)
+	require.ErrorIs(t, err, core.ErrDuplicate)
 
 	// Confirm the first doc was rolled back.
-	count, err := den.NewQuery[uniqueNameDoc](db,
+	count, err := core.NewQuery[uniqueNameDoc](db,
 		where.Field("name").Eq("Good"),
 	).Count(ctx)
 	require.NoError(t, err)
@@ -856,7 +856,7 @@ func TestSaveAll_FailFastRollsBack(t *testing.T) {
 
 func TestDeleteAll_EmptyInput(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
-	require.NoError(t, den.DeleteAll[Product](context.Background(), db, nil))
+	require.NoError(t, core.DeleteAll[Product](context.Background(), db, nil))
 }
 
 func TestDeleteAll_BatchOfDocs(t *testing.T) {
@@ -868,11 +868,11 @@ func TestDeleteAll_BatchOfDocs(t *testing.T) {
 		{Name: "B", Price: 2},
 		{Name: "C", Price: 3},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
-	require.NoError(t, den.DeleteAll(ctx, db, docs[:2])) // delete A and B
+	require.NoError(t, core.DeleteAll(ctx, db, docs[:2])) // delete A and B
 
-	remaining, err := den.NewQuery[Product](db).All(ctx)
+	remaining, err := core.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "C", remaining[0].Name)
@@ -880,7 +880,7 @@ func TestDeleteAll_BatchOfDocs(t *testing.T) {
 
 func TestRefreshAll_EmptyInput(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
-	require.NoError(t, den.RefreshAll[Product](context.Background(), db, nil))
+	require.NoError(t, core.RefreshAll[Product](context.Background(), db, nil))
 }
 
 func TestRefreshAll_PicksUpExternalChanges(t *testing.T) {
@@ -891,17 +891,17 @@ func TestRefreshAll_PicksUpExternalChanges(t *testing.T) {
 		{Name: "A", Price: 1},
 		{Name: "B", Price: 2},
 	}
-	require.NoError(t, den.SaveAll(ctx, db, docs))
+	require.NoError(t, core.SaveAll(ctx, db, docs))
 
 	// External update via QuerySet.Update bumps both prices.
-	_, err := den.NewQuery[Product](db).Update(ctx, den.SetFields{"price": 99.0})
+	_, err := core.NewQuery[Product](db).Update(ctx, core.SetFields{"price": 99.0})
 	require.NoError(t, err)
 
 	// Local docs still show the old prices.
 	assert.InDelta(t, 1.0, docs[0].Price, 0.001)
 	assert.InDelta(t, 2.0, docs[1].Price, 0.001)
 
-	require.NoError(t, den.RefreshAll(ctx, db, docs))
+	require.NoError(t, core.RefreshAll(ctx, db, docs))
 
 	assert.InDelta(t, 99.0, docs[0].Price, 0.001)
 	assert.InDelta(t, 99.0, docs[1].Price, 0.001)

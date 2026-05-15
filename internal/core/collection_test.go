@@ -1,16 +1,16 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"sort"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type Note struct {
@@ -27,7 +27,7 @@ type Category struct {
 func TestMeta(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{})
 
-	meta, err := den.Meta[Note](db)
+	meta, err := core.Meta[Note](db)
 	require.NoError(t, err)
 
 	assert.Equal(t, "note", meta.Name)
@@ -38,7 +38,7 @@ func TestMeta(t *testing.T) {
 	assert.GreaterOrEqual(t, len(meta.Fields), 5) // _id, _created_at, _updated_at, title, body
 
 	// Find title field
-	var titleField *den.FieldMeta
+	var titleField *core.FieldMeta
 	for i := range meta.Fields {
 		if meta.Fields[i].Name == "title" {
 			titleField = &meta.Fields[i]
@@ -57,7 +57,7 @@ func TestMeta(t *testing.T) {
 
 func TestMeta_Flags_SoftDeleteOnly(t *testing.T) {
 	db := dentest.MustOpen(t, &SoftProduct{})
-	meta, err := den.Meta[SoftProduct](db)
+	meta, err := core.Meta[SoftProduct](db)
 	require.NoError(t, err)
 	assert.True(t, meta.HasSoftDelete)
 	assert.False(t, meta.HasRevision)
@@ -65,7 +65,7 @@ func TestMeta_Flags_SoftDeleteOnly(t *testing.T) {
 
 func TestMeta_Flags_RevisionOnly(t *testing.T) {
 	db := dentest.MustOpen(t, &RevProduct{})
-	meta, err := den.Meta[RevProduct](db)
+	meta, err := core.Meta[RevProduct](db)
 	require.NoError(t, err)
 	assert.False(t, meta.HasSoftDelete)
 	assert.True(t, meta.HasRevision)
@@ -73,7 +73,7 @@ func TestMeta_Flags_RevisionOnly(t *testing.T) {
 
 func TestMeta_Flags_BothSoftDeleteAndRevision(t *testing.T) {
 	db := dentest.MustOpen(t, &SoftRevProduct{})
-	meta, err := den.Meta[SoftRevProduct](db)
+	meta, err := core.Meta[SoftRevProduct](db)
 	require.NoError(t, err)
 	assert.True(t, meta.HasSoftDelete)
 	assert.True(t, meta.HasRevision)
@@ -81,7 +81,7 @@ func TestMeta_Flags_BothSoftDeleteAndRevision(t *testing.T) {
 
 func TestMeta_Flags_ChangeTrackingOnly(t *testing.T) {
 	db := dentest.MustOpen(t, &TrackedProduct{})
-	meta, err := den.Meta[TrackedProduct](db)
+	meta, err := core.Meta[TrackedProduct](db)
 	require.NoError(t, err)
 	assert.False(t, meta.HasSoftDelete)
 	assert.False(t, meta.HasRevision)
@@ -90,14 +90,14 @@ func TestMeta_Flags_ChangeTrackingOnly(t *testing.T) {
 
 func TestMeta_Flags_NoChangeTracking(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{})
-	meta, err := den.Meta[Note](db)
+	meta, err := core.Meta[Note](db)
 	require.NoError(t, err)
 	assert.False(t, meta.HasChangeTracking)
 }
 
 func TestMeta_Flags_AllThree(t *testing.T) {
 	db := dentest.MustOpen(t, &AuditDoc{})
-	meta, err := den.Meta[AuditDoc](db)
+	meta, err := core.Meta[AuditDoc](db)
 	require.NoError(t, err)
 	assert.True(t, meta.HasSoftDelete)
 	assert.True(t, meta.HasRevision)
@@ -113,15 +113,15 @@ type AuditDoc struct {
 	Name string `json:"name"`
 }
 
-func (AuditDoc) DenSettings() den.Settings {
-	return den.Settings{UseRevision: true}
+func (AuditDoc) DenSettings() core.Settings {
+	return core.Settings{UseRevision: true}
 }
 
 func TestMeta_Unregistered(t *testing.T) {
 	db := dentest.MustOpen(t)
 
-	_, err := den.Meta[Note](db)
-	assert.ErrorIs(t, err, den.ErrNotRegistered)
+	_, err := core.Meta[Note](db)
+	assert.ErrorIs(t, err, core.ErrNotRegistered)
 }
 
 // TestErrNotRegistered_MessageIsActionable pins that the error a user
@@ -131,11 +131,11 @@ func TestMeta_Unregistered(t *testing.T) {
 func TestErrNotRegistered_MessageIsActionable(t *testing.T) {
 	db := dentest.MustOpen(t)
 
-	_, err := den.Meta[Note](db)
+	_, err := core.Meta[Note](db)
 	require.Error(t, err)
 
 	msg := err.Error()
-	assert.Contains(t, msg, "den_test.Note",
+	assert.Contains(t, msg, "core_test.Note",
 		"qualified type name disambiguates between same-named types in different packages")
 	assert.Contains(t, msg, "den.Register(ctx, db, &Note{})",
 		"message must spell out the exact Register call to add")
@@ -148,7 +148,7 @@ func TestErrNotRegistered_MessageIsActionable(t *testing.T) {
 func TestCollections(t *testing.T) {
 	db := dentest.MustOpen(t, &Note{}, &Category{})
 
-	names := den.Collections(db)
+	names := core.Collections(db)
 	sort.Strings(names)
 
 	assert.Equal(t, []string{"category", "note"}, names)
@@ -157,7 +157,7 @@ func TestCollections(t *testing.T) {
 func TestCollections_Empty(t *testing.T) {
 	db := dentest.MustOpen(t)
 
-	names := den.Collections(db)
+	names := core.Collections(db)
 	assert.Empty(t, names)
 }
 
@@ -166,8 +166,8 @@ type CustomNameDoc struct {
 	Title string `json:"title"`
 }
 
-func (d CustomNameDoc) DenSettings() den.Settings {
-	return den.Settings{CollectionName: "custom_docs"}
+func (d CustomNameDoc) DenSettings() core.Settings {
+	return core.Settings{CollectionName: "custom_docs"}
 }
 
 // DocWithSQLInjectionTag carries an intentionally malicious json tag so we
@@ -205,8 +205,8 @@ func TestRegister_RejectsInjectionInFieldName_SQLite(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			db := dentest.MustOpen(t) // no types, so Register can fail
-			err := den.Register(context.Background(), db, tt.doc)
-			require.ErrorIs(t, err, den.ErrValidation,
+			err := core.Register(context.Background(), db, tt.doc)
+			require.ErrorIs(t, err, core.ErrValidation,
 				"Register must reject malicious field names with ErrValidation")
 		})
 	}
@@ -224,8 +224,8 @@ func TestRegister_RejectsInjectionInFieldName_Postgres(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			db := dentest.MustOpenPostgres(t, dentest.PostgresURL())
-			err := den.Register(context.Background(), db, tt.doc)
-			require.ErrorIs(t, err, den.ErrValidation,
+			err := core.Register(context.Background(), db, tt.doc)
+			require.ErrorIs(t, err, core.ErrValidation,
 				"Register must reject malicious field names with ErrValidation")
 		})
 	}
@@ -236,21 +236,21 @@ func TestRegister_CustomCollectionName(t *testing.T) {
 	ctx := context.Background()
 
 	// Meta should reflect the custom name
-	meta, err := den.Meta[CustomNameDoc](db)
+	meta, err := core.Meta[CustomNameDoc](db)
 	require.NoError(t, err)
 	assert.Equal(t, "custom_docs", meta.Name)
 
 	// CRUD should work with the custom name
 	doc := &CustomNameDoc{Title: "Hello"}
-	require.NoError(t, den.Save(ctx, db, doc))
+	require.NoError(t, core.Save(ctx, db, doc))
 	assert.NotEmpty(t, doc.ID)
 
-	found, err := den.FindByID[CustomNameDoc](ctx, db, doc.ID)
+	found, err := core.FindByID[CustomNameDoc](ctx, db, doc.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Hello", found.Title)
 
 	// Collections should list the custom name
-	names := den.Collections(db)
+	names := core.Collections(db)
 	assert.Contains(t, names, "custom_docs")
 }
 
@@ -274,9 +274,9 @@ type SettingsIndexDoc struct {
 	Email    string `json:"email"`
 }
 
-func (d SettingsIndexDoc) DenSettings() den.Settings {
-	return den.Settings{
-		Indexes: []den.IndexDefinition{{
+func (d SettingsIndexDoc) DenSettings() core.Settings {
+	return core.Settings{
+		Indexes: []core.IndexDefinition{{
 			Name:   "idx_settingsindexdoc_tenant_email",
 			Fields: []string{"tenant_id", "email"},
 			Unique: true,
@@ -287,11 +287,11 @@ func (d SettingsIndexDoc) DenSettings() den.Settings {
 func TestRegister_CompositeUniqueIndex(t *testing.T) {
 	db := dentest.MustOpen(t, &CompositeUniqueDoc{})
 
-	meta, err := den.Meta[CompositeUniqueDoc](db)
+	meta, err := core.Meta[CompositeUniqueDoc](db)
 	require.NoError(t, err)
 
 	// Should have one composite unique index
-	var found *den.IndexDefinition
+	var found *core.IndexDefinition
 	for i := range meta.Indexes {
 		if meta.Indexes[i].Name == "idx_compositeuniquedoc_user_name" {
 			found = &meta.Indexes[i]
@@ -308,29 +308,29 @@ func TestRegister_CompositeUniqueIndex_EnforcesDuplicates(t *testing.T) {
 	ctx := context.Background()
 
 	doc1 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
-	require.NoError(t, den.Save(ctx, db, doc1))
+	require.NoError(t, core.Save(ctx, db, doc1))
 
 	// Same composite key → ErrDuplicate
 	doc2 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
-	err := den.Save(ctx, db, doc2)
-	require.ErrorIs(t, err, den.ErrDuplicate)
+	err := core.Save(ctx, db, doc2)
+	require.ErrorIs(t, err, core.ErrDuplicate)
 
 	// Different user, same name → OK
 	doc3 := &CompositeUniqueDoc{UserID: "user2", Name: "alice"}
-	require.NoError(t, den.Save(ctx, db, doc3))
+	require.NoError(t, core.Save(ctx, db, doc3))
 
 	// Same user, different name → OK
 	doc4 := &CompositeUniqueDoc{UserID: "user1", Name: "bob"}
-	require.NoError(t, den.Save(ctx, db, doc4))
+	require.NoError(t, core.Save(ctx, db, doc4))
 }
 
 func TestRegister_CompositeNonUniqueIndex(t *testing.T) {
 	db := dentest.MustOpen(t, &CompositeIndexDoc{})
 
-	meta, err := den.Meta[CompositeIndexDoc](db)
+	meta, err := core.Meta[CompositeIndexDoc](db)
 	require.NoError(t, err)
 
-	var found *den.IndexDefinition
+	var found *core.IndexDefinition
 	for i := range meta.Indexes {
 		if meta.Indexes[i].Name == "idx_compositeindexdoc_feed_date" {
 			found = &meta.Indexes[i]
@@ -346,11 +346,11 @@ func TestRegister_SettingsIndexes(t *testing.T) {
 	db := dentest.MustOpen(t, &SettingsIndexDoc{})
 	ctx := context.Background()
 
-	meta, err := den.Meta[SettingsIndexDoc](db)
+	meta, err := core.Meta[SettingsIndexDoc](db)
 	require.NoError(t, err)
 
 	// Should have the custom composite unique index from Settings
-	var found *den.IndexDefinition
+	var found *core.IndexDefinition
 	for i := range meta.Indexes {
 		if meta.Indexes[i].Name == "idx_settingsindexdoc_tenant_email" {
 			found = &meta.Indexes[i]
@@ -363,11 +363,11 @@ func TestRegister_SettingsIndexes(t *testing.T) {
 
 	// Enforce uniqueness
 	doc1 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
-	require.NoError(t, den.Save(ctx, db, doc1))
+	require.NoError(t, core.Save(ctx, db, doc1))
 
 	doc2 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
-	err = den.Save(ctx, db, doc2)
-	require.ErrorIs(t, err, den.ErrDuplicate)
+	err = core.Save(ctx, db, doc2)
+	require.ErrorIs(t, err, core.ErrDuplicate)
 }
 
 func TestPing(t *testing.T) {
@@ -391,17 +391,17 @@ type PtrSettingsDoc struct {
 	Name string `json:"name"`
 }
 
-func (d *PtrSettingsDoc) DenSettings() den.Settings {
-	return den.Settings{CollectionName: "ptr_settings_custom"}
+func (d *PtrSettingsDoc) DenSettings() core.Settings {
+	return core.Settings{CollectionName: "ptr_settings_custom"}
 }
 
 func TestRegister_ValueWithPointerReceiverSettings(t *testing.T) {
 	db := dentest.MustOpen(t)
 	ctx := context.Background()
 
-	require.NoError(t, den.Register(ctx, db, PtrSettingsDoc{}))
+	require.NoError(t, core.Register(ctx, db, PtrSettingsDoc{}))
 
-	meta, err := den.Meta[PtrSettingsDoc](db)
+	meta, err := core.Meta[PtrSettingsDoc](db)
 	require.NoError(t, err)
 	assert.Equal(t, "ptr_settings_custom", meta.Name)
 }
@@ -409,22 +409,22 @@ func TestRegister_ValueWithPointerReceiverSettings(t *testing.T) {
 func TestOpenURL_WithTypes(t *testing.T) {
 	ctx := context.Background()
 	dsn := "sqlite:///" + t.TempDir() + "/with_types.db"
-	db, err := den.OpenURL(ctx, dsn, den.WithTypes(&Product{}, &Note{}))
+	db, err := core.OpenURL(ctx, dsn, core.WithTypes(&Product{}, &Note{}))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	cols := den.Collections(db)
+	cols := core.Collections(db)
 	assert.Contains(t, cols, "product")
 	assert.Contains(t, cols, "note")
 
-	require.NoError(t, den.Save(ctx, db, &Product{Name: "W", Price: 1.0}))
+	require.NoError(t, core.Save(ctx, db, &Product{Name: "W", Price: 1.0}))
 }
 
 func TestOpenURL_WithTypes_PropagatesRegistrationError(t *testing.T) {
 	dsn := "sqlite:///" + t.TempDir() + "/bad_types.db"
-	_, err := den.OpenURL(context.Background(), dsn, den.WithTypes(&DocWithSQLInjectionTag{}))
+	_, err := core.OpenURL(context.Background(), dsn, core.WithTypes(&DocWithSQLInjectionTag{}))
 	require.Error(t, err)
-	require.ErrorIs(t, err, den.ErrValidation)
+	require.ErrorIs(t, err, core.ErrValidation)
 }
 
 // TestOpenURL_ContextCanceledDuringRegistration regresses that OpenURL
@@ -436,7 +436,7 @@ func TestOpenURL_ContextCanceledDuringRegistration(t *testing.T) {
 	cancel() // canceled before any work starts
 
 	dsn := "sqlite:///" + t.TempDir() + "/canceled.db"
-	_, err := den.OpenURL(ctx, dsn, den.WithTypes(&Product{}))
+	_, err := core.OpenURL(ctx, dsn, core.WithTypes(&Product{}))
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
 }
@@ -454,9 +454,9 @@ type badEagerType struct {
 // long-standing behavior for index/unique/fts.
 func TestRegister_RejectsEagerOnNonLinkField(t *testing.T) {
 	dsn := "sqlite:///" + t.TempDir() + "/bad_eager.db"
-	_, err := den.OpenURL(context.Background(), dsn, den.WithTypes(&badEagerType{}))
+	_, err := core.OpenURL(context.Background(), dsn, core.WithTypes(&badEagerType{}))
 	require.Error(t, err)
-	require.ErrorIs(t, err, den.ErrValidation)
+	require.ErrorIs(t, err, core.ErrValidation)
 	require.Contains(t, err.Error(), `den:"eager"`)
 	require.Contains(t, err.Error(), "Name")
 }

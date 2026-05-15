@@ -1,6 +1,8 @@
-package den_test
+package core_test
 
 import (
+	"github.com/oliverandrich/den/internal/core"
+
 	"context"
 	"fmt"
 	"strings"
@@ -8,11 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oliverandrich/den/dentest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/oliverandrich/den"
-	"github.com/oliverandrich/den/dentest"
 )
 
 // TestAllWithCount_WithFetchLinks_SmallPool reproduces den-1c7s: AllWithCount
@@ -34,18 +34,18 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 	// link fetch).
 	url := base + sep + "pool_max_conns=2"
 
-	db, err := den.OpenURL(context.Background(), url)
+	db, err := core.OpenURL(context.Background(), url)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		for _, name := range den.Collections(db) {
+		for _, name := range core.Collections(db) {
 			_ = db.Backend().DropCollection(ctx, name)
 		}
 		_ = db.Close()
 	})
 
 	ctx := context.Background()
-	require.NoError(t, den.Register(ctx, db, &Door{}, &Window{}, &House{}))
+	require.NoError(t, core.Register(ctx, db, &Door{}, &Window{}, &House{}))
 
 	// Seed: N houses, each with a linked Door. N >= pool size so every
 	// iteration step needs a link fetch; together with concurrent callers,
@@ -54,11 +54,11 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 	doors := make([]*Door, houses)
 	for i := range houses {
 		doors[i] = &Door{Height: 200 + i, Width: 80}
-		require.NoError(t, den.Save(ctx, db, doors[i]))
+		require.NoError(t, core.Save(ctx, db, doors[i]))
 	}
 	for i := range houses {
-		h := &House{Name: fmt.Sprintf("h-%d", i), Door: den.NewLink(doors[i])}
-		require.NoError(t, den.Save(ctx, db, h))
+		h := &House{Name: fmt.Sprintf("h-%d", i), Door: core.NewLink(doors[i])}
+		require.NoError(t, core.Save(ctx, db, h))
 	}
 
 	// Run concurrent AllWithCount + WithFetchLinks. Without the fix,
@@ -75,7 +75,7 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 		wg.Add(1)
 		go func(gi int) {
 			defer wg.Done()
-			results, _, err := den.NewQuery[House](db).WithFetchLinks().AllWithCount(deadline)
+			results, _, err := core.NewQuery[House](db).WithFetchLinks().AllWithCount(deadline)
 			errs[gi] = err
 			allResults[gi] = results
 		}(g)

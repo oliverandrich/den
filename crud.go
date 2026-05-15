@@ -319,9 +319,7 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	}
 
 	rv := reflect.ValueOf(document).Elem()
-
-	id := getID(rv, col.structInfo)
-	if id == "" {
+	if getID(rv, col.structInfo) == "" {
 		return fmt.Errorf("%w: cannot delete document without ID", ErrValidation)
 	}
 
@@ -335,32 +333,40 @@ func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		}
 	}
 
+	return deleteDocCore(ctx, db, b, document, col, o)
+}
+
+// deleteDocCore performs the post-BeforeDelete delete chain on a loaded
+// document: branches on soft vs hard, fires the soft-only hook pair when
+// applicable, and runs AfterDelete. The caller owns BeforeDelete and any
+// cascade-delete of links — cascade pre-empts this body and is
+// single-level by design.
+func deleteDocCore(ctx context.Context, db *DB, b ReadWriter, doc any, col *collectionInfo, o crudOpts) error {
+	rv := reflect.ValueOf(doc).Elem()
+
 	if col.meta.HasSoftDelete && !o.hardDelete {
-		if err := runBeforeSoftDeleteHooks(ctx, document); err != nil {
+		if err := runBeforeSoftDeleteHooks(ctx, doc); err != nil {
 			return err
 		}
-		if err := softDelete(ctx, db, b, rv, document, col, o); err != nil {
+		if err := softDelete(ctx, db, b, rv, doc, col, o); err != nil {
 			return err
 		}
-		if err := runAfterSoftDeleteHooks(ctx, document); err != nil {
+		if err := runAfterSoftDeleteHooks(ctx, doc); err != nil {
 			return err
 		}
-		return runAfterDeleteHooks(ctx, document)
+		return runAfterDeleteHooks(ctx, doc)
 	}
 
 	if err := db.preflightAttachments(rv); err != nil {
 		return err
 	}
-
-	if err := b.Delete(ctx, col.meta.Name, id); err != nil {
+	if err := b.Delete(ctx, col.meta.Name, getID(rv, col.structInfo)); err != nil {
 		return err
 	}
-
-	// Hard-delete cascade: drop the bytes behind any document.Attachment
-	// fields. Best-effort — remote Storage failures are logged, not returned.
+	// Best-effort: drop the bytes behind document.Attachment fields.
+	// Remote Storage failures are logged, not returned.
 	db.cleanupAttachments(ctx, rv)
-
-	return runAfterDeleteHooks(ctx, document)
+	return runAfterDeleteHooks(ctx, doc)
 }
 
 // Refresh re-reads a document from the database by its ID,

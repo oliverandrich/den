@@ -490,11 +490,11 @@ func cascadeWriteLinks(ctx context.Context, db *DB, b ReadWriter, doc any) error
 // targets' own links are left intact. Callers that need transitive deletion
 // must drive it themselves.
 //
-// The crudOpts are forwarded so HardDelete() propagates: a hard-delete on
-// the parent must hard-delete the linked targets too, even when they embed
-// document.SoftDelete. Soft-delete-only audit options (SoftDeleteBy,
-// SoftDeleteReason) are not yet threaded into the cascade soft path; that
-// is tracked separately.
+// The crudOpts are forwarded so HardDelete(), SoftDeleteBy() and
+// SoftDeleteReason() all propagate: hard-deletes on the parent
+// hard-delete the linked targets too (even when they embed
+// document.SoftDelete), and the audit options reach the cascade soft
+// path via the shared deleteDocCore.
 func cascadeDeleteLinks(ctx context.Context, db *DB, b ReadWriter, doc any, o crudOpts) error {
 	return forEachLinkField(ctx, doc, func(elem reflect.Value, lf linkFieldInfo) error {
 		return deleteSingleLinkedValue(ctx, db, b, elem, lf, o)
@@ -548,19 +548,15 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 		return nil
 	}
 
-	valueField := linkVal.FieldByIndex(lf.valueIdx)
-
-	id := idField.String()
-	targetType := valueField.Type().Elem()
-
+	targetType := linkVal.FieldByIndex(lf.valueIdx).Type().Elem()
 	col, err := collectionForType(db, targetType)
 	if err != nil {
 		return err
 	}
-	colName := col.meta.Name
 
-	// Load the linked document to run hooks and handle soft-delete
-	data, err := b.Get(ctx, colName, id)
+	// Load the linked document so hooks see the persisted state and
+	// softDelete can read the current revision.
+	data, err := b.Get(ctx, col.meta.Name, idField.String())
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil // already deleted
@@ -571,40 +567,14 @@ func deleteSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal 
 	docPtr := reflect.New(targetType)
 	doc := docPtr.Interface()
 	if err := db.decode(data, doc); err != nil {
-		return fmt.Errorf("decode linked %s: %w", colName, err)
+		return fmt.Errorf("decode linked %s: %w", col.meta.Name, err)
 	}
 
 	if err := runBeforeDeleteHooks(ctx, doc); err != nil {
 		return err
 	}
 
-	if col.meta.HasSoftDelete && !o.hardDelete {
-		if err := runBeforeSoftDeleteHooks(ctx, doc); err != nil {
-			return err
-		}
-
-		// Route through softDelete so the cascade participates in the
-		// revision chain (concurrent stale-rev writers see
-		// ErrRevisionConflict instead of clobbering DeletedAt) and the
-		// caller's SoftDeleteBy / SoftDeleteReason audit fields propagate
-		// to the cascade target the same way they do for direct deletes.
-		if err := softDelete(ctx, db, b, docPtr.Elem(), doc, col, o); err != nil {
-			return err
-		}
-		if err := runAfterSoftDeleteHooks(ctx, doc); err != nil {
-			return err
-		}
-		return runAfterDeleteHooks(ctx, doc)
-	}
-
-	if err := db.preflightAttachments(docPtr.Elem()); err != nil {
-		return err
-	}
-	if err := b.Delete(ctx, colName, id); err != nil {
-		return err
-	}
-	db.cleanupAttachments(ctx, docPtr.Elem())
-	return runAfterDeleteHooks(ctx, doc)
+	return deleteDocCore(ctx, db, b, doc, col, o)
 }
 
 // parseJSONTagName delegates to internal.ParseJSONTagName.

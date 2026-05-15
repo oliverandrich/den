@@ -81,30 +81,32 @@ type Validator interface {
 	Validate(ctx context.Context) error
 }
 
-// runBeforeInsertHooks runs the mutating before-hooks for insert in order:
-// BeforeInsert first, then BeforeSave. Validation runs separately via
-// runValidationHooks after these have populated any defaults or computed
-// fields, so the validator sees the final document that will be written.
-func runBeforeInsertHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(BeforeInserter); ok {
-		if err := h.BeforeInsert(ctx); err != nil {
-			return err
-		}
-	}
-	if h, ok := doc.(BeforeSaver); ok {
-		if err := h.BeforeSave(ctx); err != nil {
-			return err
-		}
+// runHook invokes call on doc when doc implements I. Returns whatever
+// the hook method returned, or nil if doc doesn't implement I. Callers
+// typically pass an interface method expression like
+// BeforeInserter.BeforeInsert as call.
+func runHook[I any](ctx context.Context, doc any, call func(I, context.Context) error) error {
+	if h, ok := doc.(I); ok {
+		return call(h, ctx)
 	}
 	return nil
 }
 
-// runValidationHooks runs the custom Validator.Validate(ctx) method,
-// if any. Runs after BeforeInsert/BeforeUpdate/BeforeSave so the
-// validator sees the final, fully-populated document. Tag-based
-// validation (via DB.tagValidator) is invoked separately in the CRUD
-// functions so both declarative and custom validation see the same
-// post-hook state.
+// runBeforeInsertHooks fires BeforeInsert then BeforeSave. Validation runs
+// separately via runValidationHooks after these have populated any defaults
+// or computed fields, so the validator sees the final document.
+func runBeforeInsertHooks(ctx context.Context, doc any) error {
+	if err := runHook(ctx, doc, BeforeInserter.BeforeInsert); err != nil {
+		return err
+	}
+	return runHook(ctx, doc, BeforeSaver.BeforeSave)
+}
+
+// runValidationHooks runs the custom Validator.Validate(ctx) method, if
+// any, and wraps any returned error with ErrValidation so callers can
+// errors.Is for it. Runs after BeforeInsert/BeforeUpdate/BeforeSave so the
+// validator sees the final, fully-populated document. Stays inline rather
+// than using runHook because of the error-wrap requirement.
 func runValidationHooks(ctx context.Context, doc any) error {
 	if v, ok := doc.(Validator); ok {
 		if err := v.Validate(ctx); err != nil {
@@ -115,82 +117,41 @@ func runValidationHooks(ctx context.Context, doc any) error {
 }
 
 func runAfterInsertHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(AfterInserter); ok {
-		if err := h.AfterInsert(ctx); err != nil {
-			return err
-		}
+	if err := runHook(ctx, doc, AfterInserter.AfterInsert); err != nil {
+		return err
 	}
-	if h, ok := doc.(AfterSaver); ok {
-		if err := h.AfterSave(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, AfterSaver.AfterSave)
 }
 
-// runBeforeUpdateHooks runs the mutating before-hooks for update in order:
-// BeforeUpdate first, then BeforeSave. Validation runs separately via
-// runValidationHooks after these have populated any computed fields.
+// runBeforeUpdateHooks fires BeforeUpdate then BeforeSave. Validation runs
+// separately via runValidationHooks after these have populated any computed
+// fields.
 func runBeforeUpdateHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(BeforeUpdater); ok {
-		if err := h.BeforeUpdate(ctx); err != nil {
-			return err
-		}
+	if err := runHook(ctx, doc, BeforeUpdater.BeforeUpdate); err != nil {
+		return err
 	}
-	if h, ok := doc.(BeforeSaver); ok {
-		if err := h.BeforeSave(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, BeforeSaver.BeforeSave)
 }
 
 func runAfterUpdateHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(AfterUpdater); ok {
-		if err := h.AfterUpdate(ctx); err != nil {
-			return err
-		}
+	if err := runHook(ctx, doc, AfterUpdater.AfterUpdate); err != nil {
+		return err
 	}
-	if h, ok := doc.(AfterSaver); ok {
-		if err := h.AfterSave(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, AfterSaver.AfterSave)
 }
 
 func runBeforeDeleteHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(BeforeDeleter); ok {
-		if err := h.BeforeDelete(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, BeforeDeleter.BeforeDelete)
 }
 
 func runAfterDeleteHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(AfterDeleter); ok {
-		if err := h.AfterDelete(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, AfterDeleter.AfterDelete)
 }
 
 func runBeforeSoftDeleteHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(BeforeSoftDeleter); ok {
-		if err := h.BeforeSoftDelete(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, BeforeSoftDeleter.BeforeSoftDelete)
 }
 
 func runAfterSoftDeleteHooks(ctx context.Context, doc any) error {
-	if h, ok := doc.(AfterSoftDeleter); ok {
-		if err := h.AfterSoftDelete(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runHook(ctx, doc, AfterSoftDeleter.AfterSoftDelete)
 }

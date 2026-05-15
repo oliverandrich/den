@@ -273,6 +273,32 @@ func Save[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) 
 	return Update(ctx, s, document, opts...)
 }
 
+// SaveAll persists every doc in docs by routing each through Save: empty-ID
+// docs take the Insert path, ID-bearing docs take the Update path. Mixed
+// batches are supported — every doc gets the right branch.
+//
+// All saves run inside a single transaction when bound to a *DB; when
+// bound to a *Tx they run inline in the caller's transaction. Fail-fast:
+// any per-doc error rolls back the batch.
+//
+// Empty input is a no-op (returns nil without opening a transaction).
+func SaveAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	return runOnScopeVoid(ctx, s, func(tx *Tx) error {
+		for i, doc := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := Save(ctx, tx, doc, opts...); err != nil {
+				return fmt.Errorf("den: save failed at index %d: %w", i, err)
+			}
+		}
+		return nil
+	})
+}
+
 func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
 	o := applyCRUDOpts(opts)
 	col, err := collectionFor[T](db)
@@ -309,6 +335,29 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 // Options: WithLinkRule to cascade deletes to linked documents.
 func Delete[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
 	return deleteCore(ctx, s.db(), s.readWriter(), document, opts...)
+}
+
+// DeleteAll removes every doc in docs by routing each through Delete.
+// All deletes run inside a single transaction when bound to a *DB; when
+// bound to a *Tx they run inline in the caller's transaction. Fail-fast:
+// any per-doc error rolls back the batch.
+//
+// Empty input is a no-op.
+func DeleteAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	return runOnScopeVoid(ctx, s, func(tx *Tx) error {
+		for i, doc := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := Delete(ctx, tx, doc, opts...); err != nil {
+				return fmt.Errorf("den: delete failed at index %d: %w", i, err)
+			}
+		}
+		return nil
+	})
 }
 
 func deleteCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
@@ -399,6 +448,29 @@ func Refresh[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOptio
 
 	o := applyCRUDOpts(opts)
 	return batchResolveLinks(ctx, db, rw, []*T{document}, defaultNestingDepth, crudFetchMode(o))
+}
+
+// RefreshAll re-reads every doc in docs by routing each through Refresh.
+// All refreshes run inside a single transaction when bound to a *DB; when
+// bound to a *Tx they run inline in the caller's transaction. Fail-fast:
+// any per-doc error rolls back the batch.
+//
+// Empty input is a no-op.
+func RefreshAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	return runOnScopeVoid(ctx, s, func(tx *Tx) error {
+		for i, doc := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := Refresh(ctx, tx, doc, opts...); err != nil {
+				return fmt.Errorf("den: refresh failed at index %d: %w", i, err)
+			}
+		}
+		return nil
+	})
 }
 
 // SetFields is a map of field names (as they appear in the `json` struct

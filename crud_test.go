@@ -1205,3 +1205,114 @@ func TestFindOrCreate_HonorsEagerTag(t *testing.T) {
 	assert.True(t, got.Door.IsLoaded(),
 		"FindOrCreate delegates to upsert; must honor den:\"eager\"")
 }
+
+// --- v0.12 Child 2: Save/SaveAll/DeleteAll/RefreshAll ---
+
+func TestSaveAll_EmptyInput(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	require.NoError(t, den.SaveAll[Product](context.Background(), db, nil))
+}
+
+func TestSaveAll_MixedInsertAndUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	existing := &Product{Name: "Existing", Price: 1}
+	require.NoError(t, den.Insert(ctx, db, existing))
+
+	// One new, one updating the existing.
+	existing.Price = 99
+	docs := []*Product{
+		{Name: "Fresh", Price: 5}, // empty ID → Insert
+		existing,                  // has ID → Update
+	}
+	require.NoError(t, den.SaveAll(ctx, db, docs))
+
+	all, err := den.NewQuery[Product](db).Sort("name", den.Asc).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	assert.Equal(t, "Existing", all[0].Name)
+	assert.InDelta(t, 99.0, all[0].Price, 0.001, "existing row's update must have taken effect")
+	assert.Equal(t, "Fresh", all[1].Name)
+}
+
+type uniqueNameDoc struct {
+	document.Base
+	Name string `json:"name" den:"unique"`
+}
+
+func TestSaveAll_FailFastRollsBack(t *testing.T) {
+	db := dentest.MustOpen(t, &uniqueNameDoc{})
+	ctx := context.Background()
+
+	// Pre-seed a doc that will collide with the second batch entry.
+	require.NoError(t, den.Insert(ctx, db, &uniqueNameDoc{Name: "Bad"}))
+
+	docs := []*uniqueNameDoc{
+		{Name: "Good"},
+		{Name: "Bad"}, // duplicate of the pre-seeded row → ErrDuplicate on Insert
+	}
+	err := den.SaveAll(ctx, db, docs)
+	require.Error(t, err, "duplicate name on the second doc must error")
+	require.ErrorIs(t, err, den.ErrDuplicate)
+
+	// Confirm the first doc was rolled back.
+	count, err := den.NewQuery[uniqueNameDoc](db,
+		where.Field("name").Eq("Good"),
+	).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), count, "fail-fast must roll back earlier inserts in the batch")
+}
+
+func TestDeleteAll_EmptyInput(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	require.NoError(t, den.DeleteAll[Product](context.Background(), db, nil))
+}
+
+func TestDeleteAll_BatchOfDocs(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	docs := []*Product{
+		{Name: "A", Price: 1},
+		{Name: "B", Price: 2},
+		{Name: "C", Price: 3},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, docs))
+
+	require.NoError(t, den.DeleteAll(ctx, db, docs[:2])) // delete A and B
+
+	remaining, err := den.NewQuery[Product](db).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, "C", remaining[0].Name)
+}
+
+func TestRefreshAll_EmptyInput(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	require.NoError(t, den.RefreshAll[Product](context.Background(), db, nil))
+}
+
+func TestRefreshAll_PicksUpExternalChanges(t *testing.T) {
+	db := dentest.MustOpen(t, &Product{})
+	ctx := context.Background()
+
+	docs := []*Product{
+		{Name: "A", Price: 1},
+		{Name: "B", Price: 2},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, docs))
+
+	// External update via QuerySet.Update bumps both prices.
+	_, err := den.NewQuery[Product](db).Update(ctx, den.SetFields{"price": 99.0})
+	require.NoError(t, err)
+
+	// Local docs still show the old prices.
+	assert.InDelta(t, 1.0, docs[0].Price, 0.001)
+	assert.InDelta(t, 2.0, docs[1].Price, 0.001)
+
+	require.NoError(t, den.RefreshAll(ctx, db, docs))
+
+	assert.InDelta(t, 99.0, docs[0].Price, 0.001)
+	assert.InDelta(t, 99.0, docs[1].Price, 0.001)
+}

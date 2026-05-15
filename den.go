@@ -1,40 +1,27 @@
+// Package den is an ODM for Go with two storage backends (SQLite and
+// PostgreSQL). It exposes a single chainable QuerySet for filter-and-act
+// operations and a small set of doc-in-hand top-level functions for
+// persistence (Save, Delete, FindByID, Refresh).
+//
+// The implementation lives in github.com/oliverandrich/den/internal/core
+// — this root package is the public API skin: type aliases for every
+// exported type plus thin wrapper functions for every exported function.
+// Go's `internal/` mechanism enforces that consumers cannot import the
+// implementation directly, while the aliases preserve identity so
+// `den.QuerySet[T]` IS `core.QuerySet[T]` — same methods, same value.
 package den
 
 import (
 	"context"
-	"sync"
 
-	"github.com/oliverandrich/den/id"
-	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/internal/core"
 )
 
 // NewID generates a new ULID string. ULIDs are lexicographically sortable
 // and timestamp-ordered. Use this for document IDs, worker IDs, or any
 // unique identifier.
 func NewID() string {
-	return id.New()
-}
-
-// Option configures a DB during Open.
-type Option func(*DB)
-
-// DB is the main entry point for Den operations.
-// It wraps a Backend and holds the collection registry.
-type DB struct {
-	backend          Backend
-	collections      map[string]*collectionInfo
-	typeToCollection map[string]string // Go type derived name → registered collection name
-	typeCache        sync.Map          // reflect.Type → *collectionInfo (lock-free fast path)
-	storage          Storage
-	pendingTypes     []any // queued by WithTypes, registered at the end of Open
-	mu               sync.RWMutex
-}
-
-// collectionInfo is the internal registry entry for a registered type.
-type collectionInfo struct {
-	meta       CollectionMeta
-	structInfo *internal.StructInfo
-	settings   Settings
+	return core.NewID()
 }
 
 // Open creates a new DB using the given backend directly. The context
@@ -44,57 +31,61 @@ type collectionInfo struct {
 //
 // Use OpenURL for URL-based opening with automatic backend selection.
 func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
-	db := &DB{
-		backend:          backend,
-		collections:      make(map[string]*collectionInfo),
-		typeToCollection: make(map[string]string),
-	}
-	for _, opt := range opts {
-		opt(db)
-	}
-	if len(db.pendingTypes) > 0 {
-		types := db.pendingTypes
-		db.pendingTypes = nil
-		if err := Register(ctx, db, types...); err != nil {
-			return nil, err
-		}
-	}
-	return db, nil
+	return core.Open(ctx, backend, opts...)
+}
+
+// OpenURL opens a database by DSN, dispatching to the registered backend
+// for the scheme (e.g. sqlite:///path.db, postgres://...). The backend
+// must be registered first via a side-effect import of its package.
+func OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error) {
+	return core.OpenURL(ctx, dsn, opts...)
 }
 
 // WithTypes queues document types to be registered at the end of Open.
-// Equivalent to calling Register(ctx, db, types...) after Open returns,
-// where ctx is the same context passed to Open / OpenURL — there is no
-// silent context.Background() substitution. Lets the whole setup read as
-// a single expression:
-//
-//	db, err := den.OpenURL(ctx, dsn, den.WithTypes(&Note{}, &Tag{}))
-//
-// Registration runs after every other Option has been applied. Any
-// registration error aborts Open and is surfaced as its error.
+// Equivalent to calling Register(ctx, db, types...) after Open returns.
 func WithTypes(types ...any) Option {
-	return func(db *DB) {
-		db.pendingTypes = append(db.pendingTypes, types...)
-	}
+	return core.WithTypes(types...)
 }
 
-// Close closes the database and its underlying backend.
-func (db *DB) Close() error {
-	return db.backend.Close()
+// WithStorage attaches an attachment Storage to the DB. Required when
+// any registered type carries `document.Attachment` fields.
+func WithStorage(s Storage) Option {
+	return core.WithStorage(s)
 }
 
-// Backend returns the underlying backend. Useful for advanced use cases
-// or backend-specific type assertions.
-func (db *DB) Backend() Backend {
-	return db.backend
+// Register registers one or more document types with the database. It
+// must be called before any CRUD or query operation on the types.
+func Register(ctx context.Context, db *DB, types ...any) error {
+	return core.Register(ctx, db, types...)
 }
 
-// Ping verifies the backend is reachable and operational.
-func (db *DB) Ping(ctx context.Context) error {
-	return db.backend.Ping(ctx)
+// Meta returns the registered metadata for type T. Returns
+// ErrNotRegistered if T has not been registered.
+func Meta[T any](db *DB) (CollectionMeta, error) {
+	return core.Meta[T](db)
 }
 
-// readWriter / db together satisfy the sealed Scope interface. They are
-// intentionally unexported so only *DB and *Tx can implement Scope.
-func (db *DB) readWriter() ReadWriter { return db.backend }
-func (db *DB) db() *DB                { return db }
+// Collections returns the names of every registered collection.
+func Collections(db *DB) []string {
+	return core.Collections(db)
+}
+
+// RegisterBackend registers a backend opener under the given URL scheme.
+// Called from backend packages' init() functions; not typically called
+// by application code.
+func RegisterBackend(scheme string, opener func(ctx context.Context, dsn string) (Backend, error)) {
+	core.RegisterBackend(scheme, opener)
+}
+
+// DropStaleIndexes removes indexes that exist on the backend but are no
+// longer declared by any registered type. Pass DryRun() to report what
+// would change without touching the schema.
+func DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (DropStaleResult, error) {
+	return core.DropStaleIndexes(ctx, db, opts...)
+}
+
+// DryRun makes DropStaleIndexes report what it would drop without
+// touching the schema.
+func DryRun() DropStaleOption {
+	return core.DryRun()
+}

@@ -118,6 +118,60 @@ func commitInsert[T any](ctx context.Context, b ReadWriter, col *collectionInfo,
 	return runAfterInsertHooks(ctx, document)
 }
 
+// writeDocCore is the shared write body used by updateCore and cascade
+// link-writes (saveSingleLinkedValue). Runs the full single-doc persist
+// chain in canonical order: pre-persist hooks → revision handling → base
+// field stamp → encode → Put → snapshot → after-hooks. The branch is
+// driven by isInsert.
+//
+// Order is load-bearing in the same way prepareInsert / updateCore are:
+// hooks fire first so they can populate defaults; revision handling next
+// so encoded bytes carry the right _rev; setBaseFields stamps _id and
+// timestamps last; encode captures the final post-mutation state.
+//
+// Does NOT handle cascade-write or transaction wrapping — those decisions
+// pre-empt the write body and stay at the caller (updateCore wraps in a
+// tx for revision atomicity; cascadeWriteLinks runs ahead of the parent's
+// prepare chain).
+//
+// The insert-only single-doc path stays on prepareInsert + commitInsert
+// because InsertMany's PreValidate optimization splits validate-then-
+// commit across the tx boundary; writeDocCore is the all-in-one form for
+// paths that don't need that split.
+func writeDocCore(ctx context.Context, db *DB, b ReadWriter, target any, col *collectionInfo, isInsert, ignoreRevision bool) error {
+	tv := reflect.ValueOf(target).Elem()
+
+	if err := runPrePersistHooks(ctx, db, target, isInsert); err != nil {
+		return err
+	}
+
+	if col.settings.UseRevision {
+		if isInsert {
+			setRevision(tv, col.structInfo, newRevision())
+		} else if err := checkAndUpdateRevision(ctx, db, b, col, tv, ignoreRevision); err != nil {
+			return err
+		}
+	}
+
+	setBaseFields(tv, col.structInfo, time.Now(), isInsert)
+
+	data, err := db.encode(target)
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+
+	id := getID(tv, col.structInfo)
+	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
+		return err
+	}
+	captureSnapshot(data, target)
+
+	if isInsert {
+		return runAfterInsertHooks(ctx, target)
+	}
+	return runAfterUpdateHooks(ctx, target)
+}
+
 // FindByIDs retrieves multiple documents by their IDs in a single query.
 // Missing IDs are silently skipped. Order is not guaranteed.
 //
@@ -243,35 +297,11 @@ func updateCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 		}
 	}
 
-	rv := reflect.ValueOf(document).Elem()
-
-	id := getID(rv, col.structInfo)
-	if id == "" {
+	if getID(reflect.ValueOf(document).Elem(), col.structInfo) == "" {
 		return fmt.Errorf("%w: cannot update document without ID", ErrValidation)
 	}
 
-	if err := runPrePersistHooks(ctx, db, document, false); err != nil {
-		return err
-	}
-
-	if err := checkAndUpdateRevision(ctx, db, b, col, rv, o.ignoreRevision); err != nil {
-		return err
-	}
-
-	now := time.Now()
-	setBaseFields(rv, col.structInfo, now, false)
-
-	data, err := db.encode(document)
-	if err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
-
-	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
-		return err
-	}
-
-	captureSnapshot(data, document)
-	return runAfterUpdateHooks(ctx, document)
+	return writeDocCore(ctx, db, b, document, col, false, o.ignoreRevision)
 }
 
 // Delete removes a document from the database.

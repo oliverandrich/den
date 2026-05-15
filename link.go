@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	json "github.com/goccy/go-json"
 
@@ -509,52 +508,28 @@ func saveSingleLinkedValue(ctx context.Context, db *DB, b ReadWriter, linkVal re
 	}
 
 	target := valueField.Interface()
-	targetType := valueField.Type().Elem()
-
-	col, err := collectionForType(db, targetType)
+	col, err := collectionForType(db, valueField.Type().Elem())
 	if err != nil {
 		return err
 	}
 
 	tv := reflect.ValueOf(target).Elem()
+	isInsert := getID(tv, col.structInfo) == ""
 
-	id := getID(tv, col.structInfo)
-	isInsert := id == ""
-
-	if err := runPrePersistHooks(ctx, db, target, isInsert); err != nil {
+	// IgnoreRevision is parent-only: cascade children always enforce their
+	// own revision contract, independent of how the parent was opted out.
+	if err := writeDocCore(ctx, db, b, target, col, isInsert, false); err != nil {
 		return err
 	}
 
-	now := time.Now()
-	setBaseFields(tv, col.structInfo, now, isInsert)
-
-	if col.settings.UseRevision {
-		if isInsert {
-			setRevision(tv, col.structInfo, newRevision())
-		} else {
-			if err := checkAndUpdateRevision(ctx, db, b, col, tv, false); err != nil {
-				return err
-			}
-		}
-	}
-
-	data, err := db.encode(target)
-	if err != nil {
-		return fmt.Errorf("encode linked %s: %w", col.meta.Name, err)
-	}
-
-	id = getID(tv, col.structInfo)
-	linkVal.FieldByIndex(lf.idIdx).SetString(id)
-
-	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
-		return err
-	}
-	captureSnapshot(data, target)
-
+	// Propagate the (possibly newly generated) child ID back into the
+	// parent's Link slot. Runs after writeDocCore, but still before the
+	// parent's BeforeInsert/Update fires — cascadeWriteLinks is invoked
+	// ahead of the parent's prepare chain.
 	if isInsert {
-		return runAfterInsertHooks(ctx, target)
+		linkVal.FieldByIndex(lf.idIdx).SetString(getID(tv, col.structInfo))
 	}
-	return runAfterUpdateHooks(ctx, target)
+	return nil
 }
 
 // deleteSingleLinkedValue removes one link target: loads the stored doc,

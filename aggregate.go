@@ -143,14 +143,14 @@ func (qs QuerySet[T]) Project(ctx context.Context, target any) error {
 
 	sliceVal := rv.Elem()
 	elemType := sliceVal.Type().Elem()
-	enc := qs.scope.db().getEncoder()
+	db := qs.scope.db()
 
 	for iter.Next() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		var docMap map[string]any
-		if err := enc.Decode(iter.Bytes(), &docMap); err != nil {
+		if err := db.decode(iter.Bytes(), &docMap); err != nil {
 			return fmt.Errorf("decode for projection: %w", err)
 		}
 

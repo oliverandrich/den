@@ -59,10 +59,6 @@ func Open(ctx context.Context, connString string) (den.Backend, error) {
 	return &backend{pool: pool}, nil
 }
 
-func (b *backend) Encoder() den.Encoder {
-	return newJSONEncoder()
-}
-
 func (b *backend) getSQLs(collection string) *sqlSet {
 	if v, ok := b.sqls.Load(collection); ok {
 		s, _ := v.(*sqlSet)

@@ -179,10 +179,6 @@ func buildDSN(path string) string {
 	return base + "?" + params.Encode()
 }
 
-func (b *backend) Encoder() den.Encoder {
-	return newJSONEncoder()
-}
-
 func (b *backend) getStmts(ctx context.Context, collection string) (*stmtSet, error) {
 	if v, ok := b.stmts.Load(collection); ok {
 		s, _ := v.(*stmtSet)

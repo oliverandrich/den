@@ -25,8 +25,6 @@ type DB struct {
 	collections      map[string]*collectionInfo
 	typeToCollection map[string]string // Go type derived name → registered collection name
 	typeCache        sync.Map          // reflect.Type → *collectionInfo (lock-free fast path)
-	encoder          Encoder
-	encoderOnce      sync.Once
 	tagValidator     func(doc any) error
 	storage          Storage
 	pendingTypes     []any // queued by WithTypes, registered at the end of Open
@@ -38,13 +36,6 @@ type collectionInfo struct {
 	meta       CollectionMeta
 	structInfo *internal.StructInfo
 	settings   Settings
-}
-
-// Encoder serializes and deserializes documents for a specific backend.
-// Each backend provides its own implementation.
-type Encoder interface {
-	Encode(v any) ([]byte, error)
-	Decode(data []byte, v any) error
 }
 
 // Open creates a new DB using the given backend directly. The context

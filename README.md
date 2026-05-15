@@ -259,21 +259,21 @@ Single-goroutine latency per operation. Lower is better.
 <!-- BENCH:SERIAL -->
 | Scenario | SQLite | Postgres | SQLite allocs | Postgres allocs |
 |---|---:|---:|---:|---:|
-| Insert (single) | 148.2 µs | 186.6 µs | 31 | 29 |
-| InsertMany (100) | 9.98 ms | 13.91 ms | 3411 | 2916 |
-| InsertMany (1000) | 91.67 ms | 142.16 ms | 34021 | 29064 |
-| FindByID | 5.1 µs | 37.4 µs | 42 | 31 |
-| FindByIDs (10) | 266.6 µs | 930.5 µs | 343 | 328 |
-| Query + Sort + Limit(10) | 730.5 µs | 2.12 ms | 328 | 291 |
-| Query + Sort + Limit(100) | 1.50 ms | 3.83 ms | 2941 | 2544 |
-| Iter (1000 rows) | 3.07 ms | 2.93 ms | 29050 | 25036 |
-| Count(filter) | 25.5 µs | 805.0 µs | 29 | 31 |
-| Sum(filter) | 177.6 µs | 1.02 ms | 35 | 41 |
-| FTS Search | 885.9 µs | 2.04 ms | 603 | 513 |
-| WithFetchLinks (20 rows) | 78.4 µs | 632.9 µs | 658 | 570 |
-| Update (single) | 119.0 µs | 307.8 µs | 62 | 49 |
-| QuerySet.Update (100) | 9.01 ms | 18.35 ms | 5247 | 4341 |
-| RunInTransaction | 159.8 µs | 299.5 µs | 78 | 55 |
+| Insert (single) | 146.3 µs | 177.1 µs | 31 | 29 |
+| InsertMany (100) | 9.75 ms | 13.30 ms | 3412 | 2916 |
+| InsertMany (1000) | 90.86 ms | 139.34 ms | 34020 | 29062 |
+| FindByID | 5.0 µs | 36.6 µs | 43 | 32 |
+| FindByIDs (10) | 275.3 µs | 948.0 µs | 340 | 326 |
+| Query + Sort + Limit(10) | 727.9 µs | 2.18 ms | 327 | 291 |
+| Query + Sort + Limit(100) | 1.35 ms | 4.08 ms | 2940 | 2544 |
+| Iter (1000 rows) | 2.73 ms | 2.83 ms | 29048 | 25036 |
+| Count(filter) | 25.6 µs | 833.5 µs | 29 | 31 |
+| Sum(filter) | 177.3 µs | 1.09 ms | 35 | 41 |
+| FTS Search | 895.9 µs | 2.14 ms | 604 | 513 |
+| WithFetchLinks (20 rows) | 75.3 µs | 681.5 µs | 656 | 570 |
+| Update (single) | 121.4 µs | 279.6 µs | 63 | 50 |
+| QuerySet.Update (100) | 9.03 ms | 18.21 ms | 5249 | 4343 |
+| RunInTransaction | 160.8 µs | 296.5 µs | 79 | 56 |
 
 <!-- /BENCH:SERIAL -->
 
@@ -284,10 +284,10 @@ Single-goroutine latency per operation. Lower is better.
 <!-- BENCH:CONCURRENT -->
 | Scenario | SQLite | Postgres |
 |---|---:|---:|
-| FindByID | 70.1k ops/s | 82.9k ops/s |
-| Insert (single) | 6.3k ops/s | 23.4k ops/s |
-| Mixed reads/writes 80/20 | 27.2k ops/s | 63.3k ops/s |
-| Queue consumer (SkipLocked) | 23.9k ops/s | 19.4k ops/s |
+| FindByID | 69.0k ops/s | 82.4k ops/s |
+| Insert (single) | 5.1k ops/s | 29.3k ops/s |
+| Mixed reads/writes 80/20 | 29.2k ops/s | 63.3k ops/s |
+| Queue consumer (SkipLocked) | 25.1k ops/s | 19.4k ops/s |
 
 <!-- /BENCH:CONCURRENT -->
 

@@ -152,11 +152,6 @@ func TestPing(t *testing.T) {
 	assert.NoError(t, b.Ping(context.Background()))
 }
 
-func TestEncoder(t *testing.T) {
-	b := openTestDB(t)
-	assert.NotNil(t, b.Encoder())
-}
-
 func TestDropIndex(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

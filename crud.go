@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"time"
 
+	json "github.com/goccy/go-json"
+
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/where"
@@ -912,20 +914,11 @@ func setFieldValue(fv reflect.Value, newVal any, fieldName string) error {
 	return nil
 }
 
-func (db *DB) encode(v any) ([]byte, error) {
-	return db.getEncoder().Encode(v)
-}
-
-func (db *DB) decode(data []byte, v any) error {
-	return db.getEncoder().Decode(data, v)
-}
-
-func (db *DB) getEncoder() Encoder {
-	db.encoderOnce.Do(func() {
-		db.encoder = db.backend.Encoder()
-	})
-	return db.encoder
-}
+// encode and decode are the single JSON seam every storage write/read flows
+// through. Kept as DB methods so every call site reads uniformly and so a
+// future swap (e.g. encoding/json/v2 once it stabilises) lives in one place.
+func (db *DB) encode(v any) ([]byte, error)    { return json.Marshal(v) }
+func (db *DB) decode(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 func setBaseFields(v reflect.Value, info *internal.StructInfo, now time.Time, isInsert bool) {
 	if idField := info.BaseID; idField != nil {

@@ -455,11 +455,6 @@ func TestTransactionQuery(t *testing.T) {
 	assert.Equal(t, "p1", iter.ID())
 }
 
-func TestEncoder(t *testing.T) {
-	b := openTestDB(t)
-	assert.NotNil(t, b.Encoder())
-}
-
 func TestCount(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

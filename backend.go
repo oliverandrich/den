@@ -46,8 +46,6 @@ type Backend interface {
 
 	Begin(ctx context.Context) (Transaction, error)
 
-	Encoder() Encoder
-
 	Ping(ctx context.Context) error
 	Close() error
 }

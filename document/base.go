@@ -2,8 +2,6 @@ package document
 
 import (
 	"time"
-
-	"github.com/oliverandrich/den/id"
 )
 
 // Base provides the standard fields every Den document carries: ID, creation
@@ -18,11 +16,6 @@ type Base struct {
 	CreatedAt time.Time `json:"_created_at"`
 	UpdatedAt time.Time `json:"_updated_at"`
 	Rev       string    `json:"_rev,omitempty"`
-}
-
-// NewID generates a new ULID string suitable for document IDs.
-func NewID() string {
-	return id.New()
 }
 
 // Trackable is implemented by documents that carry a byte-level snapshot of

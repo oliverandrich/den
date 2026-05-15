@@ -7,25 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewID(t *testing.T) {
-	id1 := NewID()
-	id2 := NewID()
-
-	assert.NotEmpty(t, id1)
-	assert.NotEmpty(t, id2)
-	assert.NotEqual(t, id1, id2)
-	assert.Len(t, id1, 26) // ULID is 26 chars
-}
-
-func TestNewID_Sortable(t *testing.T) {
-	id1 := NewID()
-	time.Sleep(2 * time.Millisecond)
-	id2 := NewID()
-
-	// ULIDs generated in different milliseconds are lexicographically ordered
-	assert.Less(t, id1, id2, "ULIDs should be lexicographically sortable")
-}
-
 func TestTracked_ZeroValue(t *testing.T) {
 	var tr Tracked
 	assert.Nil(t, tr.Snapshot())

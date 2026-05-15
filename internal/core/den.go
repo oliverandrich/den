@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"sync"
 
-	"github.com/oliverandrich/den/id"
+	"github.com/oklog/ulid/v2"
+
 	"github.com/oliverandrich/den/internal"
 )
 
@@ -12,7 +14,7 @@ import (
 // and timestamp-ordered. Use this for document IDs, worker IDs, or any
 // unique identifier.
 func NewID() string {
-	return id.New()
+	return ulid.MustNew(ulid.Now(), rand.Reader).String()
 }
 
 // Option configures a DB during Open.

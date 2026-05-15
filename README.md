@@ -38,7 +38,7 @@ Each Go struct you register is a *document*, stored as a JSONB row in a SQL tabl
 - **Optimistic concurrency** — revision-based conflict detection with `ErrRevisionConflict`
 - **Transactions** — `RunInTransaction` with panic-safe rollback
 - **Migrations** — registry-based, each migration runs atomically in a transaction
-- **Struct tag validation** — optional `validate:"required,email"` tags via `go-playground/validator`, enabled with `validate.WithValidation()`
+- **Struct tag validation** — `validate:"required,email"` tags via `go-playground/validator`, always-on; no opt-in, no bypass from inside Den
 - **Expression indexes** — `den:"index"`, `den:"unique"`, nullable unique for pointer fields
 
 ## Quick Start
@@ -84,12 +84,12 @@ func main() {
         log.Fatal(err)
     }
 
-    // Insert
+    // Save — empty ID → insert, non-empty ID → update. Same call covers both.
     p := &Product{Name: "Widget", Price: 9.99}
-    if err := den.Insert(ctx, db, p); err != nil {
+    if err := den.Save(ctx, db, p); err != nil {
         log.Fatal(err)
     }
-    fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
+    fmt.Printf("Saved: %s (ID: %s)\n", p.Name, p.ID)
 
     // Query
     products, err := den.NewQuery[Product](db,
@@ -192,15 +192,7 @@ where.Field("addr.city").Eq("Berlin") // nested fields (dot notation)
 
 ## Validation
 
-Den supports automatic struct tag validation via [`go-playground/validator`](https://github.com/go-playground/validator). Enable it as an option when opening the database:
-
-```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
-```
-
-Then add `validate` tags to your document structs:
+Den runs `validate` struct-tag constraints automatically on every Save — there is no opt-in and no way to bypass them from inside Den. Add tags via [`go-playground/validator`](https://github.com/go-playground/validator):
 
 ```go
 type User struct {
@@ -211,10 +203,10 @@ type User struct {
 }
 ```
 
-Validation runs automatically before every insert and update. Errors wrap `den.ErrValidation` and can be inspected for field-level detail:
+Errors wrap `den.ErrValidation` and can be inspected for field-level detail:
 
 ```go
-err := den.Insert(ctx, db, &User{Name: "ab"})
+err := den.Save(ctx, db, &User{Name: "ab"})
 if errors.Is(err, den.ErrValidation) {
     var ve *validate.Errors
     if errors.As(err, &ve) {
@@ -225,7 +217,7 @@ if errors.Is(err, den.ErrValidation) {
 }
 ```
 
-Tag validation and the `Validator` interface coexist — tag validation runs first (structural rules), then `Validate()` (business logic). Without `validate.WithValidation()`, no tag validation occurs (fully backward compatible).
+Tag validation and the `Validator` interface coexist — tag validation runs first (structural rules), then `Validate()` (business logic). The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary (HTTP handlers, form parsers). For validating arbitrary non-document structs, use [`go-playground/validator/v10`](https://github.com/go-playground/validator) directly.
 
 ## Testing
 
@@ -259,9 +251,9 @@ Single-goroutine latency per operation. Lower is better.
 <!-- BENCH:SERIAL -->
 | Scenario | SQLite | Postgres | SQLite allocs | Postgres allocs |
 |---|---:|---:|---:|---:|
-| Insert (single) | 146.3 µs | 177.1 µs | 31 | 29 |
-| InsertMany (100) | 9.75 ms | 13.30 ms | 3412 | 2916 |
-| InsertMany (1000) | 90.86 ms | 139.34 ms | 34020 | 29062 |
+| Save (insert) | 146.3 µs | 177.1 µs | 31 | 29 |
+| SaveAll (100) | 9.75 ms | 13.30 ms | 3412 | 2916 |
+| SaveAll (1000) | 90.86 ms | 139.34 ms | 34020 | 29062 |
 | FindByID | 5.0 µs | 36.6 µs | 43 | 32 |
 | FindByIDs (10) | 275.3 µs | 948.0 µs | 340 | 326 |
 | Query + Sort + Limit(10) | 727.9 µs | 2.18 ms | 327 | 291 |
@@ -271,7 +263,7 @@ Single-goroutine latency per operation. Lower is better.
 | Sum(filter) | 177.3 µs | 1.09 ms | 35 | 41 |
 | FTS Search | 895.9 µs | 2.14 ms | 604 | 513 |
 | WithFetchLinks (20 rows) | 75.3 µs | 681.5 µs | 656 | 570 |
-| Update (single) | 121.4 µs | 279.6 µs | 63 | 50 |
+| Save (update) | 121.4 µs | 279.6 µs | 63 | 50 |
 | QuerySet.Update (100) | 9.03 ms | 18.21 ms | 5249 | 4343 |
 | RunInTransaction | 160.8 µs | 296.5 µs | 79 | 56 |
 
@@ -285,7 +277,7 @@ Single-goroutine latency per operation. Lower is better.
 | Scenario | SQLite | Postgres |
 |---|---:|---:|
 | FindByID | 69.0k ops/s | 82.4k ops/s |
-| Insert (single) | 5.1k ops/s | 29.3k ops/s |
+| Save (insert) | 5.1k ops/s | 29.3k ops/s |
 | Mixed reads/writes 80/20 | 29.2k ops/s | 63.3k ops/s |
 | Queue consumer (SkipLocked) | 25.1k ops/s | 19.4k ops/s |
 

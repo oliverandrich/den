@@ -53,7 +53,7 @@ type Validator interface {
 ```
 
 !!! note
-    `BeforeSaver` and `AfterSaver` are called by both `Insert` and `Update`. Use them for logic that applies to every write, regardless of whether the document is new or existing.
+    `BeforeSaver` and `AfterSaver` are called by both branches of `Save` — the insert branch (empty ID) and the update branch (non-empty ID). Use them for logic that applies to every write, regardless of whether the document is new or existing.
 
 ## Execution Order
 

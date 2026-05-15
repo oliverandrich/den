@@ -183,11 +183,11 @@ func scenarioOrderKey([2]*result) string { return "" }
 func humanScenario(s string) string {
 	switch s {
 	case "Insert":
-		return "Insert (single)"
+		return "Save (insert)"
 	case "InsertMany100":
-		return "InsertMany (100)"
+		return "SaveAll (100)"
 	case "InsertMany1000":
-		return "InsertMany (1000)"
+		return "SaveAll (1000)"
 	case "FindByID":
 		return "FindByID"
 	case "FindByIDs10":
@@ -207,7 +207,7 @@ func humanScenario(s string) string {
 	case "WithFetchLinks":
 		return "WithFetchLinks (20 rows)"
 	case "Update":
-		return "Update (single)"
+		return "Save (update)"
 	case "BulkUpdate100":
 		return "QuerySet.Update (100)"
 	case "Transaction":

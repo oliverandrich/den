@@ -14,6 +14,12 @@ type Note struct {
 }
 ```
 
+`ID` is a 26-character ULID auto-generated on first save; `CreatedAt` and `UpdatedAt` are stamped automatically; `Rev` stays empty unless you opt your type into [revision tracking](../guide/revision-control.md) for optimistic-concurrency conflicts.
+
+## Save: one verb for insert and update
+
+There is no separate `Insert` and `Update` at the top level — `den.Save(ctx, db, doc)` looks at the document's ID and branches: empty ID → insert (a ULID is generated, `BeforeInsert` hooks fire), non-empty ID → update (revision check, `BeforeUpdate` hooks). The same rule applies to `SaveAll` for batches. Read-modify-write becomes `FindByID` → mutate → `Save`. For atomic single-field updates without the read, use `NewQuery[T](db, …).UpdateOne(ctx, fields)` — see [CRUD Operations](../guide/crud.md).
+
 ## Registration
 
 Before any operation, every type must be **registered** once with the DB. Registration creates the collection (table) and any secondary indexes the struct's `den:` tags request. It's idempotent — safe to call on every startup; missing tables get created, existing ones are left alone.
@@ -33,7 +39,7 @@ If you query an unregistered type, the operation returns `ErrNotRegistered` with
 | Tag | Job |
 |---|---|
 | `json` | Serialization. Sets the field's key in JSONB. Standard Go semantics. |
-| `den` | Den-specific metadata. Indexes, uniqueness, full-text search, omitempty — never a field name. |
+| `den` | Den-specific metadata. Indexes, uniqueness, full-text search, omitempty — never a field name. The `omitempty` on the `den` tag controls index behavior (skip the index when the field is zero), not JSON serialization. |
 
 ```go
 type Note struct {

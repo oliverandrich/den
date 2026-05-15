@@ -157,7 +157,7 @@ next, err := den.NewQuery[Post](db).After(last).Sort("_id", den.Asc).Limit(pageS
 
 ## Upsert by unique field
 
-You have a stream of records to ingest, and the natural deduplication key is a unique column (email, SKU, slug). `FindOneAndUpsert` does the right thing in one round-trip per record:
+You have a stream of records to ingest, and the natural deduplication key is a unique column (email, SKU, slug). `QuerySet.UpsertOne` does the right thing in one round-trip per record:
 
 ```go
 for _, record := range incoming {

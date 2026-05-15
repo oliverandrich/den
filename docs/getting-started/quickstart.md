@@ -23,7 +23,10 @@ type Product struct {
 ```
 
 !!! note "Register before use"
-    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Insert`, `Update`, or query. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`. Registration is idempotent: calling `Register` on every startup is safe — it creates missing tables and indexes and is a no-op for ones already in place.
+    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Save`, query, or other operation. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`. Registration is idempotent: calling `Register` on every startup is safe — it creates missing tables and indexes and is a no-op for ones already in place.
+
+!!! tip "Save handles both insert and update"
+    `den.Save(ctx, db, doc)` inspects the document's ID. Empty ID → insert path (a ULID is generated, `BeforeInsert` hooks fire). Non-empty ID → update path (revision check, `BeforeUpdate` hooks). One call, two branches; the same applies to `SaveAll` for batches.
 
 !!! tip "About `Base.ID`"
     `document.Base.ID` is a 26-character ULID stored as a string. ULIDs are sortable in chronological order, so `WHERE id > ?` cursor pagination over `_id` produces the natural insert order without a separate timestamp column.
@@ -119,7 +122,7 @@ db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
 !!! tip "Same API, different engine"
-    Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
+    Every Den operation — `Save`, `NewQuery`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
 
 ## Next Steps
 

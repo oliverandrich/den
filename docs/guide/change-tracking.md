@@ -15,7 +15,7 @@ type Product struct {
 }
 ```
 
-Den automatically captures a byte-level snapshot of the serialized document after every load or write operation (`Insert`, `Update`, `FindByID`, query iteration).
+Den automatically captures a byte-level snapshot of the serialized document after every load or write operation (`Save`, `FindByID`, query iteration, `Refresh`).
 
 ## Detecting Changes
 

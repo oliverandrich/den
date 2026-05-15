@@ -156,6 +156,24 @@ p.ID = "my-custom-id"
 den.Save(ctx, db, p) // uses "my-custom-id"
 ```
 
+For generating a ULID outside a save — pre-assigned document IDs, worker IDs, correlation IDs, deterministic test fixtures — call `den.NewID()` directly:
+
+```go
+id := den.NewID() // "01HQ3K8V2X4XR1KPMM6N4G8J3P"
+```
+
+## The `document.Document` marker
+
+Every type that embeds `document.Base` automatically satisfies the unexported `document.Document` interface — Base contributes a marker method that propagates via Go's struct-embedding promotion. The marker has no runtime overhead and isn't something you implement directly; it exists so APIs that should only accept Den documents (e.g. `validate.Document(doc)`) can enforce that constraint at compile time. If you write helper functions that take "any Den document," declaring the parameter type as `document.Document` keeps the contract explicit:
+
+```go
+func auditTouch(doc document.Document) {
+    // doc is guaranteed to embed document.Base
+}
+```
+
+Random structs without `document.Base` fail to compile — surfacing the contract violation at the call site instead of at runtime.
+
 ## DenSettings Interface
 
 Implement `DenSettings()` on your document struct to configure collection-level behavior:

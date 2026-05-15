@@ -56,9 +56,9 @@ ids := []string{"01HQ3K8V2X...", "01HQ3K9A1Y...", "01HQ3KBC3Z..."}
 products, err := den.FindByIDs[Product](ctx, db, ids)
 ```
 
-## Update
+### Read-modify-write
 
-Update performs a full document write. The document must have an ID.
+For changing a document, load it, mutate the in-memory copy, and call `Save` — the non-empty ID routes the call to the update path:
 
 ```go
 product, _ := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
@@ -66,7 +66,7 @@ product.Price = 29.99
 err := den.Save(ctx, db, product)
 ```
 
-When revision control is enabled (`UseRevision: true` in `DenSettings`), Update checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
+When revision control is enabled (`UseRevision: true` in `DenSettings`), the update path checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
 
 ```go
 err := den.Save(ctx, db, product)
@@ -77,6 +77,8 @@ if errors.Is(err, den.ErrRevisionConflict) {
 // Force-write regardless of revision:
 err := den.Save(ctx, db, product, den.IgnoreRevision())
 ```
+
+For atomic single-field changes without a separate read, use [UpdateOne](#updateone) instead.
 
 ## Bulk Update via QuerySet
 
@@ -215,6 +217,8 @@ With link cascade -- delete the documents and all their linked documents:
 count, err := den.NewQuery[Product](db, where.Field("status").Eq("archived")).
     Delete(ctx, den.WithLinkRule(den.LinkDelete))
 ```
+
+`QuerySet.Delete` drains the iterator in chunks of 1000 rows before issuing per-row writes, so unbounded-size match sets (e.g. "delete every record older than a year") stay memory-bounded. The whole operation runs in a single transaction and is fail-fast: any per-row error rolls back the batch.
 
 ## Refresh
 

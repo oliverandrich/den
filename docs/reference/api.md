@@ -16,6 +16,7 @@ Module: `github.com/oliverandrich/den`
 | `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
+| `NewID` | `NewID() string` | Generate a fresh 26-character ULID. Save calls this automatically for empty-ID docs; use it directly for pre-assigned document IDs, worker IDs, correlation IDs, or deterministic test fixtures |
 
 ---
 
@@ -176,7 +177,7 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 
 ## Transactions
 
-`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Insert`/`Update`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
+`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Save`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
 
 | Function | Signature | Description |
 |---|---|---|
@@ -186,9 +187,9 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 | `NoWait` | `NoWait() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
 | `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquires a row-level lock on every matching row in one statement. Only valid when the QuerySet is bound to a `*Tx`; terminal methods return `ErrLockRequiresTransaction` if the scope is a `*DB` |
 | `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
-| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Insert` / `Update` / `Delete` / `FindByID` / `NewQuery` |
+| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Save` / `Delete` / `FindByID` / `NewQuery` |
 
-> **Note:** Standard CRUD operations (`Insert`, `Update`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
+> **Note:** Standard CRUD operations (`Save`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
 
 ---
 

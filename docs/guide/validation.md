@@ -24,11 +24,11 @@ func (a *Article) Validate(ctx context.Context) error {
 }
 ```
 
-The `Validate(ctx)` hook is called automatically before every `Insert` and `Update`. If it returns an error, the write is aborted. The context carries cancellation, deadlines, and any tracing/auth values from the surrounding call — use it for validators that hit a database, call out to another service, or otherwise need to participate in the request lifecycle.
+The `Validate(ctx)` hook is called automatically before every `Save`. If it returns an error, the write is aborted. The context carries cancellation, deadlines, and any tracing/auth values from the surrounding call — use it for validators that hit a database, call out to another service, or otherwise need to participate in the request lifecycle.
 
 ## Struct Tag Validation
 
-For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Insert` and `Update`, no opt-in required:
+For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Save`, no opt-in required:
 
 ```go
 type User struct {
@@ -40,16 +40,16 @@ type User struct {
 }
 ```
 
-The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The parameter type is `document.Document`, so it accepts any type that embeds `document.Base`; passing a non-document struct fails at compile time. The returned `*validate.Errors` mirrors what Den's write path would have produced.
+The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The parameter type is `document.Document`, so it accepts any type that embeds `document.Base`; passing a non-document struct fails at compile time. For validating arbitrary non-document structs, use [`go-playground/validator/v10`](https://github.com/go-playground/validator) directly. The returned `*validate.Errors` mirrors what Den's write path would have produced.
 
 ## Execution Order
 
 Both validation mechanisms run **after** any mutating `BeforeInsert` / `BeforeUpdate` / `BeforeSave` hook, so hooks can populate default values, compute derived fields, or normalize inputs before the constraints are checked.
 
-The full order during `Insert` and `Update`:
+The full order during `Save`:
 
-1. `BeforeInsert` / `BeforeUpdate` hook (mutating)
-2. `BeforeSave` hook (mutating, runs on both insert and update)
+1. `BeforeInsert` / `BeforeUpdate` hook (mutating; whichever branch `Save` resolved to based on the document's ID)
+2. `BeforeSave` hook (mutating, runs on both branches)
 3. Struct tag validation (`validate` tags)
 4. `Validate()` hook (custom business logic)
 5. Write to the database

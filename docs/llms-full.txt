@@ -151,6 +151,12 @@ type Note struct {
 }
 ```
 
+`ID` is a 26-character ULID auto-generated on first save; `CreatedAt` and `UpdatedAt` are stamped automatically; `Rev` stays empty unless you opt your type into [revision tracking](../guide/revision-control.md) for optimistic-concurrency conflicts.
+
+## Save: one verb for insert and update
+
+There is no separate `Insert` and `Update` at the top level — `den.Save(ctx, db, doc)` looks at the document's ID and branches: empty ID → insert (a ULID is generated, `BeforeInsert` hooks fire), non-empty ID → update (revision check, `BeforeUpdate` hooks). The same rule applies to `SaveAll` for batches. Read-modify-write becomes `FindByID` → mutate → `Save`. For atomic single-field updates without the read, use `NewQuery[T](db, …).UpdateOne(ctx, fields)` — see [CRUD Operations](../guide/crud.md).
+
 ## Registration
 
 Before any operation, every type must be **registered** once with the DB. Registration creates the collection (table) and any secondary indexes the struct's `den:` tags request. It's idempotent — safe to call on every startup; missing tables get created, existing ones are left alone.
@@ -170,7 +176,7 @@ If you query an unregistered type, the operation returns `ErrNotRegistered` with
 | Tag | Job |
 |---|---|
 | `json` | Serialization. Sets the field's key in JSONB. Standard Go semantics. |
-| `den` | Den-specific metadata. Indexes, uniqueness, full-text search, omitempty — never a field name. |
+| `den` | Den-specific metadata. Indexes, uniqueness, full-text search, omitempty — never a field name. The `omitempty` on the `den` tag controls index behavior (skip the index when the field is zero), not JSON serialization. |
 
 ```go
 type Note struct {
@@ -230,7 +236,10 @@ type Product struct {
 ```
 
 !!! note "Register before use"
-    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Insert`, `Update`, or query. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`. Registration is idempotent: calling `Register` on every startup is safe — it creates missing tables and indexes and is a no-op for ones already in place.
+    Every type must be registered — either via `den.Register(ctx, db, ...)` after Open or via `den.WithTypes(...)` during Open — before any `Save`, query, or other operation. Registration creates the backing collection and indexes; unregistered types return `ErrNotRegistered`. Registration is idempotent: calling `Register` on every startup is safe — it creates missing tables and indexes and is a no-op for ones already in place.
+
+!!! tip "Save handles both insert and update"
+    `den.Save(ctx, db, doc)` inspects the document's ID. Empty ID → insert path (a ULID is generated, `BeforeInsert` hooks fire). Non-empty ID → update path (revision check, `BeforeUpdate` hooks). One call, two branches; the same applies to `SaveAll` for batches.
 
 !!! tip "About `Base.ID`"
     `document.Base.ID` is a 26-character ULID stored as a string. ULIDs are sortable in chronological order, so `WHERE id > ?` cursor pagination over `_id` produces the natural insert order without a separate timestamp column.
@@ -326,7 +335,7 @@ db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 ```
 
 !!! tip "Same API, different engine"
-    Every Den operation — `Insert`, `NewQuery`, `Update`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
+    Every Den operation — `Save`, `NewQuery`, `Delete`, `RunInTransaction` — works the same on both backends. Choose SQLite for embedded single-binary deployments and PostgreSQL when you need replication or scale.
 
 ## Next Steps
 
@@ -436,9 +445,9 @@ func (t *Task) Validate(ctx context.Context) error {
 
 ---
 
-## 4. Insert and link
+## 4. Save and link
 
-Insert a Project, then a Task that links to it. `den.NewLink(parent)` extracts the parent's ID into the Link.
+`Link[T]` is a typed reference to another collection. It serializes as just the target's ID string (the JSON key follows the struct's `json` tag — here `"project"`). `den.NewLink(parent)` extracts the parent's ID into a fresh `Link[Project]`.
 
 ```go
 proj := &Project{Name: "Den Docs"}
@@ -453,9 +462,11 @@ if err := den.Save(ctx, db, task); err != nil { log.Fatal(err) }
 fmt.Println("created", proj.ID, task.ID, "status:", task.Status)
 ```
 
-The `BeforeInsert` hook populated `task.Status` to `"todo"`; `Validate` accepted the non-empty title.
+Both saves take the insert branch because the structs were just constructed with empty IDs — `Save` generates a ULID and stamps `CreatedAt`. The `BeforeInsert` hook populated `task.Status` to `"todo"`; `Validate` accepted the non-empty title.
 
-`Link[T]` stores only the ID in JSON. To dereference, you either fetch the linked doc separately or hydrate via `WithFetchLinks()` (next section).
+Re-running the program will fail at the Project save: `Project.Name` is tagged `den:"unique"`, so the second `"Den Docs"` collides and returns `ErrDuplicate`. Make the name dynamic (timestamp suffix, random value) or wrap the seed in a one-time setup if you want repeat-safe runs.
+
+To dereference the link later, either fetch the target separately or hydrate via `WithFetchLinks()` (next section).
 
 ---
 
@@ -483,7 +494,7 @@ For streaming over large result sets, swap `.All(ctx)` for [`.Iter(ctx)`](../gui
 
 ## 6. Update one field atomically
 
-The single-field update pattern: route through `QuerySet.UpdateOne` so you avoid the read-modify-write round-trip and any concurrent-update race.
+`Save` covers the load-mutate-save case (e.g. fetch a task, change three fields, save again). For changing one or two specific fields without the read round-trip — and without racing other writers — reach for `QuerySet.UpdateOne`:
 
 ```go
 done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
@@ -491,6 +502,8 @@ done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
 if err != nil { log.Fatal(err) }
 fmt.Println("marked done:", done.Title, "→", done.Status)
 ```
+
+Rule of thumb: use `Save` when you have a `*T` in hand and want to persist its current state; use `UpdateOne` when you want to flip specific fields atomically on a row identified by ID or by predicate. Same for `UpsertOne` and `GetOrCreate` — see [CRUD Operations](../guide/crud.md).
 
 `SetFields` keys are JSON tag names (`"status"`, not `"Status"`). Mistakes are caught before the write opens — see the [Recipes](../guide/recipes.md) page for more single-purpose patterns.
 
@@ -533,7 +546,7 @@ That's the full surface in ten minutes:
 
 - **Types and registration**: §2
 - **Lifecycle hooks and validation**: §3
-- **Insert + typed relations**: §4
+- **Save + typed relations**: §4
 - **Queries with eager links + indexes**: §5
 - **Atomic field updates**: §6
 - **Soft delete**: §7
@@ -541,7 +554,7 @@ That's the full surface in ten minutes:
 
 From here:
 
-- [CRUD Operations](../guide/crud.md) for the rest of the write surface (`Update`, `InsertMany`, `FindOneAndUpsert`, …)
+- [CRUD Operations](../guide/crud.md) for the rest of the write surface (`SaveAll`, `UpdateOne`, `UpsertOne`, `GetOrCreate`, `DeleteAll`, …)
 - [Queries](../guide/queries.md) for cursor pagination, projections, aggregations, FTS
 - [Relations](../guide/relations.md) for cascade rules, BackLinks, nested fetch
 - [Hooks](../guide/hooks.md) for the full hook ordering across paths
@@ -832,6 +845,24 @@ p.ID = "my-custom-id"
 den.Save(ctx, db, p) // uses "my-custom-id"
 ```
 
+For generating a ULID outside a save — pre-assigned document IDs, worker IDs, correlation IDs, deterministic test fixtures — call `den.NewID()` directly:
+
+```go
+id := den.NewID() // "01HQ3K8V2X4XR1KPMM6N4G8J3P"
+```
+
+## The `document.Document` marker
+
+Every type that embeds `document.Base` automatically satisfies the unexported `document.Document` interface — Base contributes a marker method that propagates via Go's struct-embedding promotion. The marker has no runtime overhead and isn't something you implement directly; it exists so APIs that should only accept Den documents (e.g. `validate.Document(doc)`) can enforce that constraint at compile time. If you write helper functions that take "any Den document," declaring the parameter type as `document.Document` keeps the contract explicit:
+
+```go
+func auditTouch(doc document.Document) {
+    // doc is guaranteed to embed document.Base
+}
+```
+
+Random structs without `document.Base` fail to compile — surfacing the contract violation at the call site instead of at runtime.
+
 ## DenSettings Interface
 
 Implement `DenSettings()` on your document struct to configure collection-level behavior:
@@ -1100,9 +1131,9 @@ ids := []string{"01HQ3K8V2X...", "01HQ3K9A1Y...", "01HQ3KBC3Z..."}
 products, err := den.FindByIDs[Product](ctx, db, ids)
 ```
 
-## Update
+### Read-modify-write
 
-Update performs a full document write. The document must have an ID.
+For changing a document, load it, mutate the in-memory copy, and call `Save` — the non-empty ID routes the call to the update path:
 
 ```go
 product, _ := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
@@ -1110,7 +1141,7 @@ product.Price = 29.99
 err := den.Save(ctx, db, product)
 ```
 
-When revision control is enabled (`UseRevision: true` in `DenSettings`), Update checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
+When revision control is enabled (`UseRevision: true` in `DenSettings`), the update path checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
 
 ```go
 err := den.Save(ctx, db, product)
@@ -1121,6 +1152,8 @@ if errors.Is(err, den.ErrRevisionConflict) {
 // Force-write regardless of revision:
 err := den.Save(ctx, db, product, den.IgnoreRevision())
 ```
+
+For atomic single-field changes without a separate read, use [UpdateOne](#updateone) instead.
 
 ## Bulk Update via QuerySet
 
@@ -1259,6 +1292,8 @@ With link cascade -- delete the documents and all their linked documents:
 count, err := den.NewQuery[Product](db, where.Field("status").Eq("archived")).
     Delete(ctx, den.WithLinkRule(den.LinkDelete))
 ```
+
+`QuerySet.Delete` drains the iterator in chunks of 1000 rows before issuing per-row writes, so unbounded-size match sets (e.g. "delete every record older than a year") stay memory-bounded. The whole operation runs in a single transaction and is fail-fast: any per-row error rolls back the batch.
 
 ## Refresh
 
@@ -2407,7 +2442,7 @@ type Attachment struct {
 These fields are set by the Storage when bytes are stored and are not meant to be edited by application code afterwards — `StoragePath`, `Size`, and `SHA256` are intrinsic to the stored content.
 
 !!! note "About the `validate:` tags"
-    `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`, where Den enforces them automatically (see [Validation](validation.md)).
+    `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later persisted through `den.Save`, where Den enforces them automatically (see [Validation](validation.md)).
 
 !!! note "StoragePath is an object key, not a URL"
     `StoragePath` is the path **relative to the storage backend's root** — for the file backend that is the root directory, for S3 that is the object key inside the bucket. Hosts, bucket names, query strings, and pre-signed URL parameters do NOT belong here; they come out of `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS object-key maxima.
@@ -2872,7 +2907,7 @@ A handful of APIs remain transaction-only because their semantics are tied to tr
 | `den.LockByID[T](ctx, tx, id, opts...)` | Row-level lock released on commit/rollback |
 | `den.AdvisoryLock(ctx, tx, key)` | Application-level lock released on commit/rollback |
 | `den.NewQuery[T](tx).ForUpdate(...)` | Multi-row `FOR UPDATE` locking (QuerySet refuses to run `ForUpdate` against a `*DB` scope) |
-| `tx.Transaction()` | Low-level escape hatch to the underlying backend Transaction. Only for infrastructure code like the migration log — application code should use `Insert` / `Update` / `Delete` / `FindByID` etc. |
+| `tx.Transaction()` | Low-level escape hatch to the underlying backend Transaction. Only for infrastructure code like the migration log — application code should use `Save` / `Delete` / `FindByID` etc. |
 
 ## Row-Level Locking
 
@@ -3087,7 +3122,7 @@ type Validator interface {
 ```
 
 !!! note
-    `BeforeSaver` and `AfterSaver` are called by both `Insert` and `Update`. Use them for logic that applies to every write, regardless of whether the document is new or existing.
+    `BeforeSaver` and `AfterSaver` are called by both branches of `Save` — the insert branch (empty ID) and the update branch (non-empty ID). Use them for logic that applies to every write, regardless of whether the document is new or existing.
 
 ## Execution Order
 
@@ -3436,7 +3471,7 @@ type Product struct {
 }
 ```
 
-Den automatically captures a byte-level snapshot of the serialized document after every load or write operation (`Insert`, `Update`, `FindByID`, query iteration).
+Den automatically captures a byte-level snapshot of the serialized document after every load or write operation (`Save`, `FindByID`, query iteration, `Refresh`).
 
 ## Detecting Changes
 
@@ -3665,11 +3700,11 @@ func (a *Article) Validate(ctx context.Context) error {
 }
 ```
 
-The `Validate(ctx)` hook is called automatically before every `Insert` and `Update`. If it returns an error, the write is aborted. The context carries cancellation, deadlines, and any tracing/auth values from the surrounding call — use it for validators that hit a database, call out to another service, or otherwise need to participate in the request lifecycle.
+The `Validate(ctx)` hook is called automatically before every `Save`. If it returns an error, the write is aborted. The context carries cancellation, deadlines, and any tracing/auth values from the surrounding call — use it for validators that hit a database, call out to another service, or otherwise need to participate in the request lifecycle.
 
 ## Struct Tag Validation
 
-For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Insert` and `Update`, no opt-in required:
+For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Save`, no opt-in required:
 
 ```go
 type User struct {
@@ -3681,16 +3716,16 @@ type User struct {
 }
 ```
 
-The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The parameter type is `document.Document`, so it accepts any type that embeds `document.Base`; passing a non-document struct fails at compile time. The returned `*validate.Errors` mirrors what Den's write path would have produced.
+The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The parameter type is `document.Document`, so it accepts any type that embeds `document.Base`; passing a non-document struct fails at compile time. For validating arbitrary non-document structs, use [`go-playground/validator/v10`](https://github.com/go-playground/validator) directly. The returned `*validate.Errors` mirrors what Den's write path would have produced.
 
 ## Execution Order
 
 Both validation mechanisms run **after** any mutating `BeforeInsert` / `BeforeUpdate` / `BeforeSave` hook, so hooks can populate default values, compute derived fields, or normalize inputs before the constraints are checked.
 
-The full order during `Insert` and `Update`:
+The full order during `Save`:
 
-1. `BeforeInsert` / `BeforeUpdate` hook (mutating)
-2. `BeforeSave` hook (mutating, runs on both insert and update)
+1. `BeforeInsert` / `BeforeUpdate` hook (mutating; whichever branch `Save` resolved to based on the document's ID)
+2. `BeforeSave` hook (mutating, runs on both branches)
 3. Struct tag validation (`validate` tags)
 4. `Validate()` hook (custom business logic)
 5. Write to the database
@@ -4214,7 +4249,7 @@ next, err := den.NewQuery[Post](db).After(last).Sort("_id", den.Asc).Limit(pageS
 
 ## Upsert by unique field
 
-You have a stream of records to ingest, and the natural deduplication key is a unique column (email, SKU, slug). `FindOneAndUpsert` does the right thing in one round-trip per record:
+You have a stream of records to ingest, and the natural deduplication key is a unique column (email, SKU, slug). `QuerySet.UpsertOne` does the right thing in one round-trip per record:
 
 ```go
 for _, record := range incoming {
@@ -4251,6 +4286,7 @@ Module: `github.com/oliverandrich/den`
 | `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
+| `NewID` | `NewID() string` | Generate a fresh 26-character ULID. Save calls this automatically for empty-ID docs; use it directly for pre-assigned document IDs, worker IDs, correlation IDs, or deterministic test fixtures |
 
 ---
 
@@ -4411,7 +4447,7 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 
 ## Transactions
 
-`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Insert`/`Update`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
+`RunInTransaction` opens a transaction; the closure receives a `*Tx`. CRUD functions take a `Scope` (satisfied by `*DB` and `*Tx`), so the same `Save`/`Delete`/`FindByID` etc. work both inside and outside a transaction — pass the `*Tx` instead of the `*DB`. The APIs listed below are the transaction-only ones: they take `*Tx` directly because their semantics are tied to transaction lifetime.
 
 | Function | Signature | Description |
 |---|---|---|
@@ -4421,9 +4457,9 @@ Requires embedding `document.Tracked` alongside `document.Base`.
 | `NoWait` | `NoWait() LockOption` | `LockByID` and `QuerySet.ForUpdate` modifier: return `ErrLocked` immediately if another transaction holds any row. PostgreSQL `FOR UPDATE NOWAIT` |
 | `QuerySet[T].ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquires a row-level lock on every matching row in one statement. Only valid when the QuerySet is bound to a `*Tx`; terminal methods return `ErrLockRequiresTransaction` if the scope is a `*DB` |
 | `AdvisoryLock` | `AdvisoryLock(ctx context.Context, tx *Tx, key int64) error` | Acquire an application-level lock held until the transaction commits or rolls back. PostgreSQL `pg_advisory_xact_lock`; SQLite no-op |
-| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Insert` / `Update` / `Delete` / `FindByID` / `NewQuery` |
+| `(*Tx).Transaction` | `(t *Tx) Transaction() Transaction` | Low-level accessor that returns the underlying backend `Transaction`. Only for infrastructure code (e.g. the migration log) that needs to bypass the registry, encoding, and hooks. Application code should use `Save` / `Delete` / `FindByID` / `NewQuery` |
 
-> **Note:** Standard CRUD operations (`Insert`, `Update`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
+> **Note:** Standard CRUD operations (`Save`, `Delete`, `FindByID`, …) accept a `Scope` parameter; pass `*DB` outside a transaction and `*Tx` inside.
 
 ---
 

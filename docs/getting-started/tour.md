@@ -98,9 +98,9 @@ func (t *Task) Validate(ctx context.Context) error {
 
 ---
 
-## 4. Insert and link
+## 4. Save and link
 
-Insert a Project, then a Task that links to it. `den.NewLink(parent)` extracts the parent's ID into the Link.
+`Link[T]` is a typed reference to another collection. It serializes as just the target's ID string (the JSON key follows the struct's `json` tag — here `"project"`). `den.NewLink(parent)` extracts the parent's ID into a fresh `Link[Project]`.
 
 ```go
 proj := &Project{Name: "Den Docs"}
@@ -115,9 +115,11 @@ if err := den.Save(ctx, db, task); err != nil { log.Fatal(err) }
 fmt.Println("created", proj.ID, task.ID, "status:", task.Status)
 ```
 
-The `BeforeInsert` hook populated `task.Status` to `"todo"`; `Validate` accepted the non-empty title.
+Both saves take the insert branch because the structs were just constructed with empty IDs — `Save` generates a ULID and stamps `CreatedAt`. The `BeforeInsert` hook populated `task.Status` to `"todo"`; `Validate` accepted the non-empty title.
 
-`Link[T]` stores only the ID in JSON. To dereference, you either fetch the linked doc separately or hydrate via `WithFetchLinks()` (next section).
+Re-running the program will fail at the Project save: `Project.Name` is tagged `den:"unique"`, so the second `"Den Docs"` collides and returns `ErrDuplicate`. Make the name dynamic (timestamp suffix, random value) or wrap the seed in a one-time setup if you want repeat-safe runs.
+
+To dereference the link later, either fetch the target separately or hydrate via `WithFetchLinks()` (next section).
 
 ---
 
@@ -145,7 +147,7 @@ For streaming over large result sets, swap `.All(ctx)` for [`.Iter(ctx)`](../gui
 
 ## 6. Update one field atomically
 
-The single-field update pattern: route through `QuerySet.UpdateOne` so you avoid the read-modify-write round-trip and any concurrent-update race.
+`Save` covers the load-mutate-save case (e.g. fetch a task, change three fields, save again). For changing one or two specific fields without the read round-trip — and without racing other writers — reach for `QuerySet.UpdateOne`:
 
 ```go
 done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
@@ -153,6 +155,8 @@ done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
 if err != nil { log.Fatal(err) }
 fmt.Println("marked done:", done.Title, "→", done.Status)
 ```
+
+Rule of thumb: use `Save` when you have a `*T` in hand and want to persist its current state; use `UpdateOne` when you want to flip specific fields atomically on a row identified by ID or by predicate. Same for `UpsertOne` and `GetOrCreate` — see [CRUD Operations](../guide/crud.md).
 
 `SetFields` keys are JSON tag names (`"status"`, not `"Status"`). Mistakes are caught before the write opens — see the [Recipes](../guide/recipes.md) page for more single-purpose patterns.
 
@@ -195,7 +199,7 @@ That's the full surface in ten minutes:
 
 - **Types and registration**: §2
 - **Lifecycle hooks and validation**: §3
-- **Insert + typed relations**: §4
+- **Save + typed relations**: §4
 - **Queries with eager links + indexes**: §5
 - **Atomic field updates**: §6
 - **Soft delete**: §7
@@ -203,7 +207,7 @@ That's the full surface in ten minutes:
 
 From here:
 
-- [CRUD Operations](../guide/crud.md) for the rest of the write surface (`Update`, `InsertMany`, `FindOneAndUpsert`, …)
+- [CRUD Operations](../guide/crud.md) for the rest of the write surface (`SaveAll`, `UpdateOne`, `UpsertOne`, `GetOrCreate`, `DeleteAll`, …)
 - [Queries](../guide/queries.md) for cursor pagination, projections, aggregations, FTS
 - [Relations](../guide/relations.md) for cascade rules, BackLinks, nested fetch
 - [Hooks](../guide/hooks.md) for the full hook ordering across paths

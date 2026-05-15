@@ -28,15 +28,7 @@ The `Validate(ctx)` hook is called automatically before every `Insert` and `Upda
 
 ## Struct Tag Validation
 
-For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. Enable it with `validate.WithValidation()` when opening the database:
-
-```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
-```
-
-Then add `validate` tags to your struct fields:
+For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Insert` and `Update`, no opt-in required:
 
 ```go
 type User struct {
@@ -48,8 +40,7 @@ type User struct {
 }
 ```
 
-!!! note
-    Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag validation is opt-in for backward compatibility.
+The `validate/` package also exports `validate.Struct(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The returned `*validate.Errors` mirrors what Den's write path would have produced.
 
 ## Execution Order
 
@@ -109,7 +100,7 @@ func (u *User) Validate(ctx context.Context) error {
 ```
 
 ```go
-db, _ := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
+db, _ := den.OpenURL(ctx, "sqlite:///data.db")
 den.Register(ctx, db, &User{})
 
 user := &User{Username: "ab", Email: "invalid"}

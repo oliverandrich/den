@@ -25,7 +25,6 @@ type DB struct {
 	collections      map[string]*collectionInfo
 	typeToCollection map[string]string // Go type derived name → registered collection name
 	typeCache        sync.Map          // reflect.Type → *collectionInfo (lock-free fast path)
-	tagValidator     func(doc any) error
 	storage          Storage
 	pendingTypes     []any // queued by WithTypes, registered at the end of Open
 	mu               sync.RWMutex
@@ -71,26 +70,11 @@ func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
 //
 //	db, err := den.OpenURL(ctx, dsn, den.WithTypes(&Note{}, &Tag{}))
 //
-// Registration runs after every other Option has been applied, so a
-// Validator installed via WithTagValidator is in place before the
-// queued types are validated. Any registration error aborts Open and
-// is surfaced as its error.
+// Registration runs after every other Option has been applied. Any
+// registration error aborts Open and is surfaced as its error.
 func WithTypes(types ...any) Option {
 	return func(db *DB) {
 		db.pendingTypes = append(db.pendingTypes, types...)
-	}
-}
-
-// WithTagValidator returns an Option that installs a function for validating
-// documents by their struct tags. The function is invoked before insert and
-// update operations; any error it returns is wrapped with ErrValidation.
-//
-// The option composes with WithTypes and WithValidation from the validate
-// package and is applied at Open, so validation is set once up-front and not
-// racy against concurrent Register calls.
-func WithTagValidator(fn func(any) error) Option {
-	return func(db *DB) {
-		db.tagValidator = fn
 	}
 }
 

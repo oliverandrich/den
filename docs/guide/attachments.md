@@ -50,7 +50,7 @@ type Attachment struct {
 These fields are set by the Storage when bytes are stored and are not meant to be edited by application code afterwards — `StoragePath`, `Size`, and `SHA256` are intrinsic to the stored content.
 
 !!! note "About the `validate:` tags"
-    The `validate:` tags fire only when validation is enabled on the DB via `validate.WithValidation()` (see [Validation](validation.md)). `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`. With validation disabled the tags are inert metadata.
+    `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`, where Den enforces them automatically (see [Validation](validation.md)).
 
 !!! note "StoragePath is an object key, not a URL"
     `StoragePath` is the path **relative to the storage backend's root** — for the file backend that is the root directory, for S3 that is the object key inside the bucket. Hosts, bucket names, query strings, and pre-signed URL parameters do NOT belong here; they come out of `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS object-key maxima.

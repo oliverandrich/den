@@ -90,7 +90,7 @@ BeforeDelete() -> BeforeSoftDelete() -> [write soft-delete] -> AfterSoftDelete()
 If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
 
 !!! note
-    Tag validation (configured via `validate.WithValidation()`) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
+    Tag validation (`validate:` struct tags, always-on) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
 
 ## Example: Article with Hooks
 

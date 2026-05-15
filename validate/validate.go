@@ -1,3 +1,20 @@
+// Package validate exposes the struct-tag constraint helper used by Den.
+//
+// Den runs Struct automatically on every Insert and Update — there is no
+// opt-in option, and there is no way to bypass tag-level constraints from
+// inside Den. Call Struct directly only at boundaries before the doc
+// reaches Den (typical use: HTTP handlers that want to reject bad input
+// before opening a database transaction). The returned *Errors mirrors
+// what Den's write path would have produced.
+//
+// The struct-tag syntax follows go-playground/validator/v10:
+//
+//	type Product struct {
+//	    document.Base
+//	    Name  string  `json:"name"  validate:"required,min=3"`
+//	    Email string  `json:"email" validate:"required,email"`
+//	    Price float64 `json:"price" validate:"required,min=0"`
+//	}
 package validate
 
 import (
@@ -6,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/oliverandrich/den"
 )
 
 // FieldError describes a single field that failed validation.
@@ -34,27 +50,21 @@ func (e *Errors) Error() string {
 	return "validation failed: " + strings.Join(parts, "; ")
 }
 
-var defaultValidator = validator.New()
+// DefaultValidator is the singleton go-playground validator instance used
+// by Struct and (internally) by Den's write path. Exposed so consumers
+// that need to register custom validation functions can do so once for
+// both surfaces.
+var DefaultValidator = validator.New()
 
-// ValidateStruct validates a struct using its `validate` struct tags.
-// Returns nil if valid, *Errors if validation fails, or an error for
-// invalid input (e.g. nil).
-func ValidateStruct(doc any) error {
-	return validateWithInstance(defaultValidator, doc)
-}
-
-// WithValidation returns a den.Option that enables struct tag validation
-// using go-playground/validator. Documents with `validate:"..."` struct tags
-// are validated automatically before insert and update operations.
-func WithValidation() den.Option {
-	v := validator.New()
-	return den.WithTagValidator(func(doc any) error {
-		return validateWithInstance(v, doc)
-	})
-}
-
-func validateWithInstance(v *validator.Validate, doc any) error {
-	err := v.Struct(doc)
+// Struct validates doc against its `validate` struct tags using
+// DefaultValidator. Returns nil on success, *Errors on validation
+// failure, or a raw error for malformed input (e.g. a nil pointer).
+//
+// Den's write path calls Struct automatically; this entry point is for
+// validating outside the Den boundary (HTTP handlers, form parsers,
+// pre-save checks).
+func Struct(doc any) error {
+	err := DefaultValidator.Struct(doc)
 	if err == nil {
 		return nil
 	}

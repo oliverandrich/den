@@ -10,7 +10,9 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Removed
 
-- **`den.Encoder` interface and `Backend.Encoder()` method.** The Encoder abstraction had a single concrete implementation across all backends (an `*internal.Encoder` doing `goccy/go-json` Marshal/Unmarshal) and no documented seam for non-JSON storage — Den is JSON-only by design (JSONB on both backends). Inlined into `db.encode` / `db.decode` as the single JSON seam. Consumers that referenced `den.Encoder` directly (likely none — Burrow, warren, gazette do not) need to drop the import. The `goccy/go-json` library remains in use; a future revisit when `encoding/json/v2` stabilizes in Go 1.27 will swap libraries inside `db.encode` only.
+- **`den.WithTagValidator` option and `validate.WithValidation()` helper.** Tag-based field validation is now always-on: Den runs `validate.Struct(doc)` automatically on every Insert and Update — there is no opt-in, no way to bypass `validate:` constraints from inside Den. Migration: delete `den.WithTagValidator(...)` and `validate.WithValidation()` calls from the `Open` / `OpenURL` argument list. Struct tags stay unchanged. `validate.ValidateStruct` renamed to `validate.Struct` for callers that validate outside the Den boundary (HTTP handlers, form parsers).
+
+- **`den.Encoder` interface and `Backend.Encoder()` method.** The Encoder abstraction had a single concrete implementation across all backends (an `*internal.Encoder` doing `goccy/go-json` Marshal/Unmarshal) and no documented seam for non-JSON storage — Den is JSON-only by design (JSONB on both backends). Inlined into `db.encode` / `db.decode` as the single JSON seam; consumers that referenced `den.Encoder` directly need to drop the import. The `goccy/go-json` library remains in use; a future revisit when `encoding/json/v2` stabilizes in Go 1.27 will swap libraries inside `db.encode` only.
 
 ## 0.11.2 — 2026-05-03
 

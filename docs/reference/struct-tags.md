@@ -10,7 +10,7 @@ Den uses three struct tags: `json` for serialization, `den` for Den-specific met
 |---|---|---|
 | `json` | Sets the serialized field name (the key stored in JSONB) | `json:"name"` |
 | `den` | Den-specific metadata (index/unique/fts on documents; `from:` on projections; `count`/`sum:`/`group_key` on aggregations) | `den:"index"` |
-| `validate` | Struct tag validation rules (requires `validate.WithValidation()`) | `validate:"required,email"` |
+| `validate` | Struct tag validation rules (always enforced) | `validate:"required,email"` |
 
 ---
 
@@ -142,13 +142,7 @@ Composite unique indexes include a `WHERE ... IS NOT NULL` clause for all partic
 
 ## The `validate` Tag
 
-When `validate.WithValidation()` is passed as an option to `den.OpenURL` or `den.Open`, Den validates documents using `go-playground/validator` struct tags before insert and update operations.
-
-```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
-```
+Den validates documents using `go-playground/validator` struct tags before every insert and update operation. Validation is always-on — there is no opt-in option and no way to bypass `validate:` constraints from inside Den.
 
 ```go
 type User struct {

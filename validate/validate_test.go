@@ -55,17 +55,17 @@ func (d *DefaultingTagDoc) BeforeInsert(_ context.Context) error {
 	return nil
 }
 
-func mustOpenSQLite(t *testing.T, opts ...den.Option) *den.DB {
+func mustOpenSQLite(t *testing.T) *den.DB {
 	t.Helper()
 	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
-	db, err := den.OpenURL(context.Background(), dsn, opts...)
+	db, err := den.OpenURL(context.Background(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
 func TestInsertRequiredFieldEmpty(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -77,7 +77,7 @@ func TestInsertRequiredFieldEmpty(t *testing.T) {
 }
 
 func TestInsertMinLengthViolation(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -94,7 +94,7 @@ func TestInsertMinLengthViolation(t *testing.T) {
 }
 
 func TestInsertInvalidEmail(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -106,7 +106,7 @@ func TestInsertInvalidEmail(t *testing.T) {
 }
 
 func TestInsertValidDocument(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -117,7 +117,7 @@ func TestInsertValidDocument(t *testing.T) {
 }
 
 func TestInsertNoValidateTagsNoError(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, NoTagsDoc{}))
 
@@ -127,19 +127,23 @@ func TestInsertNoValidateTagsNoError(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestInsertWithoutValidationOption(t *testing.T) {
-	db := mustOpenSQLite(t) // no WithValidation
+// TestTagConstraintsAreMandatory pins that struct-tag constraints cannot
+// be bypassed — there is no opt-in option, and a doc with `validate:`
+// tags always has those constraints enforced by Den on every write.
+func TestTagConstraintsAreMandatory(t *testing.T) {
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
-	doc := &ValidatedDoc{} // empty — would fail validation
+	doc := &ValidatedDoc{} // empty Name + Email — would violate required
 	err := den.Insert(ctx, db, doc)
 
-	require.NoError(t, err) // but no validator registered
+	require.Error(t, err, "Den must enforce validate-tag constraints unconditionally")
+	require.ErrorIs(t, err, den.ErrValidation)
 }
 
 func TestUpdateValidationFailure(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -154,7 +158,7 @@ func TestUpdateValidationFailure(t *testing.T) {
 }
 
 func TestBothTagAndInterfaceValidation(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, CustomValidatorDoc{}))
 
@@ -178,7 +182,7 @@ func TestBothTagAndInterfaceValidation(t *testing.T) {
 // bug: tag validation must run AFTER BeforeInsert/BeforeSave hooks so that
 // a hook can populate a default value for a field marked as required.
 func TestBeforeInsertPopulatesRequiredTagField(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, DefaultingTagDoc{}))
 
@@ -190,7 +194,7 @@ func TestBeforeInsertPopulatesRequiredTagField(t *testing.T) {
 }
 
 func TestInsertManyRollsBackOnValidationError(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -205,7 +209,7 @@ func TestInsertManyRollsBackOnValidationError(t *testing.T) {
 }
 
 func TestMultipleFieldErrors(t *testing.T) {
-	db := mustOpenSQLite(t, validate.WithValidation())
+	db := mustOpenSQLite(t)
 	ctx := context.Background()
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
@@ -220,7 +224,7 @@ func TestMultipleFieldErrors(t *testing.T) {
 
 func TestValidateStructDirectly(t *testing.T) {
 	doc := &ValidatedDoc{Name: "ab", Email: "bad", Age: -1}
-	err := validate.ValidateStruct(doc)
+	err := validate.Struct(doc)
 	require.Error(t, err)
 
 	var ve *validate.Errors
@@ -230,12 +234,12 @@ func TestValidateStructDirectly(t *testing.T) {
 
 func TestValidateStructValid(t *testing.T) {
 	doc := &ValidatedDoc{Name: "Alice", Email: "alice@example.com", Age: 25}
-	err := validate.ValidateStruct(doc)
+	err := validate.Struct(doc)
 	require.NoError(t, err)
 }
 
 func TestValidateStructNilReturnsError(t *testing.T) {
-	err := validate.ValidateStruct(nil)
+	err := validate.Struct(nil)
 	require.Error(t, err)
 }
 

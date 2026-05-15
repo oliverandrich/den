@@ -11,6 +11,7 @@ import (
 
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal"
+	"github.com/oliverandrich/den/validate"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -42,21 +43,23 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 	return commitInsert(ctx, b, col, document, id, data)
 }
 
-// runPrePersistHooks runs the mutating hook, tag-validator, and Validate
-// chain that every insert and update path executes before touching the
-// backend. Shared by prepareInsert, updateCore, and saveSingleLinkedValue so
-// the chain lives in exactly one place. Pick the right BeforeInsert /
-// BeforeUpdate branch via isInsert — downstream steps (setBaseFields,
-// revision handling, encode, Put) differ and remain at each call site.
+// runPrePersistHooks runs the mutating hook chain, struct-tag constraint
+// check, and custom Validate hook that every insert and update path
+// executes before touching the backend. Shared by prepareInsert,
+// updateCore, and writeDocCore so the chain lives in exactly one place.
+// Pick the right BeforeInsert / BeforeUpdate branch via isInsert —
+// downstream steps (setBaseFields, revision handling, encode, Put)
+// differ and remain at each call site.
 //
 // Order is load-bearing:
 //   - Mutating hooks run first so they can populate defaults, compute
 //     derived fields, and normalize values before validation sees them.
-//   - Tag-based validation runs next so declarative constraints are checked
-//     against the final post-hook state.
+//   - validate.Struct runs next — `validate:` struct-tag constraints
+//     check the final post-hook state. Always-on, not opt-in: a doc with
+//     constraint tags has those constraints enforced by Den itself.
 //   - Custom Validator.Validate() runs last so it can perform cross-field
 //     checks against that same post-hook state.
-func runPrePersistHooks(ctx context.Context, db *DB, doc any, isInsert bool) error {
+func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 	if isInsert {
 		if err := runBeforeInsertHooks(ctx, doc); err != nil {
 			return err
@@ -66,10 +69,8 @@ func runPrePersistHooks(ctx context.Context, db *DB, doc any, isInsert bool) err
 			return err
 		}
 	}
-	if db.tagValidator != nil {
-		if err := db.tagValidator(doc); err != nil {
-			return fmt.Errorf("%w: %w", ErrValidation, err)
-		}
+	if err := validate.Struct(doc); err != nil {
+		return fmt.Errorf("%w: %w", ErrValidation, err)
 	}
 	return runValidationHooks(ctx, doc)
 }
@@ -89,7 +90,7 @@ func prepareInsert[T any](ctx context.Context, db *DB, document *T) (string, []b
 		return "", nil, nil, err
 	}
 
-	if err := runPrePersistHooks(ctx, db, document, true); err != nil {
+	if err := runPrePersistHooks(ctx, document, true); err != nil {
 		return "", nil, nil, err
 	}
 
@@ -143,7 +144,7 @@ func commitInsert[T any](ctx context.Context, b ReadWriter, col *collectionInfo,
 func writeDocCore(ctx context.Context, db *DB, b ReadWriter, target any, col *collectionInfo, isInsert, ignoreRevision bool) error {
 	tv := reflect.ValueOf(target).Elem()
 
-	if err := runPrePersistHooks(ctx, db, target, isInsert); err != nil {
+	if err := runPrePersistHooks(ctx, target, isInsert); err != nil {
 		return err
 	}
 

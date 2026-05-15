@@ -3,6 +3,7 @@ package den_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -908,6 +909,36 @@ func TestParity_GroupBy_InTransaction(t *testing.T) {
 			assert.InDelta(t, 30.0, byCat["X"].Total, 0.001)
 			assert.Equal(t, int64(3), byCat["Y"].Count)
 			assert.InDelta(t, 120.0, byCat["Y"].Total, 0.001)
+		})
+	}
+}
+
+// TestParity_QuerySetDelete_LargeBatch pins that QuerySet.Delete works for
+// multi-row batches on both backends. pgx's default row buffer is ~50;
+// 200 docs forces multiple fetch round-trips mid-iteration, which is the
+// scenario that surfaced "conn busy" on the old DeleteMany path (cursor
+// pinned while in-loop writes ran on the same connection). The drain-
+// first pattern in QuerySet.Delete avoids that — this test pins the fix.
+func TestParity_QuerySetDelete_LargeBatch(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			const N = 200
+			docs := make([]*ParityProduct, N)
+			for i := range N {
+				docs[i] = &ParityProduct{Name: fmt.Sprintf("p%03d", i), Price: float64(i)}
+			}
+			require.NoError(t, den.InsertMany(ctx, db, docs))
+
+			count, err := den.NewQuery[ParityProduct](db,
+				where.Field("price").Lt(150.0),
+			).Delete(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(150), count)
+
+			remaining, err := den.NewQuery[ParityProduct](db).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(50), remaining)
 		})
 	}
 }

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-
-	"github.com/oliverandrich/den/where"
 )
 
 // BackLinks finds all documents of type T that reference the given target ID
@@ -21,31 +19,7 @@ import (
 // JSON-tag renames. Use this string form to disambiguate when multiple
 // Link[T] fields point at the same target type.
 func BackLinks[T any](ctx context.Context, s Scope, linkField string, targetID string, opts ...CRUDOption) ([]*T, error) {
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return nil, err
-	}
-
-	rw := s.readWriter()
-	q := NewQuery[T](db, where.Field(linkField).Eq(targetID)).buildBackendQuery(col)
-
-	iter, err := rw.Query(ctx, col.meta.Name, q)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = iter.Close() }()
-
-	results, err := drainIter[T](ctx, db, iter, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	o := applyCRUDOpts(opts)
-	if err := batchResolveLinks(ctx, db, rw, results, defaultNestingDepth, crudFetchMode(o)); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return querySetFromOpts[T](s, nil, opts).BackLinks(linkField, targetID).All(ctx)
 }
 
 // BackLinksField is the typed alternative to BackLinks: it identifies

@@ -2,6 +2,7 @@ package den
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -535,6 +536,199 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 		return 0, err
 	}
 	return count, nil
+}
+
+// Delete removes every document matching the QuerySet's conditions and
+// returns the number of rows affected. The scan + writes run in one
+// transaction (or inline in the caller's tx when bound to a *Tx); the
+// iterator is drained before any write fires, which is required on
+// PostgreSQL because pgx pins the transaction's connection while a
+// cursor is open and an in-loop write would surface a "conn busy" error.
+//
+// Per-row hooks fire: BeforeDelete, then on the soft path BeforeSoftDelete
+// → AfterSoftDelete → AfterDelete, on the hard path just AfterDelete.
+// Soft-delete docs route through the soft path unless HardDelete() is
+// passed via opts.
+//
+// Fail-fast: a per-row error stops the loop, rolls back the transaction,
+// and returns (0, err). No partial commit.
+func (qs QuerySet[T]) Delete(ctx context.Context, opts ...CRUDOption) (int64, error) {
+	if err := qs.preflight(); err != nil {
+		return 0, err
+	}
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return 0, err
+	}
+
+	q := qs.buildBackendQuery(col)
+
+	var count int64
+	body := func(tx *Tx) error {
+		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
+		if err != nil {
+			return err
+		}
+		docs, err := drainIter[T](ctx, db, iter, qs.limitN)
+		_ = iter.Close()
+		if err != nil {
+			return err
+		}
+
+		for _, doc := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := Delete(ctx, tx, doc, opts...); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	}
+
+	if err := runOnScopeVoid(ctx, qs.scope, body); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// UpdateOne atomically finds the single document matching the QuerySet's
+// conditions, applies fields, and returns the updated document hydrated
+// per the QuerySet's fetchMode / nestDepth settings.
+//
+// Conditions must identify the document uniquely: returns
+// ErrMultipleMatches if more than one matches, ErrNotFound if none match.
+// Field names are validated against the registered struct before the
+// transaction opens.
+//
+// Sort / Limit / Skip / After / Before are ignored — UpdateOne is
+// single-doc-strict-by-conditions. IncludeDeleted is honored.
+func (qs QuerySet[T]) UpdateOne(ctx context.Context, fields SetFields) (*T, error) {
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSetFields(col, fields); err != nil {
+		return nil, err
+	}
+
+	body := func(tx *Tx) (*T, error) {
+		doc, err := findOneStrict[T](ctx, tx, qs.conditions, qs.includeDeleted)
+		if err != nil {
+			return nil, err
+		}
+		rv := reflect.ValueOf(doc).Elem()
+		if err := applySetFields(rv, col, fields); err != nil {
+			return nil, err
+		}
+		if err := Update(ctx, tx, doc); err != nil {
+			return nil, err
+		}
+		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode); err != nil {
+			return nil, err
+		}
+		return doc, nil
+	}
+	return runOnScope(ctx, qs.scope, body)
+}
+
+// UpsertOne atomically finds the single document matching the QuerySet's
+// conditions and applies fields, or inserts a new document built from
+// defaults with fields applied on top. The second return value reports
+// which path ran: true means a new document was inserted, false means an
+// existing one was updated.
+//
+// Conditions must identify the document uniquely: ErrMultipleMatches is
+// returned if more than one matches. Concurrent upserts on the same
+// missing row rely on a unique constraint to fail one of the inserters
+// with ErrDuplicate — there is no internal retry, and no row lock is
+// taken on the lookup.
+//
+// On the miss path, defaults is mutated by Insert (ID, CreatedAt,
+// UpdatedAt are populated) and returned as the result. Callers reusing a
+// shared defaults template across upserts should pass a fresh value each
+// call — a stale ID would otherwise be carried into the next Insert.
+//
+// Hooks follow the standard Insert / Update order. Exactly one path
+// runs. IncludeDeleted is honored on the lookup; Sort/Limit/Skip/After/
+// Before are ignored.
+func (qs QuerySet[T]) UpsertOne(ctx context.Context, defaults *T, fields SetFields) (*T, bool, error) {
+	return qs.upsertOne(ctx, defaults, fields)
+}
+
+// GetOrCreate is the fetch-this-row-or-insert-defaults shorthand:
+// returns the existing document if conditions match exactly one row,
+// otherwise inserts defaults as a new row. Existing rows are not
+// modified.
+//
+// Equivalent to UpsertOne(ctx, defaults, SetFields{}); reach for it when
+// the typical "fetch by unique key, create with defaults if missing,
+// leave the rest alone" pattern doesn't need post-find field updates.
+func (qs QuerySet[T]) GetOrCreate(ctx context.Context, defaults *T) (*T, bool, error) {
+	return qs.upsertOne(ctx, defaults, SetFields{})
+}
+
+func (qs QuerySet[T]) upsertOne(ctx context.Context, defaults *T, fields SetFields) (*T, bool, error) {
+	db := qs.scope.db()
+	col, err := collectionFor[T](db)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := validateSetFields(col, fields); err != nil {
+		return nil, false, err
+	}
+
+	body := func(tx *Tx) (upsertResult[T], error) {
+		existing, err := findOneStrict[T](ctx, tx, qs.conditions, qs.includeDeleted)
+		switch {
+		case err == nil:
+			rv := reflect.ValueOf(existing).Elem()
+			if err := applySetFields(rv, col, fields); err != nil {
+				return upsertResult[T]{}, err
+			}
+			if err := Update(ctx, tx, existing); err != nil {
+				return upsertResult[T]{}, err
+			}
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, qs.nestDepth, qs.fetchMode); err != nil {
+				return upsertResult[T]{}, err
+			}
+			return upsertResult[T]{doc: existing, inserted: false}, nil
+		case errors.Is(err, ErrNotFound):
+			rv := reflect.ValueOf(defaults).Elem()
+			if err := applySetFields(rv, col, fields); err != nil {
+				return upsertResult[T]{}, err
+			}
+			if err := Insert(ctx, tx, defaults); err != nil {
+				return upsertResult[T]{}, err
+			}
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, qs.nestDepth, qs.fetchMode); err != nil {
+				return upsertResult[T]{}, err
+			}
+			return upsertResult[T]{doc: defaults, inserted: true}, nil
+		default:
+			return upsertResult[T]{}, err
+		}
+	}
+
+	res, err := runOnScope(ctx, qs.scope, body)
+	if err != nil {
+		return nil, false, err
+	}
+	return res.doc, res.inserted, nil
+}
+
+// BackLinks adds a WHERE filter that matches documents whose link field
+// references the given target ID. Equivalent to
+// Where(where.Field(fieldName).Eq(targetID)) but reads more clearly when
+// the intent is a backwards-link lookup. Chainable: combine with Sort /
+// Limit / etc as needed, then call a terminal like All / First / Count.
+//
+//	houses, err := den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)
+func (qs QuerySet[T]) BackLinks(fieldName string, targetID string) QuerySet[T] {
+	return qs.Where(where.Field(fieldName).Eq(targetID))
 }
 
 // --- Internal helpers ---

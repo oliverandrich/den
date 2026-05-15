@@ -2,7 +2,6 @@ package den
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -428,38 +427,7 @@ type SetFields map[string]any
 //
 // Pass IncludeDeleted to consider soft-deleted documents in the match.
 func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error) {
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateSetFields(col, fields); err != nil {
-		return nil, err
-	}
-
-	o := applyCRUDOpts(opts)
-
-	body := func(tx *Tx) (*T, error) {
-		doc, err := findOneStrict[T](ctx, tx, conditions, o.includeDeleted)
-		if err != nil {
-			return nil, err
-		}
-
-		rv := reflect.ValueOf(doc).Elem()
-		if err := applySetFields(rv, col, fields); err != nil {
-			return nil, err
-		}
-
-		if err := Update(ctx, tx, doc); err != nil {
-			return nil, err
-		}
-		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, defaultNestingDepth, crudFetchMode(o)); err != nil {
-			return nil, err
-		}
-		return doc, nil
-	}
-
-	return runOnScope(ctx, s, body)
+	return querySetFromOpts[T](s, conditions, opts).UpdateOne(ctx, fields)
 }
 
 // FindOneAndUpsert atomically finds the single document matching conditions
@@ -503,7 +471,7 @@ func FindOneAndUpsert[T any](
 	conditions []where.Condition,
 	opts ...CRUDOption,
 ) (*T, bool, error) {
-	return findOneAndUpsertImpl(ctx, s, defaults, fields, conditions, opts...)
+	return querySetFromOpts[T](s, conditions, opts).UpsertOne(ctx, defaults, fields)
 }
 
 // FindOrCreate is the find-or-create-with-defaults shorthand: returns the
@@ -523,70 +491,32 @@ func FindOrCreate[T any](
 	conditions []where.Condition,
 	opts ...CRUDOption,
 ) (*T, bool, error) {
-	return findOneAndUpsertImpl(ctx, s, defaults, SetFields{}, conditions, opts...)
+	return querySetFromOpts[T](s, conditions, opts).GetOrCreate(ctx, defaults)
 }
 
-func findOneAndUpsertImpl[T any](
-	ctx context.Context,
-	s Scope,
-	defaults *T,
-	fields SetFields,
-	conditions []where.Condition,
-	opts ...CRUDOption,
-) (*T, bool, error) {
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return nil, false, err
-	}
-	if err := validateSetFields(col, fields); err != nil {
-		return nil, false, err
-	}
-
+// querySetFromOpts translates the legacy CRUDOption surface (includeDeleted,
+// fetchMode) into the equivalent QuerySet state. Used by the top-level
+// FindOneAnd* and BackLinks wrappers to feed their conditions+opts into
+// the QuerySet terminals; removed together with those wrappers in Child 4
+// of the v0.12 redesign (see den-olop).
+func querySetFromOpts[T any](s Scope, conditions []where.Condition, opts []CRUDOption) QuerySet[T] {
 	o := applyCRUDOpts(opts)
-
-	body := func(tx *Tx) (upsertResult[T], error) {
-		existing, err := findOneStrict[T](ctx, tx, conditions, o.includeDeleted)
-		switch {
-		case err == nil:
-			rv := reflect.ValueOf(existing).Elem()
-			if err := applySetFields(rv, col, fields); err != nil {
-				return upsertResult[T]{}, err
-			}
-			if err := Update(ctx, tx, existing); err != nil {
-				return upsertResult[T]{}, err
-			}
-			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, defaultNestingDepth, crudFetchMode(o)); err != nil {
-				return upsertResult[T]{}, err
-			}
-			return upsertResult[T]{doc: existing, inserted: false}, nil
-		case errors.Is(err, ErrNotFound):
-			rv := reflect.ValueOf(defaults).Elem()
-			if err := applySetFields(rv, col, fields); err != nil {
-				return upsertResult[T]{}, err
-			}
-			if err := Insert(ctx, tx, defaults); err != nil {
-				return upsertResult[T]{}, err
-			}
-			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, defaultNestingDepth, crudFetchMode(o)); err != nil {
-				return upsertResult[T]{}, err
-			}
-			return upsertResult[T]{doc: defaults, inserted: true}, nil
-		default:
-			return upsertResult[T]{}, err
-		}
+	qs := NewQuery[T](s, conditions...)
+	if o.includeDeleted {
+		qs = qs.IncludeDeleted()
 	}
-
-	res, err := runOnScope(ctx, s, body)
-	if err != nil {
-		return nil, false, err
+	switch crudFetchMode(o) { //nolint:exhaustive // fetchDefault matches the QuerySet's NewQuery default — no override needed.
+	case fetchAll:
+		qs = qs.WithFetchLinks()
+	case fetchNone:
+		qs = qs.WithoutFetchLinks()
 	}
-	return res.doc, res.inserted, nil
+	return qs
 }
 
-// upsertResult bundles FindOneAndUpsert's two return values so the helper
-// runOnScope (which is single-valued over T) can carry both across the tx
-// dispatch.
+// upsertResult bundles QuerySet.upsertOne's two return values so the
+// runOnScope helper (which is single-valued over T) can carry both
+// across the tx dispatch.
 type upsertResult[T any] struct {
 	doc      *T
 	inserted bool
@@ -792,49 +722,16 @@ func UpdateMany[T any](ctx context.Context, s Scope, conditions []where.Conditio
 	return NewQuery[T](s, conditions...).Update(ctx, fields)
 }
 
-// DeleteMany deletes all documents matching the given conditions.
-// Returns the number of deleted documents.
+// DeleteMany deletes every document matching the given conditions and
+// returns the number of rows affected.
 //
-// When scope is a *DB, all deletes run in one new transaction; when scope
-// is a *Tx, the deletes run inline in the caller's transaction.
+// Top-level shorthand for `NewQuery[T](s, conditions...).Delete(ctx, opts...)`
+// — discoverable next to InsertMany / UpdateMany. All semantics (per-row
+// hooks, fail-fast on error, drain-first cursor handling on PostgreSQL,
+// soft-delete routing, HardDelete option) come from QuerySet.Delete; see
+// [QuerySet.Delete] for the full contract.
 func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error) {
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return 0, err
-	}
-
-	qs := NewQuery[T](db, conditions...)
-	q := qs.buildBackendQuery(col)
-
-	var count int64
-	body := func(tx *Tx) error {
-		it, err := tx.tx.Query(ctx, col.meta.Name, q)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = it.Close() }()
-
-		for it.Next() {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			doc := new(T)
-			if err := decodeWithSnapshot(db, it.Bytes(), doc); err != nil {
-				return fmt.Errorf("decode: %w", err)
-			}
-			if err := Delete(ctx, tx, doc, opts...); err != nil {
-				return err
-			}
-			count++
-		}
-		return it.Err()
-	}
-
-	if err := runOnScopeVoid(ctx, s, body); err != nil {
-		return 0, err
-	}
-	return count, nil
+	return NewQuery[T](s, conditions...).Delete(ctx, opts...)
 }
 
 // findOneStrict loads exactly one document matching conditions. Returns

@@ -862,3 +862,125 @@ func TestQuerySet_Update_NilValue(t *testing.T) {
 		assert.Empty(t, r.Category)
 	}
 }
+
+// --- QuerySet write terminals (v0.12 Child 1) ---
+
+func TestQuerySet_Delete(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	require.NoError(t, den.InsertMany(ctx, db, []*QueryProduct{
+		{Name: "Keep", Price: 5},
+		{Name: "Drop1", Price: 15},
+		{Name: "Drop2", Price: 25},
+	}))
+
+	count, err := den.NewQuery[QueryProduct](db,
+		where.Field("price").Gt(10.0),
+	).Delete(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	remaining, err := den.NewQuery[QueryProduct](db).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, "Keep", remaining[0].Name)
+}
+
+func TestQuerySet_UpdateOne(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Widget", Price: 10}))
+
+	updated, err := den.NewQuery[QueryProduct](db,
+		where.Field("name").Eq("Widget"),
+	).UpdateOne(ctx, den.SetFields{"price": 42.0})
+	require.NoError(t, err)
+	assert.InDelta(t, 42.0, updated.Price, 0.001)
+}
+
+func TestQuerySet_UpsertOne_InsertBranch(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	doc, inserted, err := den.NewQuery[QueryProduct](db,
+		where.Field("name").Eq("Fresh"),
+	).UpsertOne(ctx,
+		&QueryProduct{Name: "Fresh", Price: 1},
+		den.SetFields{"price": 7.0},
+	)
+	require.NoError(t, err)
+	assert.True(t, inserted)
+	assert.Equal(t, "Fresh", doc.Name)
+	assert.InDelta(t, 7.0, doc.Price, 0.001)
+}
+
+func TestQuerySet_UpsertOne_UpdateBranch(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+
+	doc, inserted, err := den.NewQuery[QueryProduct](db,
+		where.Field("name").Eq("Existing"),
+	).UpsertOne(ctx,
+		&QueryProduct{Name: "should-not-apply", Price: 999}, // defaults ignored on hit
+		den.SetFields{"price": 11.0},
+	)
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.Equal(t, "Existing", doc.Name)
+	assert.InDelta(t, 11.0, doc.Price, 0.001)
+}
+
+func TestQuerySet_GetOrCreate_InsertBranch(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	doc, inserted, err := den.NewQuery[QueryProduct](db,
+		where.Field("name").Eq("New"),
+	).GetOrCreate(ctx, &QueryProduct{Name: "New", Price: 3})
+	require.NoError(t, err)
+	assert.True(t, inserted)
+	assert.InDelta(t, 3.0, doc.Price, 0.001)
+}
+
+func TestQuerySet_GetOrCreate_FindBranch(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+
+	doc, inserted, err := den.NewQuery[QueryProduct](db,
+		where.Field("name").Eq("Existing"),
+	).GetOrCreate(ctx, &QueryProduct{Name: "should-not-apply", Price: 999})
+	require.NoError(t, err)
+	assert.False(t, inserted)
+	assert.InDelta(t, 1.0, doc.Price, 0.001, "existing row must not be modified")
+}
+
+// TestQuerySet_BackLinks pins that the chain-method form is just a typed
+// alias for Where(Field=Eq); composes naturally with Sort/Limit/etc.
+func TestQuerySet_BackLinks(t *testing.T) {
+	db := dentest.MustOpen(t, &Door{}, &House{})
+	ctx := context.Background()
+
+	door := &Door{Height: 200, Width: 80}
+	require.NoError(t, den.Insert(ctx, db, door))
+
+	houses := []*House{
+		{Name: "Cottage", Door: den.NewLink(door)},
+		{Name: "Manor", Door: den.NewLink(door)},
+	}
+	require.NoError(t, den.InsertMany(ctx, db, houses))
+
+	results, err := den.NewQuery[House](db).
+		BackLinks("door", door.ID).
+		Sort("name", den.Asc).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "Cottage", results[0].Name)
+	assert.Equal(t, "Manor", results[1].Name)
+}

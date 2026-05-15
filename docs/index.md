@@ -54,7 +54,7 @@ func main() {
     defer db.Close()
 
     den.Register(ctx, db, &Product{})
-    den.Insert(ctx, db, &Product{Name: "Widget", Price: 9.99})
+    den.Save(ctx, db, &Product{Name: "Widget", Price: 9.99})
 
     products, _ := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),

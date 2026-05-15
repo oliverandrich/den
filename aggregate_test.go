@@ -31,7 +31,7 @@ func seedAggProducts(t *testing.T, db *den.DB) {
 		{Name: "D", Price: 40.0, Category: "Y"},
 		{Name: "E", Price: 50.0, Category: "Y"},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, products))
+	require.NoError(t, den.SaveAll(ctx, db, products))
 }
 
 func TestAvg(t *testing.T) {
@@ -181,7 +181,7 @@ func TestGroupBy_MultiKey(t *testing.T) {
 		{Name: "d", Price: 40, Category: "Y", Region: "north"},
 	}
 	for i := range products {
-		require.NoError(t, den.Insert(ctx, db, &products[i]))
+		require.NoError(t, den.Save(ctx, db, &products[i]))
 	}
 
 	type Stats struct {

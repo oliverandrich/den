@@ -54,11 +54,11 @@ func TestAllWithCount_WithFetchLinks_SmallPool(t *testing.T) {
 	doors := make([]*Door, houses)
 	for i := range houses {
 		doors[i] = &Door{Height: 200 + i, Width: 80}
-		require.NoError(t, den.Insert(ctx, db, doors[i]))
+		require.NoError(t, den.Save(ctx, db, doors[i]))
 	}
 	for i := range houses {
 		h := &House{Name: fmt.Sprintf("h-%d", i), Door: den.NewLink(doors[i])}
-		require.NoError(t, den.Insert(ctx, db, h))
+		require.NoError(t, den.Save(ctx, db, h))
 	}
 
 	// Run concurrent AllWithCount + WithFetchLinks. Without the fix,

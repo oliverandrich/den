@@ -6,31 +6,29 @@ Patterns most apps need eventually. Each recipe is a few lines of code with the 
 
 ## Update one field on one known document
 
-When you know the ID and only want to flip a single field, route through `FindOneAndUpdate` so the update is atomic and avoids the read-modify-write round-trip:
+When you know the ID and only want to flip a single field, route through `QuerySet.UpdateOne` so the update is atomic and avoids the read-modify-write round-trip:
 
 ```go
-done, err := den.FindOneAndUpdate[Todo](ctx, db,
-    den.SetFields{"done": true},
-    []where.Condition{where.Field("_id").Eq(todoID)},
-)
+done, err := den.NewQuery[Todo](db, where.Field("_id").Eq(todoID)).
+    UpdateOne(ctx, den.SetFields{"done": true})
 ```
 
-Returns `ErrNotFound` if the document was deleted between your read and this call. If the document carries `document.SoftDelete` and you want to flip a field on a soft-deleted doc, add `den.IncludeDeleted()`.
+Returns `ErrNotFound` if the document was deleted between your read and this call. If the document carries `document.SoftDelete` and you want to flip a field on a soft-deleted doc, chain `.IncludeDeleted()`.
 
-→ [`FindOneAndUpdate`](crud.md#findoneandupdate)
+→ [`QuerySet.UpdateOne`](crud.md#updateone)
 
 ---
 
 ## Find or create with defaults
 
-Atomic find-or-create using `FindOneAndUpsert`. The `defaults` template is used only on miss; `fields` is applied on both branches (pass `den.SetFields{}` if you want existing rows untouched):
+Atomic find-or-create using `QuerySet.UpsertOne`. The `defaults` template is used only on miss; `fields` is applied on both branches (pass `den.SetFields{}` if you want existing rows untouched):
 
 ```go
-user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
-    &User{Email: "x@y.z", LoginCount: 0},   // defaults — applied on miss only
-    den.SetFields{"last_seen": time.Now()}, // applied on both paths
-    []where.Condition{where.Field("email").Eq("x@y.z")},
-)
+user, inserted, err := den.NewQuery[User](db, where.Field("email").Eq("x@y.z")).
+    UpsertOne(ctx,
+        &User{Email: "x@y.z", LoginCount: 0},   // defaults — applied on miss only
+        den.SetFields{"last_seen": time.Now()}, // applied on both paths
+    )
 if inserted {
     log.Println("created new user")
 }
@@ -38,13 +36,13 @@ if inserted {
 
 Concurrent inserts that both miss race on the unique constraint — one wins, the other gets `ErrDuplicate`. There is no internal retry; callers decide.
 
-→ [`FindOneAndUpsert`](crud.md#findoneandupsert)
+→ [`QuerySet.UpsertOne`](crud.md#upsertone)
 
 ---
 
 ## Atomic counter increment
 
-`FindOneAndUpdate` plus a tx for the read-then-write. The simplest correct version under contention uses `ForUpdate` to lock the row:
+`QuerySet.UpdateOne` plus a tx for the read-then-write. The simplest correct version under contention uses `ForUpdate` to lock the row:
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
@@ -55,7 +53,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         return err
     }
     counter.Value++
-    return den.Update(ctx, tx, counter)
+    return den.Save(ctx, tx, counter)
 })
 ```
 
@@ -85,7 +83,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     }
     job.Status = "in_flight"
     job.WorkerID = workerID
-    return den.Update(ctx, tx, job)
+    return den.Save(ctx, tx, job)
 })
 ```
 
@@ -163,11 +161,7 @@ You have a stream of records to ingest, and the natural deduplication key is a u
 
 ```go
 for _, record := range incoming {
-    _, _, err := den.FindOneAndUpsert[Customer](ctx, db,
-        &Customer{Email: record.Email, Name: record.Name, Source: "import"},
-        den.SetFields{"name": record.Name, "last_synced_at": time.Now()},
-        []where.Condition{where.Field("email").Eq(record.Email)},
-    )
+    _, _, err := den.NewQuery[Customer](db, where.Field("email").Eq(record.Email)).UpsertOne(ctx, &Customer{Email: record.Email, Name: record.Name, Source: "import"}, den.SetFields{"name": record.Name, "last_synced_at": time.Now()})
     if err != nil {
         return err
     }
@@ -176,6 +170,6 @@ for _, record := range incoming {
 
 If two ingest workers race on the same email, one wins and the other gets `ErrDuplicate` from the unique constraint — handle by retrying, logging, or surfacing depending on your semantics.
 
-For *batch* ingests with no per-record uniqueness needs, prefer `InsertMany(ctx, db, docs, den.ContinueOnError())` — much faster, returns an `*InsertManyError` listing per-document failures by input index.
+For *batch* ingests with no per-record uniqueness needs, prefer `SaveAll(ctx, db, docs)` — much faster, but fail-fast: any per-doc error rolls back the whole transaction.
 
-→ [`FindOneAndUpsert`](crud.md#findoneandupsert) · [`InsertMany`](crud.md#insertmany)
+→ [`QuerySet.UpsertOne`](crud.md#upsertone) · [`SaveAll`](crud.md#saveall)

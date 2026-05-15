@@ -524,7 +524,7 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 			if err := applySetFields(rv, col, fields); err != nil {
 				return err
 			}
-			if err := Update(ctx, tx, doc); err != nil {
+			if err := updateCore(ctx, tx.parent, tx.tx, doc); err != nil {
 				return err
 			}
 			count++
@@ -624,7 +624,7 @@ func (qs QuerySet[T]) UpdateOne(ctx context.Context, fields SetFields) (*T, erro
 		if err := applySetFields(rv, col, fields); err != nil {
 			return nil, err
 		}
-		if err := Update(ctx, tx, doc); err != nil {
+		if err := updateCore(ctx, tx.parent, tx.tx, doc); err != nil {
 			return nil, err
 		}
 		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode); err != nil {
@@ -647,10 +647,11 @@ func (qs QuerySet[T]) UpdateOne(ctx context.Context, fields SetFields) (*T, erro
 // with ErrDuplicate — there is no internal retry, and no row lock is
 // taken on the lookup.
 //
-// On the miss path, defaults is mutated by Insert (ID, CreatedAt,
-// UpdatedAt are populated) and returned as the result. Callers reusing a
-// shared defaults template across upserts should pass a fresh value each
-// call — a stale ID would otherwise be carried into the next Insert.
+// On the miss path, defaults is mutated by the insert path (ID,
+// CreatedAt, UpdatedAt are populated) and returned as the result.
+// Callers reusing a shared defaults template across upserts should pass
+// a fresh value each call — a stale ID would otherwise be carried into
+// the next insert.
 //
 // Hooks follow the standard Insert / Update order. Exactly one path
 // runs. IncludeDeleted is honored on the lookup; Sort/Limit/Skip/After/
@@ -689,7 +690,7 @@ func (qs QuerySet[T]) upsertOne(ctx context.Context, defaults *T, fields SetFiel
 			if err := applySetFields(rv, col, fields); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := Update(ctx, tx, existing); err != nil {
+			if err := updateCore(ctx, tx.parent, tx.tx, existing); err != nil {
 				return upsertResult[T]{}, err
 			}
 			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, qs.nestDepth, qs.fetchMode); err != nil {
@@ -701,7 +702,7 @@ func (qs QuerySet[T]) upsertOne(ctx context.Context, defaults *T, fields SetFiel
 			if err := applySetFields(rv, col, fields); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := Insert(ctx, tx, defaults); err != nil {
+			if err := insertCore(ctx, tx.parent, tx.tx, defaults); err != nil {
 				return upsertResult[T]{}, err
 			}
 			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, qs.nestDepth, qs.fetchMode); err != nil {

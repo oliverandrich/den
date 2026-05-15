@@ -34,7 +34,7 @@ func seedQueryProducts(t *testing.T, db *den.DB) {
 		{Name: "Epsilon", Price: 25.0, Category: "A"},
 	}
 	for i := range products {
-		require.NoError(t, den.Insert(ctx, db, &products[i]))
+		require.NoError(t, den.Save(ctx, db, &products[i]))
 	}
 }
 
@@ -222,7 +222,7 @@ func TestFind_CursorPagination(t *testing.T) {
 	ctx := context.Background()
 
 	p := &QueryProduct{Name: "Solo", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// After a very high ID should return nothing
 	results, err := den.NewQuery[QueryProduct](db).After("ZZZZZZZZZZZZZZZZZZZZZZZZZZ").All(ctx)
@@ -577,7 +577,7 @@ func TestQuerySet_Update_Postgres_NoDeadlock(t *testing.T) {
 	// Seed a result set big enough that the iterator streams.
 	for i := range 25 {
 		p := &QueryProduct{Name: fmt.Sprintf("bulk-%02d", i), Price: float64(i), Category: "bulk"}
-		require.NoError(t, den.Insert(parent, db, p))
+		require.NoError(t, den.Save(parent, db, p))
 	}
 
 	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).
@@ -605,7 +605,7 @@ func TestQuerySet_Update_HookFailureRollsBack(t *testing.T) {
 		{Name: "C"},
 	}
 	for _, d := range docs {
-		require.NoError(t, den.Insert(ctx, db, d))
+		require.NoError(t, den.Save(ctx, db, d))
 	}
 
 	count, err := den.NewQuery[FailBeforeUpdateDoc](db).
@@ -624,12 +624,12 @@ func TestQuerySet_Update_OnTxScope_FailureRollsBackCallerTx(t *testing.T) {
 	db := dentest.MustOpen(t, &FailBeforeUpdateDoc{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &FailBeforeUpdateDoc{Name: "Seed"}))
+	require.NoError(t, den.Save(ctx, db, &FailBeforeUpdateDoc{Name: "Seed"}))
 
 	// A failing bulk Update inside an outer tx must roll back the whole tx,
 	// including any prior writes done in that same tx.
 	txErr := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.Insert(ctx, tx, &FailBeforeUpdateDoc{Name: "TxOnly"}); err != nil {
+		if err := den.Save(ctx, tx, &FailBeforeUpdateDoc{Name: "TxOnly"}); err != nil {
 			return err
 		}
 		_, err := den.NewQuery[FailBeforeUpdateDoc](tx).
@@ -681,7 +681,7 @@ func TestQuerySet_Update_HooksFirePerRow(t *testing.T) {
 	})
 
 	for _, name := range []string{"A", "B", "C"} {
-		require.NoError(t, den.Insert(ctx, db, &counterUpdateDoc{Name: name}))
+		require.NoError(t, den.Save(ctx, db, &counterUpdateDoc{Name: name}))
 	}
 
 	count, err := den.NewQuery[counterUpdateDoc](db).
@@ -698,7 +698,7 @@ func TestQuerySet_Update_HonorsCtxCancellation(t *testing.T) {
 
 	// Seed enough rows that the cancel-before-start case is meaningful.
 	for i := range 5 {
-		require.NoError(t, den.Insert(ctx, db, &QueryProduct{
+		require.NoError(t, den.Save(ctx, db, &QueryProduct{
 			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
 		}))
 	}
@@ -741,7 +741,7 @@ func TestQuerySet_Update_HonorsCtxCancellation_MidLoop(t *testing.T) {
 	db := dentest.MustOpen(t, &cancelOnBeforeUpdate{})
 	ctx := context.Background()
 	for i := range 5 {
-		require.NoError(t, den.Insert(ctx, db, &cancelOnBeforeUpdate{
+		require.NoError(t, den.Save(ctx, db, &cancelOnBeforeUpdate{
 			Name: fmt.Sprintf("p%d", i), Category: "bulk",
 		}))
 	}
@@ -796,8 +796,8 @@ func TestQuerySet_Update_FetchModifiers_AreNoOp(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
-	require.NoError(t, den.Insert(ctx, db, &linkUpdateDoc{
+	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, &linkUpdateDoc{
 		Name: "v1", Owner: den.NewLink(door),
 	}))
 
@@ -828,7 +828,7 @@ func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 5 {
-		require.NoError(t, den.Insert(ctx, db, &QueryProduct{
+		require.NoError(t, den.Save(ctx, db, &QueryProduct{
 			Name: fmt.Sprintf("p%d", i), Price: float64(i), Category: "bulk",
 		}))
 	}
@@ -836,8 +836,7 @@ func TestDeleteMany_HonorsCtxCancellation(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	count, err := den.DeleteMany[QueryProduct](cancelCtx, db,
-		[]where.Condition{where.Field("category").Eq("bulk")})
+	count, err := den.NewQuery[QueryProduct](db, where.Field("category").Eq("bulk")).Delete(cancelCtx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int64(0), count, "no rows deleted when ctx is cancelled up front")
 
@@ -869,7 +868,7 @@ func TestQuerySet_Delete(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*QueryProduct{
+	require.NoError(t, den.SaveAll(ctx, db, []*QueryProduct{
 		{Name: "Keep", Price: 5},
 		{Name: "Drop1", Price: 15},
 		{Name: "Drop2", Price: 25},
@@ -891,7 +890,7 @@ func TestQuerySet_UpdateOne(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Widget", Price: 10}))
+	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Widget", Price: 10}))
 
 	updated, err := den.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Widget"),
@@ -920,7 +919,7 @@ func TestQuerySet_UpsertOne_UpdateBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
 
 	doc, inserted, err := den.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Existing"),
@@ -950,7 +949,7 @@ func TestQuerySet_GetOrCreate_FindBranch(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
+	require.NoError(t, den.Save(ctx, db, &QueryProduct{Name: "Existing", Price: 1}))
 
 	doc, inserted, err := den.NewQuery[QueryProduct](db,
 		where.Field("name").Eq("Existing"),
@@ -967,13 +966,13 @@ func TestQuerySet_BackLinks(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	houses := []*House{
 		{Name: "Cottage", Door: den.NewLink(door)},
 		{Name: "Manor", Door: den.NewLink(door)},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, houses))
+	require.NoError(t, den.SaveAll(ctx, db, houses))
 
 	results, err := den.NewQuery[House](db).
 		BackLinks("door", door.ID).

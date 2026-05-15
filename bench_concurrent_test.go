@@ -76,7 +76,7 @@ func runConInsert(b *testing.B, db *den.DB) {
 			doc := makeBenchArticle(int(i), authorID)
 			// Ensure slug uniqueness under concurrency even if counter wraps
 			doc.Slug = doc.ID + "-" + doc.Slug
-			if err := den.Insert(ctx, db, doc); err != nil {
+			if err := den.Save(ctx, db, doc); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -108,7 +108,7 @@ func runConMixed(b *testing.B, db *den.DB) {
 					b.Fatal(err)
 				}
 				doc.Stock++
-				if err := den.Update(ctx, db, doc); err != nil {
+				if err := den.Save(ctx, db, doc); err != nil {
 					b.Fatal(err)
 				}
 			} else {
@@ -138,7 +138,7 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 	for i := range jobCount {
 		jobs[i] = &BenchJob{Status: "pending", Payload: "work item"}
 	}
-	if err := den.InsertMany(ctx, db, jobs); err != nil {
+	if err := den.SaveAll(ctx, db, jobs); err != nil {
 		b.Fatal(err)
 	}
 	ids := make([]string, jobCount)
@@ -162,7 +162,7 @@ func runConQueueConsumer(b *testing.B, db *den.DB) {
 					return err
 				}
 				job.Status = "processed"
-				return den.Update(ctx, tx, job)
+				return den.Save(ctx, tx, job)
 			})
 		}
 	})

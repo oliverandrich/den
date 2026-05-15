@@ -64,7 +64,7 @@ If tag validation fails, the `Validate()` hook is not called. Either step aborts
 Validation errors are wrapped with `den.ErrValidation`:
 
 ```go
-err := den.Insert(ctx, db, &user)
+err := den.Save(ctx, db, &user)
 if errors.Is(err, den.ErrValidation) {
     fmt.Println("Validation failed:", err)
 }
@@ -104,7 +104,7 @@ db, _ := den.OpenURL(ctx, "sqlite:///data.db")
 den.Register(ctx, db, &User{})
 
 user := &User{Username: "ab", Email: "invalid"}
-err := den.Insert(ctx, db, user)
+err := den.Save(ctx, db, user)
 // err wraps den.ErrValidation — "ab" is too short, "invalid" is not a valid email
 ```
 

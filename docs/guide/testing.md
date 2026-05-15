@@ -35,7 +35,7 @@ func TestProductInsert(t *testing.T) {
 
     ctx := context.Background()
     p := &Product{Name: "Widget", Price: 9.99}
-    err := den.Insert(ctx, db, p)
+    err := den.Save(ctx, db, p)
     require.NoError(t, err)
     assert.NotEmpty(t, p.ID)
 
@@ -59,7 +59,7 @@ func TestProductInsertPG(t *testing.T) {
 
     ctx := context.Background()
     p := &Product{Name: "Widget", Price: 9.99}
-    err := den.Insert(ctx, db, p)
+    err := den.Save(ctx, db, p)
     require.NoError(t, err)
 
     found, err := den.FindByID[Product](ctx, db, p.ID)
@@ -88,7 +88,7 @@ func TestProductLifecycle(t *testing.T) {
 
     // Insert
     p := &Product{Name: "Gadget", Price: 19.99}
-    require.NoError(t, den.Insert(ctx, db, p))
+    require.NoError(t, den.Save(ctx, db, p))
     assert.NotEmpty(t, p.ID)
 
     // Query
@@ -101,7 +101,7 @@ func TestProductLifecycle(t *testing.T) {
 
     // Update
     p.Price = 24.99
-    require.NoError(t, den.Update(ctx, db, p))
+    require.NoError(t, den.Save(ctx, db, p))
 
     refreshed, err := den.FindByID[Product](ctx, db, p.ID)
     require.NoError(t, err)

@@ -25,7 +25,7 @@ func TestInsertAndFindByID(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 29.99}
-	err := den.Insert(ctx, db, p)
+	err := den.Save(ctx, db, p)
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, p.ID, "ID should be auto-generated")
@@ -47,7 +47,7 @@ func TestInsertWithCustomID(t *testing.T) {
 		Base: document.Base{ID: "custom-123"},
 		Name: "Custom",
 	}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	assert.Equal(t, "custom-123", p.ID)
 
@@ -71,7 +71,7 @@ func TestFindByIDs(t *testing.T) {
 	p1 := &Product{Name: "A", Price: 1.0}
 	p2 := &Product{Name: "B", Price: 2.0}
 	p3 := &Product{Name: "C", Price: 3.0}
-	require.NoError(t, den.InsertMany(ctx, db, []*Product{p1, p2, p3}))
+	require.NoError(t, den.SaveAll(ctx, db, []*Product{p1, p2, p3}))
 
 	// Fetch two of three
 	docs, err := den.FindByIDs[Product](ctx, db, []string{p1.ID, p3.ID})
@@ -91,7 +91,7 @@ func TestFindByIDs_MissingIDs(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Only", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// One real, one fake — should return only the real one
 	docs, err := den.FindByIDs[Product](ctx, db, []string{p.ID, "nonexistent"})
@@ -109,23 +109,19 @@ func TestFindByIDs_Empty(t *testing.T) {
 	assert.Empty(t, docs)
 }
 
-// TestUpdateMany_DelegatesToQuerySet pins that the top-level shim
-// produces the same result as the chained QuerySet.Update form. It is
-// pure ergonomics — the test just confirms the rows actually change.
-func TestUpdateMany_DelegatesToQuerySet(t *testing.T) {
+// TestQuerySet_Update_BulkPriceUpdate pins basic chained bulk update.
+func TestQuerySet_Update_BulkPriceUpdate(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Product{
+	require.NoError(t, den.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 99.0},
 	}))
 
-	count, err := den.UpdateMany[Product](ctx, db,
-		[]where.Condition{where.Field("price").Lt(10.0)},
-		den.SetFields{"price": 50.0},
-	)
+	count, err := den.NewQuery[Product](db, where.Field("price").Lt(10.0)).
+		Update(ctx, den.SetFields{"price": 50.0})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
@@ -158,7 +154,7 @@ func TestSave_UpdateWhenIDPresent(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Initial", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	originalID := p.ID
 
 	p.Price = 99.0
@@ -176,13 +172,13 @@ func TestUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	originalUpdatedAt := p.UpdatedAt
 
 	time.Sleep(2 * time.Millisecond)
 	p.Name = "Updated"
 	p.Price = 20.0
-	require.NoError(t, den.Update(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	assert.True(t, p.UpdatedAt.After(originalUpdatedAt), "UpdatedAt should be bumped")
 
@@ -197,7 +193,7 @@ func TestDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "ToDelete"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	require.NoError(t, den.Delete(ctx, db, p))
 
@@ -210,7 +206,7 @@ func TestInsert_Upsert(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "New"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	assert.NotEmpty(t, p.ID)
 
@@ -224,10 +220,10 @@ func TestUpdate_ViaSave(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	p.Name = "Updated"
-	require.NoError(t, den.Update(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -239,7 +235,7 @@ func TestRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Original", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// Simulate external change by directly updating
 	p2 := &Product{
@@ -247,7 +243,7 @@ func TestRefresh(t *testing.T) {
 		Name:  "Changed",
 		Price: 99.0,
 	}
-	require.NoError(t, den.Update(ctx, db, p2))
+	require.NoError(t, den.Save(ctx, db, p2))
 
 	// p still has old values
 	assert.Equal(t, "Original", p.Name)
@@ -263,7 +259,7 @@ func TestRefresh_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "WillBeDeleted"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	err := den.Refresh(ctx, db, p)
@@ -275,7 +271,7 @@ func TestUnregisteredType(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Orphan"}
-	err := den.Insert(ctx, db, p)
+	err := den.Save(ctx, db, p)
 	require.ErrorIs(t, err, den.ErrNotRegistered)
 }
 
@@ -298,10 +294,10 @@ func TestUniqueConstraint(t *testing.T) {
 	ctx := context.Background()
 
 	p1 := &UniqueProduct{Name: "Widget A", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p1))
+	require.NoError(t, den.Save(ctx, db, p1))
 
 	p2 := &UniqueProduct{Name: "Widget B", SKU: "ABC123"}
-	err := den.Insert(ctx, db, p2)
+	err := den.Save(ctx, db, p2)
 	require.ErrorIs(t, err, den.ErrDuplicate)
 }
 
@@ -310,10 +306,10 @@ func TestUniqueConstraint_DifferentValues(t *testing.T) {
 	ctx := context.Background()
 
 	p1 := &UniqueProduct{Name: "Widget A", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p1))
+	require.NoError(t, den.Save(ctx, db, p1))
 
 	p2 := &UniqueProduct{Name: "Widget B", SKU: "DEF456"}
-	require.NoError(t, den.Insert(ctx, db, p2))
+	require.NoError(t, den.Save(ctx, db, p2))
 }
 
 func TestUniqueConstraint_UpdateKeepsSameValue(t *testing.T) {
@@ -321,10 +317,10 @@ func TestUniqueConstraint_UpdateKeepsSameValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	p.Name = "Updated Widget"
-	require.NoError(t, den.Update(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[UniqueProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -337,14 +333,14 @@ func TestUniqueConstraint_UpdateChangesValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	p.SKU = "NEW456"
-	require.NoError(t, den.Update(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// Old unique value should be freed
 	p2 := &UniqueProduct{Name: "Other", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p2))
+	require.NoError(t, den.Save(ctx, db, p2))
 }
 
 func TestUniqueConstraint_DeleteFreesValue(t *testing.T) {
@@ -352,12 +348,12 @@ func TestUniqueConstraint_DeleteFreesValue(t *testing.T) {
 	ctx := context.Background()
 
 	p := &UniqueProduct{Name: "Widget", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// Unique value should be available again
 	p2 := &UniqueProduct{Name: "New Widget", SKU: "ABC123"}
-	require.NoError(t, den.Insert(ctx, db, p2))
+	require.NoError(t, den.Save(ctx, db, p2))
 }
 
 func ptr(s string) *string { return &s }
@@ -367,10 +363,10 @@ func TestNullableUnique_MultipleNils(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice"}
-	require.NoError(t, den.Insert(ctx, db, u1))
+	require.NoError(t, den.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob"}
-	require.NoError(t, den.Insert(ctx, db, u2))
+	require.NoError(t, den.Save(ctx, db, u2))
 }
 
 func TestNullableUnique_ConflictOnNonNil(t *testing.T) {
@@ -378,10 +374,10 @@ func TestNullableUnique_ConflictOnNonNil(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice", Email: ptr("alice@example.com")}
-	require.NoError(t, den.Insert(ctx, db, u1))
+	require.NoError(t, den.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob", Email: ptr("alice@example.com")}
-	err := den.Insert(ctx, db, u2)
+	err := den.Save(ctx, db, u2)
 	require.ErrorIs(t, err, den.ErrDuplicate)
 }
 
@@ -390,10 +386,10 @@ func TestNullableUnique_DifferentNonNil(t *testing.T) {
 	ctx := context.Background()
 
 	u1 := &NullableUniqueUser{Username: "alice", Email: ptr("alice@example.com")}
-	require.NoError(t, den.Insert(ctx, db, u1))
+	require.NoError(t, den.Save(ctx, db, u1))
 
 	u2 := &NullableUniqueUser{Username: "bob", Email: ptr("bob@example.com")}
-	require.NoError(t, den.Insert(ctx, db, u2))
+	require.NoError(t, den.Save(ctx, db, u2))
 }
 
 // --- Bulk operation tests ---
@@ -407,7 +403,7 @@ func TestInsertMany(t *testing.T) {
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, products))
+	require.NoError(t, den.SaveAll(ctx, db, products))
 
 	for _, p := range products {
 		assert.NotEmpty(t, p.ID)
@@ -416,342 +412,6 @@ func TestInsertMany(t *testing.T) {
 	all, err := den.NewQuery[Product](db).All(ctx)
 	require.NoError(t, err)
 	assert.Len(t, all, 3)
-}
-
-// counterHookCalls records hook invocations on counterHookDoc to pin the
-// "PreValidate fires every hook twice" contract. Tests touching it must
-// NOT use t.Parallel — it has no synchronization.
-var counterHookCalls []string
-
-type counterHookDoc struct {
-	document.Base
-	Name string `json:"name"`
-}
-
-func (c *counterHookDoc) BeforeInsert(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "BeforeInsert")
-	return nil
-}
-
-func (c *counterHookDoc) BeforeSave(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "BeforeSave")
-	return nil
-}
-
-func (c *counterHookDoc) Validate(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "Validate")
-	return nil
-}
-
-func TestInsertMany_PreValidate_AllValid(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: "A"}, {Name: "B"}, {Name: "C"}}
-	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
-
-	all, err := den.NewQuery[Validated](db).All(ctx)
-	require.NoError(t, err)
-	assert.Len(t, all, 3)
-}
-
-func TestInsertMany_PreValidate_FailsAtEnd(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: "A"}, {Name: "B"}, {Name: ""}}
-	err := den.InsertMany(ctx, db, docs, den.PreValidate())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "index 2", "error must point at the failing document")
-	require.ErrorIs(t, err, den.ErrValidation)
-
-	count, err := den.NewQuery[Validated](db).Count(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), count, "no document is written when pre-validation fails")
-}
-
-func TestInsertMany_PreValidate_FailsAtStart(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: ""}, {Name: "B"}, {Name: "C"}}
-	err := den.InsertMany(ctx, db, docs, den.PreValidate())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "index 0")
-	require.ErrorIs(t, err, den.ErrValidation)
-
-	count, err := den.NewQuery[Validated](db).Count(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), count)
-}
-
-// counterLinkedDoc is counterHookDoc + a Link field so the LinkWrite path
-// can be exercised while the same counterHookCalls recorder is reused.
-type counterLinkedDoc struct {
-	document.Base
-	Name string         `json:"name"`
-	Ref  den.Link[Door] `json:"ref"`
-}
-
-func (d *counterLinkedDoc) BeforeInsert(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "BeforeInsert")
-	return nil
-}
-
-func (d *counterLinkedDoc) BeforeSave(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "BeforeSave")
-	return nil
-}
-
-func (d *counterLinkedDoc) Validate(_ context.Context) error {
-	counterHookCalls = append(counterHookCalls, "Validate")
-	return nil
-}
-
-func TestInsertMany_PreValidate_LinkWrite_HooksRunTwice(t *testing.T) {
-	// Pins the documented exception: PreValidate + LinkWrite disables the
-	// caching optimization, so the prep chain runs once outside the tx and
-	// again inside it.
-	db := dentest.MustOpen(t, &Door{}, &counterLinkedDoc{})
-	ctx := context.Background()
-	counterHookCalls = nil
-	t.Cleanup(func() { counterHookCalls = nil })
-
-	docs := []*counterLinkedDoc{{
-		Name: "A",
-		Ref:  den.NewLink(&Door{Height: 200, Width: 80}),
-	}}
-	require.NoError(t, den.InsertMany(ctx, db, docs,
-		den.PreValidate(), den.WithLinkRule(den.LinkWrite)))
-
-	expected := []string{
-		"BeforeInsert", "BeforeSave", "Validate",
-		"BeforeInsert", "BeforeSave", "Validate",
-	}
-	assert.Equal(t, expected, counterHookCalls)
-}
-
-func TestInsertMany_PreValidate_LinkWrite_CascadesAndPersists(t *testing.T) {
-	// Guards the LinkWrite + PreValidate branch: cascade must still happen
-	// (the optimization doesn't apply; the fallback runs the standard Insert
-	// per-doc inside the tx). The main contract tested here is that children
-	// get written — not the hook count.
-	db := dentest.MustOpen(t, &Door{}, &Window{}, &House{})
-	ctx := context.Background()
-
-	door1 := &Door{Height: 200, Width: 80}
-	door2 := &Door{Height: 210, Width: 90}
-	houses := []*House{
-		{Name: "A", Door: den.NewLink(door1)},
-		{Name: "B", Door: den.NewLink(door2)},
-	}
-	require.NoError(t, den.InsertMany(ctx, db, houses,
-		den.PreValidate(), den.WithLinkRule(den.LinkWrite)))
-
-	assert.NotEmpty(t, door1.ID)
-	assert.NotEmpty(t, door2.ID)
-	assert.NotEqual(t, door1.ID, door2.ID)
-
-	for _, d := range []*Door{door1, door2} {
-		found, err := den.FindByID[Door](ctx, db, d.ID)
-		require.NoError(t, err)
-		assert.Equal(t, d.Height, found.Height)
-	}
-}
-
-func TestInsertMany_PreValidate_HooksRunOnce(t *testing.T) {
-	db := dentest.MustOpen(t, &counterHookDoc{})
-	ctx := context.Background()
-	counterHookCalls = nil
-	t.Cleanup(func() { counterHookCalls = nil })
-
-	docs := []*counterHookDoc{{Name: "A"}}
-	require.NoError(t, den.InsertMany(ctx, db, docs, den.PreValidate()))
-
-	// Single pass: hooks run in the PreValidate pre-pass, then commitInsert
-	// re-uses the encoded bytes — no second run.
-	expected := []string{"BeforeInsert", "BeforeSave", "Validate"}
-	assert.Equal(t, expected, counterHookCalls)
-}
-
-func TestInsertMany_ContinueOnError_PartialSuccess(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{
-		{Name: "A"},
-		{Name: ""}, // invalid
-		{Name: "C"},
-		{Name: ""}, // invalid
-		{Name: "E"},
-	}
-	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
-	require.Error(t, err)
-
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	require.Len(t, multi.Failures, 2)
-	assert.Equal(t, 1, multi.Failures[0].Index)
-	assert.Equal(t, 3, multi.Failures[1].Index)
-	require.ErrorIs(t, multi.Failures[0].Err, den.ErrValidation)
-	require.ErrorIs(t, err, den.ErrValidation, "InsertManyError unwraps to wrapped sentinels")
-
-	all, err := den.NewQuery[Validated](db).All(ctx)
-	require.NoError(t, err)
-	assert.Len(t, all, 3, "valid docs are written")
-}
-
-func TestInsertMany_ContinueOnError_AllSucceed(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: "A"}, {Name: "B"}}
-	require.NoError(t, den.InsertMany(ctx, db, docs, den.ContinueOnError()))
-
-	count, err := den.NewQuery[Validated](db).Count(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-}
-
-func TestInsertMany_ContinueOnError_AllFail(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: ""}, {Name: ""}}
-	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
-
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 2)
-
-	count, err := den.NewQuery[Validated](db).Count(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), count)
-}
-
-func TestInsertMany_ContinueOnError_RejectsTxScope(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.InsertMany(ctx, tx, []*Validated{{Name: "A"}}, den.ContinueOnError())
-	})
-	require.ErrorIs(t, err, den.ErrIncompatibleScope)
-}
-
-func TestInsertMany_RejectsPreValidatePlusContinueOnError(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	err := den.InsertMany(ctx, db,
-		[]*Validated{{Name: "A"}},
-		den.PreValidate(), den.ContinueOnError(),
-	)
-	require.ErrorIs(t, err, den.ErrIncompatibleOptions)
-
-	count, err := den.NewQuery[Validated](db).Count(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), count, "rejected option combo writes nothing")
-}
-
-func TestInsertMany_ContinueOnError_HonorsContextCancellation(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := den.InsertMany(ctx, db,
-		[]*Validated{{Name: "A"}, {Name: "B"}},
-		den.ContinueOnError(),
-	)
-	require.ErrorIs(t, err, context.Canceled)
-}
-
-func TestInsertMany_MaxRecordedFailures_CapsAt(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := make([]*Validated, 20)
-	for i := range docs {
-		docs[i] = &Validated{Name: ""} // all invalid
-	}
-
-	err := den.InsertMany(ctx, db, docs,
-		den.ContinueOnError(),
-		den.MaxRecordedFailures(5),
-	)
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 5, "failures slice is capped")
-	assert.True(t, multi.Truncated, "Truncated reports the cap was hit")
-	assert.Equal(t, 20, multi.TotalFailures, "TotalFailures reports the uncapped count")
-}
-
-func TestInsertMany_MaxRecordedFailures_UnderLimit_NotTruncated(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	docs := []*Validated{{Name: ""}, {Name: ""}, {Name: ""}}
-	err := den.InsertMany(ctx, db, docs,
-		den.ContinueOnError(),
-		den.MaxRecordedFailures(10),
-	)
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 3)
-	assert.False(t, multi.Truncated)
-	assert.Equal(t, 3, multi.TotalFailures)
-}
-
-func TestInsertMany_MaxRecordedFailures_Zero_Unlimited(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	// The default cap is 100 — confirm MaxRecordedFailures(0) disables it by
-	// producing a batch larger than the default.
-	docs := make([]*Validated, 150)
-	for i := range docs {
-		docs[i] = &Validated{Name: ""}
-	}
-
-	err := den.InsertMany(ctx, db, docs,
-		den.ContinueOnError(),
-		den.MaxRecordedFailures(0),
-	)
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 150, "0 cap means unlimited")
-	assert.False(t, multi.Truncated)
-	assert.Equal(t, 150, multi.TotalFailures)
-}
-
-func TestInsertMany_DefaultRecordedFailuresCap(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	// With no MaxRecordedFailures option, the default cap of 100 kicks in.
-	docs := make([]*Validated, 150)
-	for i := range docs {
-		docs[i] = &Validated{Name: ""}
-	}
-
-	err := den.InsertMany(ctx, db, docs, den.ContinueOnError())
-	var multi *den.InsertManyError
-	require.ErrorAs(t, err, &multi)
-	assert.Len(t, multi.Failures, 100)
-	assert.True(t, multi.Truncated)
-	assert.Equal(t, 150, multi.TotalFailures)
-}
-
-func TestInsertMany_RejectsMaxRecordedFailuresWithoutContinueOnError(t *testing.T) {
-	db := dentest.MustOpen(t, &Validated{})
-	ctx := context.Background()
-
-	err := den.InsertMany(ctx, db,
-		[]*Validated{{Name: "A"}},
-		den.MaxRecordedFailures(10),
-	)
-	require.ErrorIs(t, err, den.ErrIncompatibleOptions,
-		"MaxRecordedFailures is only meaningful with ContinueOnError")
 }
 
 func TestDeleteMany(t *testing.T) {
@@ -763,9 +423,9 @@ func TestDeleteMany(t *testing.T) {
 		{Name: "Delete1", Price: 15.0},
 		{Name: "Delete2", Price: 25.0},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, products))
+	require.NoError(t, den.SaveAll(ctx, db, products))
 
-	count, err := den.DeleteMany[Product](ctx, db, []where.Condition{where.Field("price").Gt(10.0)})
+	count, err := den.NewQuery[Product](db, where.Field("price").Gt(10.0)).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
@@ -782,12 +442,9 @@ func TestFindOneAndUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
-	updated, err := den.FindOneAndUpdate[Product](ctx, db,
-		den.SetFields{"price": 99.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	updated, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"price": 99.0})
 	require.NoError(t, err)
 	assert.InDelta(t, 99.0, updated.Price, 0.001)
 	assert.Equal(t, "Widget", updated.Name)
@@ -802,10 +459,7 @@ func TestFindOneAndUpdate_NotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, err := den.FindOneAndUpdate[Product](ctx, db,
-		den.SetFields{"price": 99.0},
-		[]where.Condition{where.Field("name").Eq("Nonexistent")},
-	)
+	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Nonexistent")).UpdateOne(ctx, den.SetFields{"price": 99.0})
 	require.ErrorIs(t, err, den.ErrNotFound)
 }
 
@@ -814,12 +468,9 @@ func TestFindOneAndUpdate_FieldNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
-	_, err := den.FindOneAndUpdate[Product](ctx, db,
-		den.SetFields{"nonexistent": "x"},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -833,10 +484,7 @@ func TestFindOneAndUpdate_FieldValidatedBeforeLookup(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, err := den.FindOneAndUpdate[Product](ctx, db,
-		den.SetFields{"nonexistent": "x"},
-		[]where.Condition{where.Field("name").Eq("absent")},
-	)
+	_, err := den.NewQuery[Product](db, where.Field("name").Eq("absent")).UpdateOne(ctx, den.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	require.NotErrorIs(t, err, den.ErrNotFound,
 		"field validation must surface before findOneStrict runs")
@@ -847,13 +495,10 @@ func TestFindOneAndUpdate_MultipleMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 10.0}))
-	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 20.0}))
+	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 10.0}))
+	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 20.0}))
 
-	_, err := den.FindOneAndUpdate[Product](ctx, db,
-		den.SetFields{"price": 99.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"price": 99.0})
 	require.ErrorIs(t, err, den.ErrMultipleMatches)
 
 	all, err := den.NewQuery[Product](db).Sort("price", den.Asc).All(ctx)
@@ -871,10 +516,7 @@ func TestFindOrCreate_Insert(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.FindOrCreate[Product](ctx, db,
-		&Product{Name: "Widget", Price: 1.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).GetOrCreate(ctx, &Product{Name: "Widget", Price: 1.0})
 	require.NoError(t, err)
 	assert.True(t, inserted, "no existing match → must insert")
 	assert.Equal(t, "Widget", doc.Name)
@@ -891,12 +533,10 @@ func TestFindOrCreate_Existing(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Widget", Price: 99.0}
-	require.NoError(t, den.Insert(ctx, db, existing))
+	require.NoError(t, den.Save(ctx, db, existing))
 
-	doc, inserted, err := den.FindOrCreate[Product](ctx, db,
-		&Product{Name: "Widget", Price: 1.0}, // defaults — must NOT overwrite the 99.0
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).
+		GetOrCreate(ctx, &Product{Name: "Widget", Price: 1.0}) // defaults — must NOT overwrite the 99.0
 	require.NoError(t, err)
 	assert.False(t, inserted, "existing row → must not insert")
 	assert.Equal(t, existing.ID, doc.ID, "must return the existing row's ID")
@@ -910,11 +550,7 @@ func TestFindOneAndUpsert_Insert(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	doc, inserted, err := den.FindOneAndUpsert[Product](ctx, db,
-		&Product{Name: "Widget", Price: 1.0},
-		den.SetFields{"price": 5.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget", Price: 1.0}, den.SetFields{"price": 5.0})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.Equal(t, "Widget", doc.Name)
@@ -931,13 +567,13 @@ func TestFindOneAndUpsert_Update(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, existing))
+	require.NoError(t, den.Save(ctx, db, existing))
 
-	doc, inserted, err := den.FindOneAndUpsert[Product](ctx, db,
-		&Product{Name: "Widget", Price: 999.0}, // defaults must NOT apply on hit
-		den.SetFields{"price": 5.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	doc, inserted, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).
+		UpsertOne(ctx,
+			&Product{Name: "Widget", Price: 999.0}, // defaults must NOT apply on hit
+			den.SetFields{"price": 5.0},
+		)
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t, existing.ID, doc.ID)
@@ -952,14 +588,10 @@ func TestFindOneAndUpsert_MultipleMatches(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 1.0}))
-	require.NoError(t, den.Insert(ctx, db, &Product{Name: "Widget", Price: 2.0}))
+	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 1.0}))
+	require.NoError(t, den.Save(ctx, db, &Product{Name: "Widget", Price: 2.0}))
 
-	_, _, err := den.FindOneAndUpsert[Product](ctx, db,
-		&Product{Name: "Widget"},
-		den.SetFields{"price": 99.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, _, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, den.SetFields{"price": 99.0})
 	require.ErrorIs(t, err, den.ErrMultipleMatches)
 }
 
@@ -967,11 +599,7 @@ func TestFindOneAndUpsert_FieldNotFound(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	_, _, err := den.FindOneAndUpsert[Product](ctx, db,
-		&Product{Name: "Widget"},
-		den.SetFields{"nonexistent": "x"},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, _, err := den.NewQuery[Product](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &Product{Name: "Widget"}, den.SetFields{"nonexistent": "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field")
 }
@@ -981,14 +609,10 @@ func TestFindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
 	ctx := context.Background()
 
 	original := &SoftProduct{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, original))
+	require.NoError(t, den.Save(ctx, db, original))
 	require.NoError(t, den.Delete(ctx, db, original))
 
-	doc, inserted, err := den.FindOneAndUpsert[SoftProduct](ctx, db,
-		&SoftProduct{Name: "Widget", Price: 10.0},
-		den.SetFields{"price": 20.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	doc, inserted, err := den.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
 	require.NoError(t, err)
 	assert.True(t, inserted, "soft-deleted match should not satisfy upsert")
 	assert.NotEqual(t, original.ID, doc.ID)
@@ -1000,15 +624,12 @@ func TestFindOneAndUpsert_IncludeDeletedUpdates(t *testing.T) {
 	ctx := context.Background()
 
 	original := &SoftProduct{Name: "Widget", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, original))
+	require.NoError(t, den.Save(ctx, db, original))
 	require.NoError(t, den.Delete(ctx, db, original))
 
-	doc, inserted, err := den.FindOneAndUpsert[SoftProduct](ctx, db,
-		&SoftProduct{Name: "Widget", Price: 10.0},
-		den.SetFields{"price": 20.0},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-		den.IncludeDeleted(),
-	)
+	doc, inserted, err := den.NewQuery[SoftProduct](db, where.Field("name").Eq("Widget")).
+		IncludeDeleted().
+		UpsertOne(ctx, &SoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
 	require.NoError(t, err)
 	assert.False(t, inserted, "soft-deleted match should be updated")
 	assert.Equal(t, original.ID, doc.ID)
@@ -1021,11 +642,7 @@ func TestFindOneAndUpsert_HookOrder_InsertPath(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	_, inserted, err := den.FindOneAndUpsert[orderingDoc](ctx, db,
-		&orderingDoc{Name: "Widget"},
-		den.SetFields{},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, inserted, err := den.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, den.SetFields{})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.Equal(t,
@@ -1039,14 +656,10 @@ func TestFindOneAndUpsert_HookOrder_UpdatePath(t *testing.T) {
 	db := dentest.MustOpen(t, &orderingDoc{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &orderingDoc{Name: "Widget"}))
+	require.NoError(t, den.Save(ctx, db, &orderingDoc{Name: "Widget"}))
 	resetHookOrderCalls(t) // discard insert hooks from seed
 
-	_, inserted, err := den.FindOneAndUpsert[orderingDoc](ctx, db,
-		&orderingDoc{Name: "Widget"},
-		den.SetFields{},
-		[]where.Condition{where.Field("name").Eq("Widget")},
-	)
+	_, inserted, err := den.NewQuery[orderingDoc](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &orderingDoc{Name: "Widget"}, den.SetFields{})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t,
@@ -1054,15 +667,6 @@ func TestFindOneAndUpsert_HookOrder_UpdatePath(t *testing.T) {
 		hookOrderCalls,
 		"only Update hooks fire on hit path",
 	)
-}
-
-func TestUpdate_MissingIDWrapsErrValidation(t *testing.T) {
-	db := dentest.MustOpen(t, &Product{})
-	ctx := context.Background()
-
-	err := den.Update(ctx, db, &Product{Name: "NoID"})
-	require.Error(t, err)
-	require.ErrorIs(t, err, den.ErrValidation)
 }
 
 func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
@@ -1082,11 +686,11 @@ func TestDelete_MissingIDWrapsErrValidation(t *testing.T) {
 func seedEagerHouse(ctx context.Context, t *testing.T, db *den.DB, name string) *EagerHouse {
 	t.Helper()
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Owner"}
-	require.NoError(t, den.Insert(ctx, db, owner))
+	require.NoError(t, den.Save(ctx, db, owner))
 	h := &EagerHouse{Name: name, Door: den.NewLink(door), Owner: den.NewLink(owner)}
-	require.NoError(t, den.Insert(ctx, db, h))
+	require.NoError(t, den.Save(ctx, db, h))
 	return h
 }
 
@@ -1146,10 +750,7 @@ func TestFindOneAndUpdate_HonorsEagerTag(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, err := den.FindOneAndUpdate[EagerHouse](ctx, db,
-		den.SetFields{"name": "Renamed"},
-		[]where.Condition{where.Field("_id").Eq(h.ID)},
-	)
+	got, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpdateOne(ctx, den.SetFields{"name": "Renamed"})
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", got.Name)
 	assert.True(t, got.Door.IsLoaded(), "FindOneAndUpdate must honor den:\"eager\"")
@@ -1161,11 +762,7 @@ func TestFindOneAndUpsert_HonorsEagerTag_HitPath(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, inserted, err := den.FindOneAndUpsert[EagerHouse](ctx, db,
-		&EagerHouse{Name: "should-not-insert"},
-		den.SetFields{"name": "Updated"},
-		[]where.Condition{where.Field("_id").Eq(h.ID)},
-	)
+	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).UpsertOne(ctx, &EagerHouse{Name: "should-not-insert"}, den.SetFields{"name": "Updated"})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.True(t, got.Door.IsLoaded(), "Upsert hit path must honor den:\"eager\"")
@@ -1176,14 +773,10 @@ func TestFindOneAndUpsert_HonorsEagerTag_MissPath(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	defaults := &EagerHouse{Name: "Fresh", Door: den.NewLink(door)}
-	got, inserted, err := den.FindOneAndUpsert[EagerHouse](ctx, db,
-		defaults,
-		den.SetFields{},
-		[]where.Condition{where.Field("name").Eq("Fresh")},
-	)
+	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("name").Eq("Fresh")).UpsertOne(ctx, defaults, den.SetFields{})
 	require.NoError(t, err)
 	assert.True(t, inserted)
 	assert.True(t, got.Door.IsLoaded(),
@@ -1196,10 +789,7 @@ func TestFindOrCreate_HonorsEagerTag(t *testing.T) {
 
 	h := seedEagerHouse(ctx, t, db, "Cottage")
 
-	got, inserted, err := den.FindOrCreate[EagerHouse](ctx, db,
-		&EagerHouse{Name: "should-not-insert"},
-		[]where.Condition{where.Field("_id").Eq(h.ID)},
-	)
+	got, inserted, err := den.NewQuery[EagerHouse](db, where.Field("_id").Eq(h.ID)).GetOrCreate(ctx, &EagerHouse{Name: "should-not-insert"})
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.True(t, got.Door.IsLoaded(),
@@ -1218,7 +808,7 @@ func TestSaveAll_MixedInsertAndUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	existing := &Product{Name: "Existing", Price: 1}
-	require.NoError(t, den.Insert(ctx, db, existing))
+	require.NoError(t, den.Save(ctx, db, existing))
 
 	// One new, one updating the existing.
 	existing.Price = 99
@@ -1246,7 +836,7 @@ func TestSaveAll_FailFastRollsBack(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-seed a doc that will collide with the second batch entry.
-	require.NoError(t, den.Insert(ctx, db, &uniqueNameDoc{Name: "Bad"}))
+	require.NoError(t, den.Save(ctx, db, &uniqueNameDoc{Name: "Bad"}))
 
 	docs := []*uniqueNameDoc{
 		{Name: "Good"},
@@ -1278,7 +868,7 @@ func TestDeleteAll_BatchOfDocs(t *testing.T) {
 		{Name: "B", Price: 2},
 		{Name: "C", Price: 3},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, docs))
+	require.NoError(t, den.SaveAll(ctx, db, docs))
 
 	require.NoError(t, den.DeleteAll(ctx, db, docs[:2])) // delete A and B
 
@@ -1301,7 +891,7 @@ func TestRefreshAll_PicksUpExternalChanges(t *testing.T) {
 		{Name: "A", Price: 1},
 		{Name: "B", Price: 2},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, docs))
+	require.NoError(t, den.SaveAll(ctx, db, docs))
 
 	// External update via QuerySet.Update bumps both prices.
 	_, err := den.NewQuery[Product](db).Update(ctx, den.SetFields{"price": 99.0})

@@ -26,7 +26,7 @@ type Event struct {
 func seedEvents(t *testing.T, db *den.DB) {
 	t.Helper()
 	ctx := context.Background()
-	require.NoError(t, den.InsertMany(ctx, db, []*Event{
+	require.NoError(t, den.SaveAll(ctx, db, []*Event{
 		{Name: "Alpha Meeting", Start: 10, End: 20, Category: "work", Priority: 1},
 		{Name: "Beta Review", Start: 15, End: 25, Category: "work", Priority: 2},
 		{Name: "Gamma Party", Start: 30, End: 40, Category: "social", Priority: 3},
@@ -46,7 +46,7 @@ func TestHasKey(t *testing.T) {
 	db := dentest.MustOpen(t, &DocWithMap{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*DocWithMap{
+	require.NoError(t, den.SaveAll(ctx, db, []*DocWithMap{
 		{Name: "A", Metadata: map[string]any{"color": "red", "size": "large"}},
 		{Name: "B", Metadata: map[string]any{"weight": 10}},
 		{Name: "C", Metadata: map[string]any{"color": "blue"}},
@@ -61,7 +61,7 @@ func TestHasKey_NoMatch(t *testing.T) {
 	db := dentest.MustOpen(t, &DocWithMap{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &DocWithMap{
+	require.NoError(t, den.Save(ctx, db, &DocWithMap{
 		Name: "A", Metadata: map[string]any{"size": "large"},
 	}))
 
@@ -146,7 +146,7 @@ func TestFieldRef_Filtered(t *testing.T) {
 	db := dentest.MustOpen(t, &Event{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Event{
+	require.NoError(t, den.SaveAll(ctx, db, []*Event{
 		{Name: "Valid", Start: 10, End: 20},
 		{Name: "Invalid", Start: 30, End: 20}, // end < start
 		{Name: "Equal", Start: 15, End: 15},   // end == start
@@ -162,7 +162,7 @@ func TestFieldRef_Eq(t *testing.T) {
 	db := dentest.MustOpen(t, &Event{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Event{
+	require.NoError(t, den.SaveAll(ctx, db, []*Event{
 		{Name: "Same", Start: 15, End: 15},
 		{Name: "Different", Start: 10, End: 20},
 	}))

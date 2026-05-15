@@ -23,41 +23,34 @@ Module: `github.com/oliverandrich/den`
 
 Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interface satisfied by both `*DB` (operating outside a transaction) and `*Tx` (operating inside `RunInTransaction`). Pass whichever you have.
 
-### Insert
+### Save
 
 | Function | Signature | Description |
 |---|---|---|
-| `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction. Honors `PreValidate()` and `ContinueOnError()` |
+| `Save[T]` | `Save[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Persist a single document. Empty-ID docs take the insert path (ULID assigned); ID-bearing docs take the update path. Hooks fire on whichever branch runs |
+| `SaveAll[T]` | `SaveAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Persist every doc in the slice in a single transaction. Mixed batches (some empty-ID, some not) are supported. Fail-fast: any per-doc error rolls back the transaction |
 
 ### Read
 
 | Function | Signature | Description |
 |---|---|---|
-| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
-| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
-
-### Update
-
-| Function | Signature | Description |
-|---|---|---|
-| `Update[T]` | `Update[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
-| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error)` | Atomically find the single matching document, apply field updates, and return the modified document. Returns `ErrNotFound` on miss and `ErrMultipleMatches` if more than one row matches |
-| `FindOneAndUpsert[T]` | `FindOneAndUpsert[T](ctx context.Context, s Scope, defaults *T, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, bool, error)` | Atomic find-or-create-then-update. `defaults` is used only on miss; `fields` is applied on both paths. Returns `(doc, inserted, err)`. `IncludeDeleted()` makes soft-deleted matches satisfy the lookup |
-| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T) error` | Re-read the document from storage, replacing all field values |
+| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string, opts ...CRUDOption) (*T, error)` | Find a document by its ID (direct key lookup). Bypasses the soft-delete filter — explicit-by-ID lookups always return the row if present. Callers can check `Value.IsDeleted()` |
+| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string, opts ...CRUDOption) ([]*T, error)` | Find multiple documents by their IDs. Same soft-delete contract as `FindByID` |
+| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Re-read the document from storage, replacing all field values |
+| `RefreshAll[T]` | `RefreshAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Re-read every doc in the slice from storage in one transaction. Fail-fast |
 
 ### Delete
 
 | Function | Signature | Description |
 |---|---|---|
 | `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
-| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
-| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
-| `IncludeDeleted` | `IncludeDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match. Mirrors `QuerySet.IncludeDeleted()` so the same name covers both query-driven reads and CRUD-style lookups |
-| `SoftDeleteBy` | `SoftDeleteBy(actor string) CRUDOption` | CRUDOption for `Delete` that records an actor on the document's `DeletedBy` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
-| `SoftDeleteReason` | `SoftDeleteReason(reason string) CRUDOption` | CRUDOption for `Delete` that records a free-form reason on the document's `DeleteReason` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
-| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire once per document (pre-pass only); combining with `WithLinkRule(LinkWrite)` disables the optimization and hooks fire twice |
-| `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
+| `DeleteAll[T]` | `DeleteAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Delete every doc in the slice in one transaction. Fail-fast |
+| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document |
+| `IncludeDeleted` | `IncludeDeleted() CRUDOption` | CRUDOption that makes by-ID lookups (`FindByID`, `FindByIDs`) consider soft-deleted documents. Mirrors `QuerySet.IncludeDeleted()` |
+| `SoftDeleteBy` | `SoftDeleteBy(actor string) CRUDOption` | CRUDOption for `Delete` that records an actor on the document's `DeletedBy` field. No-op on `HardDelete()` and on types that don't embed `SoftDelete` |
+| `SoftDeleteReason` | `SoftDeleteReason(reason string) CRUDOption` | CRUDOption for `Delete` that records a free-form reason on the document's `DeleteReason` field. No-op on `HardDelete()` and on types that don't embed `SoftDelete` |
+
+> **By-condition writes** (find-and-update, find-or-create, bulk update, bulk delete, back-links) live on `QuerySet` — see the [Query](#query) section below. There is no top-level `FindOneAndUpdate` / `FindOneAndUpsert` / `FindOrCreate` / `UpdateMany` / `DeleteMany` / `BackLinks` anymore: build a chain with `NewQuery[T](db, conds...)` and call the matching terminal (`UpdateOne`, `UpsertOne`, `GetOrCreate`, `Update`, `Delete`, `BackLinks`).
 
 ---
 
@@ -105,6 +98,11 @@ Every terminal takes `ctx context.Context` as its first argument, so the same `Q
 | `AllWithCount` | `AllWithCount(ctx context.Context) ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
 | `Iter` | `Iter(ctx context.Context) iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range`. Terminates on the first error |
 | `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update every matching document and return the count. Fail-fast: any per-row error rolls back the transaction and returns `(0, err)`. Field names are validated before the tx opens |
+| `UpdateOne` | `UpdateOne(ctx context.Context, fields SetFields) (*T, error)` | Atomic find-and-modify on a single matching row. Returns `ErrNotFound` on miss and `ErrMultipleMatches` if more than one row matches |
+| `UpsertOne` | `UpsertOne(ctx context.Context, defaults *T, fields SetFields) (*T, bool, error)` | Find-or-create-then-update. `defaults` is used only on miss; `fields` is applied on both paths. Returns `(doc, inserted, err)` |
+| `GetOrCreate` | `GetOrCreate(ctx context.Context, defaults *T) (*T, bool, error)` | Find-or-create with no post-find update. Equivalent to `UpsertOne(ctx, defaults, SetFields{})` |
+| `Delete` | `Delete(ctx context.Context, opts ...CRUDOption) (int64, error)` | Delete every matching row and return the count. Drains the iterator before issuing per-row writes so cursor pinning on PostgreSQL is safe. Soft-delete routing and `HardDelete` apply per row |
+| `BackLinks` | `BackLinks(linkField string, targetID string) QuerySet[T]` | Chainable: narrow the QuerySet to documents that reference `targetID` via the named link field. Compose with `WithFetchLinks` / `IncludeDeleted` / `Sort` / `Limit` etc. and dispatch with any terminal |
 | `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
 ---
@@ -150,8 +148,9 @@ err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 | `NewLink[T]` | `NewLink[T any](doc *T) Link[T]` | Create a Link from an existing document, extracting its ID |
 | `FetchLink[T]` | `FetchLink[T](ctx context.Context, s Scope, doc *T, field string) error` | Fetch and resolve a single link field on a document |
 | `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, s Scope, doc *T) error` | Fetch and resolve all link fields on a document |
-| `BackLinks[T]` | `BackLinks[T](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
 | `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
+
+Reverse queries live on `QuerySet`: `den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)` — see the [Terminal Methods](#terminal-methods) table.
 
 ### Link Rules
 
@@ -331,7 +330,7 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 | `Tx` | Transaction handle; wraps a backend transaction. Satisfies `Scope` |
 | `Scope` | Sealed interface satisfied by `*DB` and `*Tx`. Parameter type for all CRUD entry points so the same function works inside and outside a transaction |
 | `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
-| `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate`, `FindOneAndUpsert`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
+| `SetFields` | `map[string]any` used for partial updates via `QuerySet.UpdateOne`, `UpsertOne`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
 | `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |
 | `QuerySet[T]` | Chainable, lazy query builder |
 | `SortDirection` | Sort direction: `den.Asc` or `den.Desc` |

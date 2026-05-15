@@ -50,7 +50,7 @@ func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 	_ = f.Close()
 
 	m := &mediaDoc{Attachment: att, AltText: "test"}
-	require.NoError(t, den.Insert(ctx, db, m))
+	require.NoError(t, den.Save(ctx, db, m))
 
 	// Hard-delete via the HardDelete option.
 	require.NoError(t, den.Delete(ctx, db, m, den.HardDelete()))
@@ -74,7 +74,7 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	require.NoError(t, err)
 
 	p := &productDoc{Hero: hero, Thumbnail: thumb, Name: "Widget"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	require.NoError(t, den.Delete(ctx, db, p, den.HardDelete()))
 
@@ -107,10 +107,10 @@ func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
 	att, err := fs.Store(ctx, bytes.NewReader([]byte("hero-bytes")), ".jpg", "image/jpeg")
 	require.NoError(t, err)
 	m := &mediaDoc{Attachment: att, AltText: "hero"}
-	require.NoError(t, den.Insert(ctx, db, m))
+	require.NoError(t, den.Save(ctx, db, m))
 
 	g := &gallery{Name: "g", Hero: den.NewLink(m)}
-	require.NoError(t, den.Insert(ctx, db, g))
+	require.NoError(t, den.Save(ctx, db, g))
 
 	// Reload g fresh so Hero.Value is nil — otherwise the outer
 	// cleanupAttachments walk on the parent discovers the child's
@@ -149,7 +149,7 @@ func TestHardDelete_WithoutStorage_Rejects(t *testing.T) {
 			SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
 		},
 	}
-	require.NoError(t, den.Insert(ctx, db, m))
+	require.NoError(t, den.Save(ctx, db, m))
 
 	err := den.Delete(ctx, db, m, den.HardDelete())
 	require.ErrorIs(t, err, den.ErrValidation)
@@ -173,10 +173,10 @@ func TestHardDelete_Cascade_WithoutStorage_Rejects(t *testing.T) {
 			SHA256:      "0000000000000000000000000000000000000000000000000000000000000000",
 		},
 	}
-	require.NoError(t, den.Insert(ctx, db, m))
+	require.NoError(t, den.Save(ctx, db, m))
 
 	g := &gallery{Name: "g", Hero: den.NewLink(m)}
-	require.NoError(t, den.Insert(ctx, db, g))
+	require.NoError(t, den.Save(ctx, db, g))
 
 	reloaded, err := den.FindByID[gallery](ctx, db, g.ID)
 	require.NoError(t, err)

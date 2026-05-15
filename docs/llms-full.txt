@@ -54,7 +54,7 @@ func main() {
     defer db.Close()
 
     den.Register(ctx, db, &Product{})
-    den.Insert(ctx, db, &Product{Name: "Widget", Price: 9.99})
+    den.Save(ctx, db, &Product{Name: "Widget", Price: 9.99})
 
     products, _ := den.NewQuery[Product](db,
         where.Field("price").Lt(20.0),
@@ -274,7 +274,7 @@ func main() {
 
     // Insert a document
     p := &Product{Name: "Widget", Price: 9.99}
-    if err := den.Insert(ctx, db, p); err != nil {
+    if err := den.Save(ctx, db, p); err != nil {
         log.Fatal(err)
     }
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)
@@ -442,13 +442,13 @@ Insert a Project, then a Task that links to it. `den.NewLink(parent)` extracts t
 
 ```go
 proj := &Project{Name: "Den Docs"}
-if err := den.Insert(ctx, db, proj); err != nil { log.Fatal(err) }
+if err := den.Save(ctx, db, proj); err != nil { log.Fatal(err) }
 
 task := &Task{
     ProjectLink: den.NewLink(proj),
     Title:       "Write 10-minute tour",
 }
-if err := den.Insert(ctx, db, task); err != nil { log.Fatal(err) }
+if err := den.Save(ctx, db, task); err != nil { log.Fatal(err) }
 
 fmt.Println("created", proj.ID, task.ID, "status:", task.Status)
 ```
@@ -483,13 +483,11 @@ For streaming over large result sets, swap `.All(ctx)` for [`.Iter(ctx)`](../gui
 
 ## 6. Update one field atomically
 
-The single-field update pattern: route through `FindOneAndUpdate` so you avoid the read-modify-write round-trip and any concurrent-update race.
+The single-field update pattern: route through `QuerySet.UpdateOne` so you avoid the read-modify-write round-trip and any concurrent-update race.
 
 ```go
-done, err := den.FindOneAndUpdate[Task](ctx, db,
-    den.SetFields{"status": "done"},
-    []where.Condition{where.Field(den.FieldID).Eq(task.ID)},
-)
+done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
+    UpdateOne(ctx, den.SetFields{"status": "done"})
 if err != nil { log.Fatal(err) }
 fmt.Println("marked done:", done.Title, "→", done.Status)
 ```
@@ -820,7 +818,7 @@ Den uses [ULID](https://github.com/oklog/ulid) for document IDs -- lexicographic
 
 ```go
 p := &Product{Name: "Widget", Price: 9.99}
-den.Insert(ctx, db, p)
+den.Save(ctx, db, p)
 fmt.Println(p.ID) // "01HQ3K8V2X..."
 ```
 
@@ -831,7 +829,7 @@ You can set an ID manually before insert. If `ID` is empty, Den generates a ULID
 ```go
 p := &Product{Name: "Widget"}
 p.ID = "my-custom-id"
-den.Insert(ctx, db, p) // uses "my-custom-id"
+den.Save(ctx, db, p) // uses "my-custom-id"
 ```
 
 ## DenSettings Interface
@@ -1015,12 +1013,12 @@ type User struct {
 }
 
 // Both users have nil Email -- no conflict:
-den.Insert(ctx, db, &User{Username: "alice"})  // Email: nil
-den.Insert(ctx, db, &User{Username: "bob"})    // Email: nil
+den.Save(ctx, db, &User{Username: "alice"})  // Email: nil
+den.Save(ctx, db, &User{Username: "bob"})    // Email: nil
 
 // But duplicate non-nil values are rejected:
-den.Insert(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) // ok
-den.Insert(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
+den.Save(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) // ok
+den.Save(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
 ```
 
 === "SQLite"
@@ -1056,20 +1054,22 @@ err := den.Register(ctx, db,
 )
 ```
 
-## Insert
+## Save
+
+`Save` is the single doc-in-hand entry point. Empty-ID documents take the insert path; ID-bearing documents take the update path. The full lifecycle hook chain fires on whichever branch runs.
 
 ```go
 p := &Product{Name: "Widget", Price: 9.99}
-err := den.Insert(ctx, db, p)
+err := den.Save(ctx, db, p)
 // p.ID is now set (auto-generated ULID if it was empty)
 // p.CreatedAt and p.UpdatedAt are set automatically
 ```
 
-Insert triggers the full lifecycle hook chain: `BeforeInsert` -> `BeforeSave` -> tag validation -> `Validate` -> write -> `AfterInsert` -> `AfterSave`. Mutating hooks run before validation so they can populate defaults. If any hook or validation step returns an error, the insert is aborted.
+Insert chain: `BeforeInsert` → `BeforeSave` → tag validation → `Validate` → write → `AfterInsert` → `AfterSave`. Update chain swaps `Insert` for `Update`. Mutating hooks run before validation so they can populate defaults. Any error aborts the write.
 
-### InsertMany
+### SaveAll
 
-Insert multiple documents in a single batch transaction:
+`SaveAll` persists a slice of documents inside a single transaction. Empty-ID docs go through the insert path; ID-bearing docs through the update path. Mixed batches are supported.
 
 ```go
 products := []*Product{
@@ -1077,33 +1077,10 @@ products := []*Product{
     {Name: "Gadget", Price: 19.99},
     {Name: "Doohickey", Price: 4.99},
 }
-err := den.InsertMany(ctx, db, products)
+err := den.SaveAll(ctx, db, products)
 ```
 
-By default the entire batch runs inside one transaction: a failure on any document rolls back every successful predecessor. Two options change that behavior:
-
-**`PreValidate()`** runs the full insert hook + validation chain on every document *before* the write transaction opens. If any document fails validation, no writes are attempted — useful for large imports where a late-failing document would otherwise waste the work of every successful predecessor. Hooks fire exactly once per document: `BeforeInsert` / `BeforeSave` / `Validate` run in the pre-pass, and the in-transaction commit only performs the Put and `AfterInsert` / `AfterSave`. Combining with `WithLinkRule(LinkWrite)` disables the caching optimization (cascade has to run inside the tx), so hooks fire twice on that specific combination.
-
-```go
-err := den.InsertMany(ctx, db, products, den.PreValidate())
-if errors.Is(err, den.ErrValidation) {
-    // a document failed pre-validation; nothing was written
-}
-```
-
-**`ContinueOnError()`** writes each document in its own short-lived transaction and returns an `*InsertManyError` listing per-document failures by input index. Successful inserts are committed, so partial success is visible. Cannot be combined with a `*Tx` scope.
-
-```go
-err := den.InsertMany(ctx, db, products, den.ContinueOnError())
-var multi *den.InsertManyError
-if errors.As(err, &multi) {
-    for _, f := range multi.Failures {
-        log.Printf("doc[%d]: %v", f.Index, f.Err)
-    }
-}
-```
-
-The two options cannot be combined — `InsertMany` returns `ErrIncompatibleOptions`. Each doc-level transaction in `ContinueOnError` would make a global pre-pass guarantee meaningless, so the rejection is intentional.
+Fail-fast: any per-doc error rolls back the whole transaction — `SaveAll` has no `ContinueOnError` knob. Validation runs unconditionally on every doc, so a late validation failure rolls back successful predecessors. Combine with `WithLinkRule(LinkWrite)` for cascade-writes per doc.
 
 ## FindByID / FindByIDs
 
@@ -1130,19 +1107,19 @@ Update performs a full document write. The document must have an ID.
 ```go
 product, _ := den.FindByID[Product](ctx, db, "01HQ3K8V2X...")
 product.Price = 29.99
-err := den.Update(ctx, db, product)
+err := den.Save(ctx, db, product)
 ```
 
 When revision control is enabled (`UseRevision: true` in `DenSettings`), Update checks that the document's revision matches the stored version. If another process modified the document since it was read, `ErrRevisionConflict` is returned:
 
 ```go
-err := den.Update(ctx, db, product)
+err := den.Save(ctx, db, product)
 if errors.Is(err, den.ErrRevisionConflict) {
     // another process modified this document -- re-read and retry
 }
 
 // Force-write regardless of revision:
-err := den.Update(ctx, db, product, den.IgnoreRevision())
+err := den.Save(ctx, db, product, den.IgnoreRevision())
 ```
 
 ## Bulk Update via QuerySet
@@ -1162,8 +1139,7 @@ count, err := den.NewQuery[Product](db,
     fails fast — see "Fail-fast and field validation" below — but it's
     easy to get wrong on the first try because every other Go API in
     the package uses Go field names. The same rule applies in
-    `FindOneAndUpdate`, `FindOneAndUpsert`, and any other CRUD
-    operation taking `SetFields`.
+    `UpdateOne`, `UpsertOne`, and any other terminal taking `SetFields`.
 
 !!! tip
     Bulk updates are more convenient than loading, modifying, and saving each document individually. The update runs in a single transaction, modifying each matching document individually.
@@ -1194,17 +1170,15 @@ for name := range myFields {
 
 Den does not ship a typed `SetFields` builder: a chained generic alternative would not give meaningfully more safety than the runtime check, and compile-time field access would require code generation, which is outside the current scope.
 
-## FindOneAndUpdate
+## UpdateOne
 
-Atomic find-and-modify in a single transaction. Finds the document matching the conditions, applies the field updates, and returns the modified document.
+Atomic find-and-modify in a single transaction. The QuerySet's conditions select the row; `UpdateOne` applies the field updates and returns the modified document.
 
-The conditions must identify the document uniquely. If they match more than one row, `FindOneAndUpdate` returns `ErrMultipleMatches` instead of silently picking one. If they match nothing, it returns `ErrNotFound`.
+Conditions must identify the document uniquely. More than one match returns `ErrMultipleMatches`; zero matches returns `ErrNotFound` — `UpdateOne` never silently picks a row.
 
 ```go
-counter, err := den.FindOneAndUpdate[Counter](ctx, db,
-    den.SetFields{"value": newValue},
-    []where.Condition{where.Field("name").Eq("downloads")}, // "name" is unique
-)
+counter, err := den.NewQuery[Counter](db, where.Field("name").Eq("downloads")).
+    UpdateOne(ctx, den.SetFields{"value": newValue})
 if errors.Is(err, den.ErrNotFound) {
     // no row named "downloads" exists yet
 }
@@ -1213,21 +1187,21 @@ if errors.Is(err, den.ErrMultipleMatches) {
 }
 ```
 
-Pass `den.IncludeDeleted()` to also match soft-deleted documents.
+Chain `.IncludeDeleted()` to also match soft-deleted documents.
 
 !!! tip "Job-queue pattern"
     For claim-one-of-many patterns (job queues, work tickets), reach for `RunInTransaction` together with `QuerySet.ForUpdate(SkipLocked())` — that locks the row at SELECT time so a concurrent worker skips it instead of racing for the same write.
 
-## FindOneAndUpsert
+## UpsertOne
 
 Find an existing document or insert a new one if none matches, then apply field updates. The `defaults` template is used only on the insert path; `fields` is applied on both paths.
 
 ```go
-user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
-    &User{Email: "x@y.z", LoginCount: 0}, // insert template
-    den.SetFields{"login_count": 5},      // applied on both paths
-    []where.Condition{where.Field("email").Eq("x@y.z")},
-)
+user, inserted, err := den.NewQuery[User](db, where.Field("email").Eq("x@y.z")).
+    UpsertOne(ctx,
+        &User{Email: "x@y.z", LoginCount: 0}, // insert template
+        den.SetFields{"login_count": 5},      // applied on both paths
+    )
 if err != nil {
     // ...
 }
@@ -1236,10 +1210,21 @@ if inserted {
 }
 ```
 
-Like `FindOneAndUpdate`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; pass `IncludeDeleted()` to update them in place.
+Like `UpdateOne`, conditions must match at most one document — `ErrMultipleMatches` otherwise. Soft-deleted matches are skipped by default; chain `.IncludeDeleted()` to update them in place.
 
 !!! note "Concurrency"
     Two concurrent upserts that both miss race for the insert. One wins; the other gets `ErrDuplicate` from the underlying unique constraint on the lookup column. There is no internal retry — callers that want one decide explicitly between retry and surfacing the error.
+
+## GetOrCreate
+
+`GetOrCreate` is the find-or-create-with-defaults shorthand. It returns the existing document if conditions match one row; otherwise it inserts `defaults`. Existing rows are never modified.
+
+```go
+user, inserted, err := den.NewQuery[User](db, where.Field("email").Eq("x@y.z")).
+    GetOrCreate(ctx, &User{Email: "x@y.z", LoginCount: 0})
+```
+
+Same atomicity and `ErrMultipleMatches` semantics as `UpsertOne`. Reach for it when there's nothing to update on hit.
 
 ## Delete
 
@@ -1260,23 +1245,19 @@ err := den.Delete(ctx, db, &product)
 err := den.Delete(ctx, db, &product, den.HardDelete())
 ```
 
-### DeleteMany
+### QuerySet.Delete
 
-Delete all documents matching conditions. Returns the number of deleted documents:
+Delete every document matching the QuerySet's conditions. Returns the number of deleted documents:
 
 ```go
-count, err := den.DeleteMany[Product](ctx, db,
-    []where.Condition{where.Field("status").Eq("archived")},
-)
+count, err := den.NewQuery[Product](db, where.Field("status").Eq("archived")).Delete(ctx)
 ```
 
 With link cascade -- delete the documents and all their linked documents:
 
 ```go
-count, err := den.DeleteMany[Product](ctx, db,
-    []where.Condition{where.Field("status").Eq("archived")},
-    den.WithLinkRule(den.LinkDelete),
-)
+count, err := den.NewQuery[Product](db, where.Field("status").Eq("archived")).
+    Delete(ctx, den.WithLinkRule(den.LinkDelete))
 ```
 
 ## Refresh
@@ -1758,7 +1739,7 @@ Use `NewLink` to create a link from an existing document:
 
 ```go
 door := &Door{Height: 200, Width: 90}
-den.Insert(ctx, db, door)
+den.Save(ctx, db, door)
 
 house := &House{
     Name: "Lakehouse",
@@ -1849,7 +1830,7 @@ Three modes interact with the tag:
 
 The default-mode resolver still uses the same batched `WHERE _id IN (…)` path on `.All` / `.AllWithCount` / `.Search`, so eager fields cost one extra query per target type per page rather than N+1.
 
-The CRUD-style read APIs honor the same tag without a QuerySet: `FindByID`, `FindByIDs`, `Refresh`, `BackLinks`, `BackLinksField`, `FindOneAndUpdate`, `FindOneAndUpsert`, and `FindOrCreate` all hydrate eager-tagged fields by default. The `den.WithoutFetchLinks()` CRUDOption is the opt-out, mirroring the QuerySet modifier.
+The doc-in-hand read APIs honor the same tag: `FindByID`, `FindByIDs`, and `Refresh` all hydrate eager-tagged fields by default. The `den.WithoutFetchLinks()` CRUDOption is the opt-out, mirroring the `QuerySet.WithoutFetchLinks()` chain method that covers the QuerySet-driven reads and write terminals (`UpdateOne`, `UpsertOne`, `GetOrCreate`).
 
 ```go
 // FindByID honors den:"eager" — Door is hydrated, Owner is not.
@@ -1879,10 +1860,10 @@ soft-deleted record; callers can detect this via
 
 ```go
 target := &Account{Name: "x"}
-den.Insert(ctx, db, target)
+den.Save(ctx, db, target)
 
 holder := &Holder{Account: den.NewLink(target)}
-den.Insert(ctx, db, holder)
+den.Save(ctx, db, holder)
 
 den.Delete(ctx, db, target) // soft-delete
 
@@ -1917,7 +1898,7 @@ Control whether linked documents are automatically saved when the parent is inse
 Only the root document is written. Linked documents must already exist in the database:
 
 ```go
-err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
 // Saves only the House -- Door and Windows must already be inserted
 ```
 
@@ -1934,7 +1915,7 @@ house := &House{
     },
 }
 
-err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 // Saves House, Door, and all Windows in one operation
 ```
 
@@ -1942,7 +1923,7 @@ This also works with `Update`:
 
 ```go
 house.Door = den.NewLink(&Door{Height: 210, Width: 95})
-err := den.Update(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 // Updates the House and inserts/replaces the new Door
 ```
 
@@ -1978,27 +1959,17 @@ Find all documents of a given type that reference a specific document via a link
 
 ```go
 // Find all Houses that reference a specific Door
-houses, err := den.BackLinks[House](ctx, db, "door", doorID)
+houses, err := den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)
 ```
 
-Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or use the typed variant below.
+Read the chain as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the first argument to `BackLinks` is the JSON tag name of that link field; the second is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every such call — keep the tag stable.
+
+`BackLinks` is a QuerySet modifier, so it composes with `WithFetchLinks` / `IncludeDeleted` / `Sort` / `Limit` etc., and the terminal (`.All(ctx)`, `.First(ctx)`, etc.) decides what to return.
 
 This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
 
-### Typed variant: `BackLinksField[H, T]`
-
-When the holder has exactly one `Link[T]` field for the target type, the typed variant skips the string field name entirely:
-
-```go
-houses, err := den.BackLinksField[House, Door](ctx, db, doorID)
-```
-
-The framework walks `House`'s fields once, finds the unique `Link[Door]` field, and uses its JSON tag for the underlying query. Renaming the JSON tag is caught at the next call instead of silently returning wrong results. Two type parameters are required (Go can't infer them from the `targetID string`), but the call is otherwise identical.
-
-The string-based form stays for two cases the typed lookup deliberately rejects with a clear error:
-
-- **Multiple `Link[T]` fields on the holder** (e.g. `FrontDoor` and `BackDoor` both `Link[Door]`) — disambiguate by passing the explicit JSON tag to `BackLinks`.
-- **Slice-link fields** (`[]Link[T]`) — the underlying query uses `Eq`, which doesn't match against array contents. Use a manual `where.Field("...").Contains(targetID)` query for slice-link backlinks.
+!!! note "Slice-link fields"
+    `BackLinks` uses `Eq`, which doesn't match against array contents. For `[]Link[T]` slice-link fields, use a manual `where.Field("...").Contains(targetID)` query instead.
 
 ## Nesting Depth
 
@@ -2062,7 +2033,7 @@ func main() {
             den.NewLink(&Window{X: 120, Y: 60}),
         },
     }
-    den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+    den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 
     // Schema-level eager: Door is hydrated automatically — no
     // WithFetchLinks() needed. Windows stays lazy because it's
@@ -2075,7 +2046,7 @@ func main() {
     fmt.Println(found.Windows[0].IsLoaded())      // false — lazy
 
     // Back-links: find houses referencing this door
-    houses, _ := den.BackLinks[House](ctx, db, "door", found.Door.ID)
+    houses, _ := den.NewQuery[House](db).BackLinks("door", found.Door.ID).All(ctx)
     fmt.Println(len(houses)) // 1
 
     // Cascade delete
@@ -2436,7 +2407,7 @@ type Attachment struct {
 These fields are set by the Storage when bytes are stored and are not meant to be edited by application code afterwards — `StoragePath`, `Size`, and `SHA256` are intrinsic to the stored content.
 
 !!! note "About the `validate:` tags"
-    The `validate:` tags fire only when validation is enabled on the DB via `validate.WithValidation()` (see [Validation](validation.md)). `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`. With validation disabled the tags are inert metadata.
+    `Storage.Store` itself does NOT run validation; the tags kick in when the containing document is later inserted or updated through `den.Insert` / `den.Update`, where Den enforces them automatically (see [Validation](validation.md)).
 
 !!! note "StoragePath is an object key, not a URL"
     `StoragePath` is the path **relative to the storage backend's root** — for the file backend that is the root directory, for S3 that is the object key inside the bucket. Hosts, bucket names, query strings, and pre-signed URL parameters do NOT belong here; they come out of `Storage.URL()` on demand. The 1024-byte limit matches S3 and GCS object-key maxima.
@@ -2530,7 +2501,7 @@ func uploadHandler(db *den.DB) http.HandlerFunc {
             Attachment:   att,
             OriginalName: header.Filename,
         }
-        if err := den.Insert(r.Context(), db, media); err != nil {
+        if err := den.Save(r.Context(), db, media); err != nil {
             // Clean up the stored bytes if the DB insert fails —
             // otherwise you have an orphan.
             _ = db.Storage().Delete(r.Context(), att)
@@ -2867,10 +2838,10 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     sender.Balance -= amount
     receiver.Balance += amount
 
-    if err := den.Update(ctx, tx, sender); err != nil {
+    if err := den.Save(ctx, tx, sender); err != nil {
         return err // rolls back
     }
-    if err := den.Update(ctx, tx, receiver); err != nil {
+    if err := den.Save(ctx, tx, receiver); err != nil {
         return err // rolls back
     }
 
@@ -2880,15 +2851,15 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ## Transaction Functions
 
-CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Insert(ctx, scope, &doc)` works outside and inside a transaction:
+CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Save(ctx, scope, &doc)` works outside and inside a transaction:
 
 ```go
 // Outside a transaction
-den.Insert(ctx, db, &product)
+den.Save(ctx, db, &product)
 
 // Inside a transaction — same function, same signature
 den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    return den.Insert(ctx, tx, &product)
+    return den.Save(ctx, tx, &product)
 })
 ```
 
@@ -2917,7 +2888,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         return ErrOutOfStock
     }
     item.Stock -= qty
-    return den.Update(ctx, tx, item)
+    return den.Save(ctx, tx, item)
 })
 ```
 
@@ -2978,7 +2949,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     }
     for _, o := range orders {
         o.Status = "processing"
-        if err := den.Update(ctx, tx, o); err != nil {
+        if err := den.Save(ctx, tx, o); err != nil {
             return err
         }
     }
@@ -3052,12 +3023,12 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     job.Status = "running"
     job.StartedAt = time.Now()
 
-    return den.Update(ctx, tx, job)
+    return den.Save(ctx, tx, job)
 })
 ```
 
 !!! note
-    For single-document atomic updates, consider `den.FindOneAndUpdate` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
+    For single-document atomic updates, consider `QuerySet.UpdateOne` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
 
 ---
 
@@ -3153,7 +3124,7 @@ BeforeDelete() -> BeforeSoftDelete() -> [write soft-delete] -> AfterSoftDelete()
 If any `Before*` hook, tag validation, or `Validate()` returns an error, the operation is aborted and the transaction is rolled back. The error is returned to the caller.
 
 !!! note
-    Tag validation (configured via `validate.WithValidation()`) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
+    Tag validation (`validate:` struct tags, always-on) and the custom `Validator.Validate()` method both run after the mutating hooks. This is the same pattern used by ActiveRecord, Django ORM and SQLAlchemy: hooks can set defaults, compute slugs or timestamps, normalize emails, etc., and then validation checks the final state.
 
 ## Example: Article with Hooks
 
@@ -3194,7 +3165,7 @@ article := &Article{
     Body:  "Den is an ODM for Go...",
 }
 
-err := den.Insert(ctx, db, article)
+err := den.Save(ctx, db, article)
 // 1. BeforeInsert() -- not implemented, skipped
 // 2. BeforeSave() -- sets slug="getting-started-with-den", word_count=6
 // 3. Validate() -- checks title and body are non-empty (sees the final document)
@@ -3255,10 +3226,10 @@ All hooks run within the same database transaction as the operation. This means:
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     // Both inserts (and their hooks) share the same transaction.
     // If the second insert's Validate() fails, both are rolled back.
-    if err := den.Insert(ctx, tx, article1); err != nil {
+    if err := den.Save(ctx, tx, article1); err != nil {
         return err
     }
-    return den.Insert(ctx, tx, article2)
+    return den.Save(ctx, tx, article2)
 })
 ```
 
@@ -3316,18 +3287,14 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
-For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, the same name is also available as a **CRUDOption** (`den.IncludeDeleted()`) that opts the atomic lookup step into matching soft-deleted rows:
+`IncludeDeleted()` is a QuerySet modifier — chain it before any terminal (`.All`, `.First`, `.UpdateOne`, `.UpsertOne`, `.Delete`, …) to opt that whole pipeline into matching soft-deleted rows:
 
 ```go
 // Find a soft-deleted product and bring it back
-p, err := den.FindOneAndUpdate[Product](ctx, db,
-    den.SetFields{"_deleted_at": nil},
-    []where.Condition{where.Field("sku").Eq("abc")},
-    den.IncludeDeleted(),
-)
+p, err := den.NewQuery[Product](db, where.Field("sku").Eq("abc")).
+    IncludeDeleted().
+    UpdateOne(ctx, den.SetFields{"_deleted_at": nil})
 ```
-
-The QuerySet method (`qs.IncludeDeleted()`) and the CRUDOption (`den.IncludeDeleted()`) are different identifiers in different namespaces, but they share the name on purpose — both mean "consider soft-deleted documents as well."
 
 ## Permanent Removal
 
@@ -3416,7 +3383,7 @@ func (a Article) DenSettings() den.Settings {
 _ = den.Delete(ctx, db, a) // bumps _rev, records DeletedAt
 
 b.Title = "stale update"
-err := den.Update(ctx, db, b)
+err := den.Save(ctx, db, b)
 // err == den.ErrRevisionConflict — b held the pre-delete revision
 ```
 
@@ -3580,7 +3547,7 @@ p, _ := den.FindByID[Product](ctx, db, "prod_001")
 p.Price = 29.99
 
 // If someone else updated this document since we read it:
-err := den.Update(ctx, db, p)
+err := den.Save(ctx, db, p)
 // err == den.ErrRevisionConflict
 ```
 
@@ -3592,12 +3559,12 @@ A typical conflict-handling pattern is to re-read and retry:
 p, _ := den.FindByID[Product](ctx, db, "prod_001")
 p.Price = 29.99
 
-err := den.Update(ctx, db, p)
+err := den.Save(ctx, db, p)
 if errors.Is(err, den.ErrRevisionConflict) {
     // Re-read the latest version and decide how to proceed
     latest, _ := den.FindByID[Product](ctx, db, p.ID)
     latest.Price = 29.99
-    err = den.Update(ctx, db, latest)
+    err = den.Save(ctx, db, latest)
 }
 ```
 
@@ -3606,7 +3573,7 @@ if errors.Is(err, den.ErrRevisionConflict) {
 Use `den.IgnoreRevision()` to bypass the revision check and force-write:
 
 ```go
-err := den.Update(ctx, db, p, den.IgnoreRevision())
+err := den.Save(ctx, db, p, den.IgnoreRevision())
 ```
 
 !!! warning
@@ -3630,7 +3597,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
     // The revision check ensures no one modified the document
     // between our read and this write.
-    return den.Update(ctx, tx, p)
+    return den.Save(ctx, tx, p)
 })
 ```
 
@@ -3644,7 +3611,7 @@ for range 3 {
             return err
         }
         p.Price = 29.99
-        return den.Update(ctx, tx, p)
+        return den.Save(ctx, tx, p)
     })
     if !errors.Is(err, den.ErrRevisionConflict) {
         break
@@ -3702,15 +3669,7 @@ The `Validate(ctx)` hook is called automatically before every `Insert` and `Upda
 
 ## Struct Tag Validation
 
-For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. Enable it with `validate.WithValidation()` when opening the database:
-
-```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
-```
-
-Then add `validate` tags to your struct fields:
+For structural validation rules, Den integrates with [go-playground/validator](https://github.com/go-playground/validator) via the `validate` package. **Tag validation is always-on** — any `validate:"..."` tag is enforced by Den on every `Insert` and `Update`, no opt-in required:
 
 ```go
 type User struct {
@@ -3722,8 +3681,7 @@ type User struct {
 }
 ```
 
-!!! note
-    Without `validate.WithValidation()`, only the `Validate()` hook runs. Tag validation is opt-in for backward compatibility.
+The `validate/` package also exports `validate.Struct(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The returned `*validate.Errors` mirrors what Den's write path would have produced.
 
 ## Execution Order
 
@@ -3747,7 +3705,7 @@ If tag validation fails, the `Validate()` hook is not called. Either step aborts
 Validation errors are wrapped with `den.ErrValidation`:
 
 ```go
-err := den.Insert(ctx, db, &user)
+err := den.Save(ctx, db, &user)
 if errors.Is(err, den.ErrValidation) {
     fmt.Println("Validation failed:", err)
 }
@@ -3783,11 +3741,11 @@ func (u *User) Validate(ctx context.Context) error {
 ```
 
 ```go
-db, _ := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
+db, _ := den.OpenURL(ctx, "sqlite:///data.db")
 den.Register(ctx, db, &User{})
 
 user := &User{Username: "ab", Email: "invalid"}
-err := den.Insert(ctx, db, user)
+err := den.Save(ctx, db, user)
 // err wraps den.ErrValidation — "ab" is too short, "invalid" is not a valid email
 ```
 
@@ -3858,7 +3816,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Title = note.Name
-                if err := den.Update(ctx, tx, note); err != nil {
+                if err := den.Save(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -3870,7 +3828,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Name = note.Title
-                if err := den.Update(ctx, tx, note); err != nil {
+                if err := den.Save(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -3953,7 +3911,7 @@ r.Register("20250410_001_normalize_prices", migrate.Migration{
                 return err
             }
             product.Price = math.Round(product.Price*100) / 100
-            if err := den.Update(ctx, tx, product); err != nil {
+            if err := den.Save(ctx, tx, product); err != nil {
                 return err
             }
         }
@@ -4012,7 +3970,7 @@ func TestProductInsert(t *testing.T) {
 
     ctx := context.Background()
     p := &Product{Name: "Widget", Price: 9.99}
-    err := den.Insert(ctx, db, p)
+    err := den.Save(ctx, db, p)
     require.NoError(t, err)
     assert.NotEmpty(t, p.ID)
 
@@ -4036,7 +3994,7 @@ func TestProductInsertPG(t *testing.T) {
 
     ctx := context.Background()
     p := &Product{Name: "Widget", Price: 9.99}
-    err := den.Insert(ctx, db, p)
+    err := den.Save(ctx, db, p)
     require.NoError(t, err)
 
     found, err := den.FindByID[Product](ctx, db, p.ID)
@@ -4065,7 +4023,7 @@ func TestProductLifecycle(t *testing.T) {
 
     // Insert
     p := &Product{Name: "Gadget", Price: 19.99}
-    require.NoError(t, den.Insert(ctx, db, p))
+    require.NoError(t, den.Save(ctx, db, p))
     assert.NotEmpty(t, p.ID)
 
     // Query
@@ -4078,7 +4036,7 @@ func TestProductLifecycle(t *testing.T) {
 
     // Update
     p.Price = 24.99
-    require.NoError(t, den.Update(ctx, db, p))
+    require.NoError(t, den.Save(ctx, db, p))
 
     refreshed, err := den.FindByID[Product](ctx, db, p.ID)
     require.NoError(t, err)
@@ -4105,31 +4063,29 @@ Patterns most apps need eventually. Each recipe is a few lines of code with the 
 
 ## Update one field on one known document
 
-When you know the ID and only want to flip a single field, route through `FindOneAndUpdate` so the update is atomic and avoids the read-modify-write round-trip:
+When you know the ID and only want to flip a single field, route through `QuerySet.UpdateOne` so the update is atomic and avoids the read-modify-write round-trip:
 
 ```go
-done, err := den.FindOneAndUpdate[Todo](ctx, db,
-    den.SetFields{"done": true},
-    []where.Condition{where.Field("_id").Eq(todoID)},
-)
+done, err := den.NewQuery[Todo](db, where.Field("_id").Eq(todoID)).
+    UpdateOne(ctx, den.SetFields{"done": true})
 ```
 
-Returns `ErrNotFound` if the document was deleted between your read and this call. If the document carries `document.SoftDelete` and you want to flip a field on a soft-deleted doc, add `den.IncludeDeleted()`.
+Returns `ErrNotFound` if the document was deleted between your read and this call. If the document carries `document.SoftDelete` and you want to flip a field on a soft-deleted doc, chain `.IncludeDeleted()`.
 
-→ [`FindOneAndUpdate`](crud.md#findoneandupdate)
+→ [`QuerySet.UpdateOne`](crud.md#updateone)
 
 ---
 
 ## Find or create with defaults
 
-Atomic find-or-create using `FindOneAndUpsert`. The `defaults` template is used only on miss; `fields` is applied on both branches (pass `den.SetFields{}` if you want existing rows untouched):
+Atomic find-or-create using `QuerySet.UpsertOne`. The `defaults` template is used only on miss; `fields` is applied on both branches (pass `den.SetFields{}` if you want existing rows untouched):
 
 ```go
-user, inserted, err := den.FindOneAndUpsert[User](ctx, db,
-    &User{Email: "x@y.z", LoginCount: 0},   // defaults — applied on miss only
-    den.SetFields{"last_seen": time.Now()}, // applied on both paths
-    []where.Condition{where.Field("email").Eq("x@y.z")},
-)
+user, inserted, err := den.NewQuery[User](db, where.Field("email").Eq("x@y.z")).
+    UpsertOne(ctx,
+        &User{Email: "x@y.z", LoginCount: 0},   // defaults — applied on miss only
+        den.SetFields{"last_seen": time.Now()}, // applied on both paths
+    )
 if inserted {
     log.Println("created new user")
 }
@@ -4137,13 +4093,13 @@ if inserted {
 
 Concurrent inserts that both miss race on the unique constraint — one wins, the other gets `ErrDuplicate`. There is no internal retry; callers decide.
 
-→ [`FindOneAndUpsert`](crud.md#findoneandupsert)
+→ [`QuerySet.UpsertOne`](crud.md#upsertone)
 
 ---
 
 ## Atomic counter increment
 
-`FindOneAndUpdate` plus a tx for the read-then-write. The simplest correct version under contention uses `ForUpdate` to lock the row:
+`QuerySet.UpdateOne` plus a tx for the read-then-write. The simplest correct version under contention uses `ForUpdate` to lock the row:
 
 ```go
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
@@ -4154,7 +4110,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         return err
     }
     counter.Value++
-    return den.Update(ctx, tx, counter)
+    return den.Save(ctx, tx, counter)
 })
 ```
 
@@ -4184,7 +4140,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     }
     job.Status = "in_flight"
     job.WorkerID = workerID
-    return den.Update(ctx, tx, job)
+    return den.Save(ctx, tx, job)
 })
 ```
 
@@ -4262,11 +4218,7 @@ You have a stream of records to ingest, and the natural deduplication key is a u
 
 ```go
 for _, record := range incoming {
-    _, _, err := den.FindOneAndUpsert[Customer](ctx, db,
-        &Customer{Email: record.Email, Name: record.Name, Source: "import"},
-        den.SetFields{"name": record.Name, "last_synced_at": time.Now()},
-        []where.Condition{where.Field("email").Eq(record.Email)},
-    )
+    _, _, err := den.NewQuery[Customer](db, where.Field("email").Eq(record.Email)).UpsertOne(ctx, &Customer{Email: record.Email, Name: record.Name, Source: "import"}, den.SetFields{"name": record.Name, "last_synced_at": time.Now()})
     if err != nil {
         return err
     }
@@ -4275,9 +4227,9 @@ for _, record := range incoming {
 
 If two ingest workers race on the same email, one wins and the other gets `ErrDuplicate` from the unique constraint — handle by retrying, logging, or surfacing depending on your semantics.
 
-For *batch* ingests with no per-record uniqueness needs, prefer `InsertMany(ctx, db, docs, den.ContinueOnError())` — much faster, returns an `*InsertManyError` listing per-document failures by input index.
+For *batch* ingests with no per-record uniqueness needs, prefer `SaveAll(ctx, db, docs)` — much faster, but fail-fast: any per-doc error rolls back the whole transaction.
 
-→ [`FindOneAndUpsert`](crud.md#findoneandupsert) · [`InsertMany`](crud.md#insertmany)
+→ [`QuerySet.UpsertOne`](crud.md#upsertone) · [`SaveAll`](crud.md#saveall)
 
 ---
 
@@ -4306,41 +4258,34 @@ Module: `github.com/oliverandrich/den`
 
 Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interface satisfied by both `*DB` (operating outside a transaction) and `*Tx` (operating inside `RunInTransaction`). Pass whichever you have.
 
-### Insert
+### Save
 
 | Function | Signature | Description |
 |---|---|---|
-| `Insert[T]` | `Insert[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Insert a single document. ID is auto-generated (ULID) if empty |
-| `InsertMany[T]` | `InsertMany[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Insert multiple documents in a single batch. When `s` is `*DB`, the batch runs in a new transaction; when `s` is `*Tx`, it runs inline in the caller's transaction. Honors `PreValidate()` and `ContinueOnError()` |
+| `Save[T]` | `Save[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Persist a single document. Empty-ID docs take the insert path (ULID assigned); ID-bearing docs take the update path. Hooks fire on whichever branch runs |
+| `SaveAll[T]` | `SaveAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Persist every doc in the slice in a single transaction. Mixed batches (some empty-ID, some not) are supported. Fail-fast: any per-doc error rolls back the transaction |
 
 ### Read
 
 | Function | Signature | Description |
 |---|---|---|
-| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string) (*T, error)` | Find a document by its ID (direct key lookup) |
-| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string) ([]*T, error)` | Find multiple documents by their IDs |
-
-### Update
-
-| Function | Signature | Description |
-|---|---|---|
-| `Update[T]` | `Update[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Update an existing document (full document write) |
-| `FindOneAndUpdate[T]` | `FindOneAndUpdate[T](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error)` | Atomically find the single matching document, apply field updates, and return the modified document. Returns `ErrNotFound` on miss and `ErrMultipleMatches` if more than one row matches |
-| `FindOneAndUpsert[T]` | `FindOneAndUpsert[T](ctx context.Context, s Scope, defaults *T, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, bool, error)` | Atomic find-or-create-then-update. `defaults` is used only on miss; `fields` is applied on both paths. Returns `(doc, inserted, err)`. `IncludeDeleted()` makes soft-deleted matches satisfy the lookup |
-| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T) error` | Re-read the document from storage, replacing all field values |
+| `FindByID[T]` | `FindByID[T](ctx context.Context, s Scope, id string, opts ...CRUDOption) (*T, error)` | Find a document by its ID (direct key lookup). Bypasses the soft-delete filter — explicit-by-ID lookups always return the row if present. Callers can check `Value.IsDeleted()` |
+| `FindByIDs[T]` | `FindByIDs[T](ctx context.Context, s Scope, ids []string, opts ...CRUDOption) ([]*T, error)` | Find multiple documents by their IDs. Same soft-delete contract as `FindByID` |
+| `Refresh[T]` | `Refresh[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Re-read the document from storage, replacing all field values |
+| `RefreshAll[T]` | `RefreshAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Re-read every doc in the slice from storage in one transaction. Fail-fast |
 
 ### Delete
 
 | Function | Signature | Description |
 |---|---|---|
 | `Delete[T]` | `Delete[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Delete a document. Soft-deletes if the document embeds `SoftDelete` |
-| `DeleteMany[T]` | `DeleteMany[T](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error)` | Delete all documents matching the given conditions. Auto-wraps a transaction when `s` is `*DB` |
-| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document. Compose with other options: `Delete(ctx, scope, doc, den.HardDelete())` |
-| `IncludeDeleted` | `IncludeDeleted() CRUDOption` | CRUDOption that makes lookup-style operations (`FindOneAndUpdate`, `FindOneAndUpsert`) consider soft-deleted documents in the match. Mirrors `QuerySet.IncludeDeleted()` so the same name covers both query-driven reads and CRUD-style lookups |
-| `SoftDeleteBy` | `SoftDeleteBy(actor string) CRUDOption` | CRUDOption for `Delete` that records an actor on the document's `DeletedBy` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
-| `SoftDeleteReason` | `SoftDeleteReason(reason string) CRUDOption` | CRUDOption for `Delete` that records a free-form reason on the document's `DeleteReason` field. Silently no-op on `HardDelete()` and on types that do not embed `SoftDelete` |
-| `PreValidate` | `PreValidate() CRUDOption` | CRUDOption for `InsertMany` that runs validation on every document before opening the write transaction. Hooks fire once per document (pre-pass only); combining with `WithLinkRule(LinkWrite)` disables the optimization and hooks fire twice |
-| `ContinueOnError` | `ContinueOnError() CRUDOption` | CRUDOption for `InsertMany` that writes each document in its own transaction; failures aggregate into an `*InsertManyError` |
+| `DeleteAll[T]` | `DeleteAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Delete every doc in the slice in one transaction. Fail-fast |
+| `HardDelete` | `HardDelete() CRUDOption` | CRUDOption for `Delete` that permanently removes a soft-deleteable document |
+| `IncludeDeleted` | `IncludeDeleted() CRUDOption` | CRUDOption that makes by-ID lookups (`FindByID`, `FindByIDs`) consider soft-deleted documents. Mirrors `QuerySet.IncludeDeleted()` |
+| `SoftDeleteBy` | `SoftDeleteBy(actor string) CRUDOption` | CRUDOption for `Delete` that records an actor on the document's `DeletedBy` field. No-op on `HardDelete()` and on types that don't embed `SoftDelete` |
+| `SoftDeleteReason` | `SoftDeleteReason(reason string) CRUDOption` | CRUDOption for `Delete` that records a free-form reason on the document's `DeleteReason` field. No-op on `HardDelete()` and on types that don't embed `SoftDelete` |
+
+> **By-condition writes** (find-and-update, find-or-create, bulk update, bulk delete, back-links) live on `QuerySet` — see the [Query](#query) section below. There is no top-level `FindOneAndUpdate` / `FindOneAndUpsert` / `FindOrCreate` / `UpdateMany` / `DeleteMany` / `BackLinks` anymore: build a chain with `NewQuery[T](db, conds...)` and call the matching terminal (`UpdateOne`, `UpsertOne`, `GetOrCreate`, `Update`, `Delete`, `BackLinks`).
 
 ---
 
@@ -4388,6 +4333,11 @@ Every terminal takes `ctx context.Context` as its first argument, so the same `Q
 | `AllWithCount` | `AllWithCount(ctx context.Context) ([]*T, int64, error)` | Return matching documents and total count (for pagination) |
 | `Iter` | `Iter(ctx context.Context) iter.Seq2[*T, error]` | Return a lazy iterator for streaming results with `range`. Terminates on the first error |
 | `Update` | `Update(ctx context.Context, fields SetFields) (int64, error)` | Bulk update every matching document and return the count. Fail-fast: any per-row error rolls back the transaction and returns `(0, err)`. Field names are validated before the tx opens |
+| `UpdateOne` | `UpdateOne(ctx context.Context, fields SetFields) (*T, error)` | Atomic find-and-modify on a single matching row. Returns `ErrNotFound` on miss and `ErrMultipleMatches` if more than one row matches |
+| `UpsertOne` | `UpsertOne(ctx context.Context, defaults *T, fields SetFields) (*T, bool, error)` | Find-or-create-then-update. `defaults` is used only on miss; `fields` is applied on both paths. Returns `(doc, inserted, err)` |
+| `GetOrCreate` | `GetOrCreate(ctx context.Context, defaults *T) (*T, bool, error)` | Find-or-create with no post-find update. Equivalent to `UpsertOne(ctx, defaults, SetFields{})` |
+| `Delete` | `Delete(ctx context.Context, opts ...CRUDOption) (int64, error)` | Delete every matching row and return the count. Drains the iterator before issuing per-row writes so cursor pinning on PostgreSQL is safe. Soft-delete routing and `HardDelete` apply per row |
+| `BackLinks` | `BackLinks(linkField string, targetID string) QuerySet[T]` | Chainable: narrow the QuerySet to documents that reference `targetID` via the named link field. Compose with `WithFetchLinks` / `IncludeDeleted` / `Sort` / `Limit` etc. and dispatch with any terminal |
 | `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
 
 ---
@@ -4433,8 +4383,9 @@ err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 | `NewLink[T]` | `NewLink[T any](doc *T) Link[T]` | Create a Link from an existing document, extracting its ID |
 | `FetchLink[T]` | `FetchLink[T](ctx context.Context, s Scope, doc *T, field string) error` | Fetch and resolve a single link field on a document |
 | `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, s Scope, doc *T) error` | Fetch and resolve all link fields on a document |
-| `BackLinks[T]` | `BackLinks[T](ctx context.Context, s Scope, linkField string, targetID string) ([]*T, error)` | Find all documents of type T that reference the given target ID via the named link field |
 | `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
+
+Reverse queries live on `QuerySet`: `den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)` — see the [Terminal Methods](#terminal-methods) table.
 
 ### Link Rules
 
@@ -4614,7 +4565,7 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 | `Tx` | Transaction handle; wraps a backend transaction. Satisfies `Scope` |
 | `Scope` | Sealed interface satisfied by `*DB` and `*Tx`. Parameter type for all CRUD entry points so the same function works inside and outside a transaction |
 | `Link[T]` | Generic reference to a document in another collection; stores ID, optionally holds resolved Value |
-| `SetFields` | `map[string]any` used for partial updates via `FindOneAndUpdate`, `FindOneAndUpsert`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
+| `SetFields` | `map[string]any` used for partial updates via `QuerySet.UpdateOne`, `UpsertOne`, and bulk `Update`. Field names are validated against the registered struct before the tx opens |
 | `Settings` | Document-level settings (collection name, revision, nesting depth, indexes) |
 | `QuerySet[T]` | Chainable, lazy query builder |
 | `SortDirection` | Sort direction: `den.Asc` or `den.Desc` |
@@ -4805,12 +4756,12 @@ Import: `github.com/oliverandrich/den`
 
 | Error | Description | When Returned |
 |---|---|---|
-| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh`, `Update`, `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
-| `ErrMultipleMatches` | A single-document lookup matched more than one row | `FindOneAndUpdate`, `FindOneAndUpsert` when conditions match more than one document. The conditions must identify the document uniquely |
-| `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
-| `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision (another process modified it) |
+| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `UpdateOne`, `Refresh`, `Save` (update branch), `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
+| `ErrMultipleMatches` | A single-document lookup matched more than one row | `QuerySet.UpdateOne` / `UpsertOne` / `GetOrCreate` when conditions match more than one document. The conditions must identify the document uniquely |
+| `ErrDuplicate` | Unique index constraint violated | `Save` when a document with the same unique field value already exists |
+| `ErrRevisionConflict` | Optimistic concurrency check failed | `Save` (update branch) when the document's `_rev` does not match the stored revision (another process modified it) |
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
-| `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when the document's `Validate()` method or struct tag validation fails |
+| `ErrValidation` | Validation hook returned an error | `Save` when the document's `Validate()` method or struct tag validation fails |
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
@@ -4819,10 +4770,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized | PostgreSQL SQLSTATE `40001`. Becomes relevant once callers opt into stricter isolation levels; standard Den operations using the default isolation level rarely see this |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend does not provide an `FTSProvider` implementation |
 | `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
-| `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` called against a `*Tx` (the caller's transaction cannot be split into per-document transactions) |
-| `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions were combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
 | `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
-| `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel. Returned only when at least one document failed; nil otherwise |
 
 ---
 
@@ -4837,7 +4785,7 @@ if errors.Is(err, den.ErrNotFound) {
 ```
 
 ```go
-err := den.Insert(ctx, db, &product)
+err := den.Save(ctx, db, &product)
 if errors.Is(err, den.ErrDuplicate) {
     // handle unique constraint violation
     log.Println("a product with that SKU already exists")
@@ -4845,7 +4793,7 @@ if errors.Is(err, den.ErrDuplicate) {
 ```
 
 ```go
-err := den.Update(ctx, db, &product)
+err := den.Save(ctx, db, &product)
 if errors.Is(err, den.ErrRevisionConflict) {
     // re-read and retry, or inform the user
     log.Println("document was modified by another process")
@@ -4859,7 +4807,7 @@ if errors.Is(err, den.ErrRevisionConflict) {
 When using the `validate` sub-package (`github.com/oliverandrich/den/validate`), validation errors can be unwrapped to access per-field details:
 
 ```go
-err := den.Insert(ctx, db, &user)
+err := den.Save(ctx, db, &user)
 if errors.Is(err, den.ErrValidation) {
     var ve *validate.Errors
     if errors.As(err, &ve) {
@@ -4898,7 +4846,7 @@ Den uses three struct tags: `json` for serialization, `den` for Den-specific met
 |---|---|---|
 | `json` | Sets the serialized field name (the key stored in JSONB) | `json:"name"` |
 | `den` | Den-specific metadata (index/unique/fts on documents; `from:` on projections; `count`/`sum:`/`group_key` on aggregations) | `den:"index"` |
-| `validate` | Struct tag validation rules (requires `validate.WithValidation()`) | `validate:"required,email"` |
+| `validate` | Struct tag validation rules (always enforced) | `validate:"required,email"` |
 
 ---
 
@@ -5030,13 +4978,7 @@ Composite unique indexes include a `WHERE ... IS NOT NULL` clause for all partic
 
 ## The `validate` Tag
 
-When `validate.WithValidation()` is passed as an option to `den.OpenURL` or `den.Open`, Den validates documents using `go-playground/validator` struct tags before insert and update operations.
-
-```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
-```
+Den validates documents using `go-playground/validator` struct tags before every insert and update operation. Validation is always-on — there is no opt-in option and no way to bypass `validate:` constraints from inside Den.
 
 ```go
 type User struct {
@@ -5228,16 +5170,17 @@ db, err := den.OpenURL(ctx, "postgresql://user:pass@localhost/mydb")
 `OpenURL` accepts functional options:
 
 ```go
-import "github.com/oliverandrich/den/validate"
-
-db, err := den.OpenURL(ctx, "sqlite:///data.db", validate.WithValidation())
+db, err := den.OpenURL(ctx, "sqlite:///data.db",
+    den.WithTypes(&Product{}, &Order{}),
+)
 ```
 
 | Option | Package | Description |
 |---|---|---|
 | `den.WithTypes(types...)` | `den` | Register the listed document types during `Open` instead of a separate `Register` call. Zero-value struct pointers, e.g. `den.WithTypes(&Product{}, &Order{})` |
 | `den.WithStorage(s)` | `den` | Install a [`Storage`](../guide/attachments.md) for documents carrying `document.Attachment` fields |
-| `validate.WithValidation()` | `den/validate` | Enable struct tag validation using `go-playground/validator` |
+
+Struct-tag validation (`validate:"..."`) runs automatically on every insert and update — no option required. See [Validation](../guide/validation.md).
 
 ---
 

@@ -67,7 +67,7 @@ func main() {
 
     // Insert a document
     p := &Product{Name: "Widget", Price: 9.99}
-    if err := den.Insert(ctx, db, p); err != nil {
+    if err := den.Save(ctx, db, p); err != nil {
         log.Fatal(err)
     }
     fmt.Printf("Inserted: %s (ID: %s)\n", p.Name, p.ID)

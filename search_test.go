@@ -25,7 +25,7 @@ func TestSearch_SQLite(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go Programming", Body: "Learn Go language basics", Category: "tech"},
 		{Title: "Python Tutorial", Body: "Introduction to Python", Category: "tech"},
 		{Title: "Cooking Tips", Body: "How to make pasta", Category: "food"},
@@ -53,7 +53,7 @@ func TestSearch_HonorsScopeInTx(t *testing.T) {
 
 			var insideHits []*FTSArticle
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				if err := den.Insert(ctx, tx, &FTSArticle{
+				if err := den.Save(ctx, tx, &FTSArticle{
 					Title: "TxLocalSecret", Body: "tx-local body", Category: "tech",
 				}); err != nil {
 					return err
@@ -90,7 +90,7 @@ func TestSearch_RollbackHidesDocs(t *testing.T) {
 
 			rollbackErr := errors.New("force rollback")
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				if err := den.Insert(ctx, tx, &FTSArticle{
+				if err := den.Save(ctx, tx, &FTSArticle{
 					Title: "ShouldNeverReachDisk", Body: "rolled-back body", Category: "tech",
 				}); err != nil {
 					return err
@@ -128,7 +128,7 @@ func TestSearch_TxBoundWhereSeesTxLocal(t *testing.T) {
 
 			var insideHits []*FTSArticle
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-				if err := den.InsertMany(ctx, tx, []*FTSArticle{
+				if err := den.SaveAll(ctx, tx, []*FTSArticle{
 					{Title: "TechPost", Body: "shared keyword tech", Category: "tech"},
 					{Title: "FoodPost", Body: "shared keyword food", Category: "food"},
 				}); err != nil {
@@ -154,7 +154,7 @@ func TestSearch_SQLite_MultipleResults(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go Basics", Body: "Learn Go", Category: "tech"},
 		{Title: "Advanced Go", Body: "Go concurrency patterns", Category: "tech"},
 		{Title: "Python Basics", Body: "Learn Python", Category: "tech"},
@@ -169,7 +169,7 @@ func TestSearch_SQLite_WithFilter(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go Web", Body: "Building web apps with Go", Category: "tech"},
 		{Title: "Go Cooking", Body: "Go to recipes for beginners", Category: "food"},
 	}))
@@ -184,7 +184,7 @@ func TestSearch_SQLite_WithLimit(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go One", Body: "First Go article", Category: "tech"},
 		{Title: "Go Two", Body: "Second Go article", Category: "tech"},
 		{Title: "Go Three", Body: "Third Go article", Category: "tech"},
@@ -199,7 +199,7 @@ func TestSearch_SQLite_NoResults(t *testing.T) {
 	db := dentest.MustOpen(t, &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
+	require.NoError(t, den.Save(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
 
 	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "nonexistent")
 	require.NoError(t, err)
@@ -210,7 +210,7 @@ func TestSearch_Postgres(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go Programming", Body: "Learn Go language basics", Category: "tech"},
 		{Title: "Python Tutorial", Body: "Introduction to Python", Category: "tech"},
 		{Title: "Cooking Tips", Body: "How to make pasta", Category: "food"},
@@ -226,7 +226,7 @@ func TestSearch_Postgres_WithFilter(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go Web", Body: "Building web apps with Go", Category: "tech"},
 		{Title: "Go Cooking", Body: "Go to recipes for beginners", Category: "food"},
 	}))
@@ -241,7 +241,7 @@ func TestSearch_Postgres_WithLimit(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+	require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 		{Title: "Go One", Body: "First Go article", Category: "tech"},
 		{Title: "Go Two", Body: "Second Go article", Category: "tech"},
 		{Title: "Go Three", Body: "Third Go article", Category: "tech"},
@@ -264,7 +264,7 @@ func TestSearch_HonorsAfterCursor(t *testing.T) {
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*FTSArticle{
+			require.NoError(t, den.SaveAll(ctx, db, []*FTSArticle{
 				{Title: "Go One", Body: "First Go article"},
 				{Title: "Go Two", Body: "Second Go article"},
 				{Title: "Go Three", Body: "Third Go article"},
@@ -287,7 +287,7 @@ func TestSearch_Postgres_NoResults(t *testing.T) {
 	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
+	require.NoError(t, den.Save(ctx, db, &FTSArticle{Title: "Hello", Body: "World"}))
 
 	results, err := den.NewQuery[FTSArticle](db).Search(ctx, "nonexistent")
 	require.NoError(t, err)

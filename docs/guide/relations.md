@@ -107,7 +107,7 @@ Use `NewLink` to create a link from an existing document:
 
 ```go
 door := &Door{Height: 200, Width: 90}
-den.Insert(ctx, db, door)
+den.Save(ctx, db, door)
 
 house := &House{
     Name: "Lakehouse",
@@ -198,7 +198,7 @@ Three modes interact with the tag:
 
 The default-mode resolver still uses the same batched `WHERE _id IN (…)` path on `.All` / `.AllWithCount` / `.Search`, so eager fields cost one extra query per target type per page rather than N+1.
 
-The CRUD-style read APIs honor the same tag without a QuerySet: `FindByID`, `FindByIDs`, `Refresh`, `BackLinks`, `BackLinksField`, `FindOneAndUpdate`, `FindOneAndUpsert`, and `FindOrCreate` all hydrate eager-tagged fields by default. The `den.WithoutFetchLinks()` CRUDOption is the opt-out, mirroring the QuerySet modifier.
+The doc-in-hand read APIs honor the same tag: `FindByID`, `FindByIDs`, and `Refresh` all hydrate eager-tagged fields by default. The `den.WithoutFetchLinks()` CRUDOption is the opt-out, mirroring the `QuerySet.WithoutFetchLinks()` chain method that covers the QuerySet-driven reads and write terminals (`UpdateOne`, `UpsertOne`, `GetOrCreate`).
 
 ```go
 // FindByID honors den:"eager" — Door is hydrated, Owner is not.
@@ -228,10 +228,10 @@ soft-deleted record; callers can detect this via
 
 ```go
 target := &Account{Name: "x"}
-den.Insert(ctx, db, target)
+den.Save(ctx, db, target)
 
 holder := &Holder{Account: den.NewLink(target)}
-den.Insert(ctx, db, holder)
+den.Save(ctx, db, holder)
 
 den.Delete(ctx, db, target) // soft-delete
 
@@ -266,7 +266,7 @@ Control whether linked documents are automatically saved when the parent is inse
 Only the root document is written. Linked documents must already exist in the database:
 
 ```go
-err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkIgnore))
 // Saves only the House -- Door and Windows must already be inserted
 ```
 
@@ -283,7 +283,7 @@ house := &House{
     },
 }
 
-err := den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 // Saves House, Door, and all Windows in one operation
 ```
 
@@ -291,7 +291,7 @@ This also works with `Update`:
 
 ```go
 house.Door = den.NewLink(&Door{Height: 210, Width: 95})
-err := den.Update(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+err := den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 // Updates the House and inserts/replaces the new Door
 ```
 
@@ -327,27 +327,17 @@ Find all documents of a given type that reference a specific document via a link
 
 ```go
 // Find all Houses that reference a specific Door
-houses, err := den.BackLinks[House](ctx, db, "door", doorID)
+houses, err := den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)
 ```
 
-Read the parameter order as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the string is the JSON tag name of that link field; the third argument is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every `BackLinks` call against this collection — keep the tag stable, or use the typed variant below.
+Read the chain as a sentence: **"Find `[House]`s where field `door` equals `doorID`."** The type parameter is the *holding* type (the side that has the `Link` field); the first argument to `BackLinks` is the JSON tag name of that link field; the second is the target ID being pointed at. Renaming the JSON tag on `House.Door` silently breaks every such call — keep the tag stable.
+
+`BackLinks` is a QuerySet modifier, so it composes with `WithFetchLinks` / `IncludeDeleted` / `Sort` / `Limit` etc., and the terminal (`.All(ctx)`, `.First(ctx)`, etc.) decides what to return.
 
 This is useful for answering "who links to this document?" without maintaining an explicit reverse reference field.
 
-### Typed variant: `BackLinksField[H, T]`
-
-When the holder has exactly one `Link[T]` field for the target type, the typed variant skips the string field name entirely:
-
-```go
-houses, err := den.BackLinksField[House, Door](ctx, db, doorID)
-```
-
-The framework walks `House`'s fields once, finds the unique `Link[Door]` field, and uses its JSON tag for the underlying query. Renaming the JSON tag is caught at the next call instead of silently returning wrong results. Two type parameters are required (Go can't infer them from the `targetID string`), but the call is otherwise identical.
-
-The string-based form stays for two cases the typed lookup deliberately rejects with a clear error:
-
-- **Multiple `Link[T]` fields on the holder** (e.g. `FrontDoor` and `BackDoor` both `Link[Door]`) — disambiguate by passing the explicit JSON tag to `BackLinks`.
-- **Slice-link fields** (`[]Link[T]`) — the underlying query uses `Eq`, which doesn't match against array contents. Use a manual `where.Field("...").Contains(targetID)` query for slice-link backlinks.
+!!! note "Slice-link fields"
+    `BackLinks` uses `Eq`, which doesn't match against array contents. For `[]Link[T]` slice-link fields, use a manual `where.Field("...").Contains(targetID)` query instead.
 
 ## Nesting Depth
 
@@ -411,7 +401,7 @@ func main() {
             den.NewLink(&Window{X: 120, Y: 60}),
         },
     }
-    den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite))
+    den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite))
 
     // Schema-level eager: Door is hydrated automatically — no
     // WithFetchLinks() needed. Windows stays lazy because it's
@@ -424,7 +414,7 @@ func main() {
     fmt.Println(found.Windows[0].IsLoaded())      // false — lazy
 
     // Back-links: find houses referencing this door
-    houses, _ := den.BackLinks[House](ctx, db, "door", found.Door.ID)
+    houses, _ := den.NewQuery[House](db).BackLinks("door", found.Door.ID).All(ctx)
     fmt.Println(len(houses)) // 1
 
     // Cascade delete

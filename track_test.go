@@ -24,7 +24,7 @@ func TestIsChanged_NoChanges(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestIsChanged_WithChanges(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestGetChanges(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestGetChanges_NoChanges(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestGetChanges_FieldRemoved(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -131,13 +131,13 @@ func TestUpdate_RefreshesSnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
 
 	found.Price = 20.0
-	require.NoError(t, den.Update(ctx, db, found))
+	require.NoError(t, den.Save(ctx, db, found))
 
 	// After Update, snapshot should be refreshed
 	changed, err := den.IsChanged(db, found)
@@ -150,7 +150,7 @@ func TestRevert(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestIsChanged_ViaIter(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	for doc, err := range den.NewQuery[TrackedProduct](db).Iter(ctx) {
 		require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestTrackedSoftDelete_Composition(t *testing.T) {
 	ctx := context.Background()
 
 	p := &TrackedSoftProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[TrackedSoftProduct](ctx, db, p.ID)
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestIsChanged_UntrackedType(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	found, err := den.FindByID[Product](ctx, db, p.ID)
 	require.NoError(t, err)

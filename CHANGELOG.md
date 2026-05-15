@@ -4,11 +4,21 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Added
+
+- **`Save` / `SaveAll` / `DeleteAll` / `RefreshAll`** as the doc-in-hand top-level entry points. `Save` inspects the document ID and routes to the insert or update path; `SaveAll` / `DeleteAll` / `RefreshAll` apply the same per-doc operation across a slice inside a single transaction.
+
+- **`QuerySet.Delete` / `UpdateOne` / `UpsertOne` / `GetOrCreate` / `BackLinks`** write terminals. By-condition mutations now live on the QuerySet so the same chain (`Where(...).IncludeDeleted()…`) composes for read and write paths. `QuerySet.Delete` drains its iterator before issuing per-row writes, which fixes a latent pgx "conn busy" failure under cursor pinning.
+
 ### Changed
 
-- **Hydration depth is now uniform across every read terminal.** `FindByID`, `Refresh`, `Iter`, and `FindOneAndUpsert` (insert branch) used to be silently single-level even when the caller had requested deeper recursion (e.g. via `WithNestingDepth`); they now route through the same batched resolver as `All` / `AllWithCount` / `Search` and recurse up to `nestDepth` (or `defaultNestingDepth=3` for the non-QuerySet reads). `FetchAllLinks` keeps its fixed one-hop contract — callers needing transitive hydration use a QuerySet terminal. Affects only docs with nested eager-tagged or `WithFetchLinks` link chains; flat-graph reads are unchanged.
+- **Hydration depth is now uniform across every read terminal.** `FindByID`, `Refresh`, `Iter`, and the upsert insert branch used to be silently single-level even when the caller had requested deeper recursion (e.g. via `WithNestingDepth`); they now route through the same batched resolver as `All` / `AllWithCount` / `Search` and recurse up to `nestDepth` (or `defaultNestingDepth=3` for the non-QuerySet reads). `FetchAllLinks` keeps its fixed one-hop contract — callers needing transitive hydration use a QuerySet terminal. Affects only docs with nested eager-tagged or `WithFetchLinks` link chains; flat-graph reads are unchanged.
 
 ### Removed
+
+- **`Insert` / `Update` / `InsertMany` / `UpdateMany` / `DeleteMany` / `FindOneAndUpdate` / `FindOneAndUpsert` / `FindOrCreate` / `BackLinks` / `BackLinksField` top-level functions.** Doc-in-hand writes go through `Save` / `SaveAll`; by-condition writes go through the new `QuerySet` terminals (`Delete`, `UpdateOne`, `UpsertOne`, `GetOrCreate`, `BackLinks`). The two-surface split (CRUD vs QuerySet) is gone — there is one chainable builder for filtering and one set of `Save*` / `Delete*` helpers for in-hand docs. Mapping: `Insert(...)` and `Update(...)` → `Save(...)`; `InsertMany(...)` → `SaveAll(...)`; `UpdateMany(...)` → `NewQuery[T](s, conds...).Update(ctx, fields)`; `DeleteMany(...)` → `NewQuery[T](s, conds...).Delete(ctx)`; `FindOneAndUpdate(...)` → `NewQuery[T](s, conds...).UpdateOne(ctx, fields)`; `FindOneAndUpsert(...)` → `NewQuery[T](s, conds...).UpsertOne(ctx, defaults, fields)`; `FindOrCreate(...)` → `NewQuery[T](s, conds...).GetOrCreate(ctx, defaults)`; `BackLinks[T](...)` → `NewQuery[T](s).BackLinks(field, id).All(ctx)`; `BackLinksField` has no direct replacement — pick the field name explicitly.
+
+- **`PreValidate` / `ContinueOnError` / `MaxRecordedFailures` options, `InsertManyError` / `InsertFailure` types, `ErrIncompatibleScope` / `ErrIncompatibleOptions` sentinels.** All scaffolding for the removed `InsertMany`. Validation is always-on (see below) so the `PreValidate` opt-in is no-op-equivalent; partial-failure batching has no equivalent on `SaveAll`, which is fail-fast and rolls back the transaction on the first error.
 
 - **`den.WithTagValidator` option and `validate.WithValidation()` helper.** Tag-based field validation is now always-on: Den runs `validate.Struct(doc)` automatically on every Insert and Update — there is no opt-in, no way to bypass `validate:` constraints from inside Den. Migration: delete `den.WithTagValidator(...)` and `validate.WithValidation()` calls from the `Open` / `OpenURL` argument list. Struct tags stay unchanged. `validate.ValidateStruct` renamed to `validate.Struct` for callers that validate outside the Den boundary (HTTP handlers, form parsers).
 

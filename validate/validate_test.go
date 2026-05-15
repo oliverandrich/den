@@ -70,7 +70,7 @@ func TestInsertRequiredFieldEmpty(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Age: 25}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
@@ -82,7 +82,7 @@ func TestInsertMinLengthViolation(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Name: "ab", Email: "test@example.com", Age: 25}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.ErrorIs(t, err, den.ErrValidation)
 
@@ -99,7 +99,7 @@ func TestInsertInvalidEmail(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Name: "Alice", Email: "not-an-email", Age: 25}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
@@ -111,7 +111,7 @@ func TestInsertValidDocument(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Name: "Alice", Email: "alice@example.com", Age: 25}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.NoError(t, err)
 }
@@ -122,7 +122,7 @@ func TestInsertNoValidateTagsNoError(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, NoTagsDoc{}))
 
 	doc := &NoTagsDoc{Title: ""}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.NoError(t, err)
 }
@@ -136,7 +136,7 @@ func TestTagConstraintsAreMandatory(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{} // empty Name + Email — would violate required
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.Error(t, err, "Den must enforce validate-tag constraints unconditionally")
 	require.ErrorIs(t, err, den.ErrValidation)
@@ -148,10 +148,10 @@ func TestUpdateValidationFailure(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Name: "Alice", Email: "alice@example.com", Age: 25}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 
 	doc.Name = "" // violates required
-	err := den.Update(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
@@ -164,17 +164,17 @@ func TestBothTagAndInterfaceValidation(t *testing.T) {
 
 	// Tag validation fails first (empty name)
 	doc := &CustomValidatorDoc{}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 	require.ErrorIs(t, err, den.ErrValidation)
 
 	// Tag passes, interface validation fails
 	doc = &CustomValidatorDoc{Name: "forbidden"}
-	err = den.Insert(ctx, db, doc)
+	err = den.Save(ctx, db, doc)
 	require.ErrorIs(t, err, den.ErrValidation)
 
 	// Both pass
 	doc = &CustomValidatorDoc{Name: "allowed"}
-	err = den.Insert(ctx, db, doc)
+	err = den.Save(ctx, db, doc)
 	require.NoError(t, err)
 }
 
@@ -188,7 +188,7 @@ func TestBeforeInsertPopulatesRequiredTagField(t *testing.T) {
 
 	// Slug is required, but the BeforeInsert hook populates it from Name.
 	doc := &DefaultingTagDoc{Name: "Hello"}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 	require.NoError(t, err)
 	assert.Equal(t, "auto-Hello", doc.Slug)
 }
@@ -202,7 +202,7 @@ func TestInsertManyRollsBackOnValidationError(t *testing.T) {
 		{Name: "Alice", Email: "alice@example.com", Age: 25},
 		{Name: "", Email: "bob@example.com", Age: 30}, // invalid
 	}
-	err := den.InsertMany(ctx, db, docs)
+	err := den.SaveAll(ctx, db, docs)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
@@ -214,7 +214,7 @@ func TestMultipleFieldErrors(t *testing.T) {
 	require.NoError(t, den.Register(ctx, db, ValidatedDoc{}))
 
 	doc := &ValidatedDoc{Name: "ab", Email: "bad", Age: -1}
-	err := den.Insert(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 
 	require.Error(t, err)
 	var ve *validate.Errors

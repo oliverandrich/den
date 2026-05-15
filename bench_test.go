@@ -37,7 +37,7 @@ func seedBenchProducts(b *testing.B, db *den.DB, n int) []string {
 			Price:    float64(i) * 1.5,
 			Category: "cat",
 		}
-		if err := den.Insert(ctx, db, p); err != nil {
+		if err := den.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 		ids[i] = p.ID
@@ -51,7 +51,7 @@ func runInsertBenchmark(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	for b.Loop() {
 		p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-		if err := den.Insert(ctx, db, p); err != nil {
+		if err := den.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -111,7 +111,7 @@ func runQueryIterBenchmark(b *testing.B, db *den.DB, n int) {
 func runUpdateBenchmark(b *testing.B, db *den.DB) {
 	ctx := context.Background()
 	p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-	if err := den.Insert(ctx, db, p); err != nil {
+	if err := den.Save(ctx, db, p); err != nil {
 		b.Fatal(err)
 	}
 
@@ -119,7 +119,7 @@ func runUpdateBenchmark(b *testing.B, db *den.DB) {
 	b.ReportAllocs()
 	for i := range b.N {
 		p.Price = float64(i)
-		if err := den.Update(ctx, db, p); err != nil {
+		if err := den.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -133,7 +133,7 @@ func runDeleteBenchmark(b *testing.B, db *den.DB) {
 	for b.Loop() {
 		b.StopTimer()
 		p := &BenchProduct{Name: "Widget", Price: 9.99, Category: "test"}
-		if err := den.Insert(ctx, db, p); err != nil {
+		if err := den.Save(ctx, db, p); err != nil {
 			b.Fatal(err)
 		}
 		b.StartTimer()

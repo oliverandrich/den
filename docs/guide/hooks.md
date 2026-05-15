@@ -131,7 +131,7 @@ article := &Article{
     Body:  "Den is an ODM for Go...",
 }
 
-err := den.Insert(ctx, db, article)
+err := den.Save(ctx, db, article)
 // 1. BeforeInsert() -- not implemented, skipped
 // 2. BeforeSave() -- sets slug="getting-started-with-den", word_count=6
 // 3. Validate() -- checks title and body are non-empty (sees the final document)
@@ -192,10 +192,10 @@ All hooks run within the same database transaction as the operation. This means:
 err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     // Both inserts (and their hooks) share the same transaction.
     // If the second insert's Validate() fails, both are rolled back.
-    if err := den.Insert(ctx, tx, article1); err != nil {
+    if err := den.Save(ctx, tx, article1); err != nil {
         return err
     }
-    return den.Insert(ctx, tx, article2)
+    return den.Save(ctx, tx, article2)
 })
 ```
 

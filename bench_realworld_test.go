@@ -84,7 +84,7 @@ func rwBenchDBPostgres(b *testing.B) *den.DB {
 func seedAuthor(b *testing.B, db *den.DB) string {
 	b.Helper()
 	a := &BenchAuthor{Name: "Jane Author", Email: "jane@example.com", Bio: "Prolific writer."}
-	if err := den.Insert(context.Background(), db, a); err != nil {
+	if err := den.Save(context.Background(), db, a); err != nil {
 		b.Fatal(err)
 	}
 	return a.ID
@@ -97,7 +97,7 @@ func seedArticles(b *testing.B, db *den.DB, n int, authorID string) []string {
 	for i := range n {
 		docs[i] = makeBenchArticle(i, authorID)
 	}
-	if err := den.InsertMany(ctx, db, docs); err != nil {
+	if err := den.SaveAll(ctx, db, docs); err != nil {
 		b.Fatal(err)
 	}
 	ids := make([]string, n)
@@ -117,7 +117,7 @@ func runRWInsert(b *testing.B, db *den.DB) {
 	i := 0
 	for b.Loop() {
 		doc := makeBenchArticle(i, authorID)
-		if err := den.Insert(ctx, db, doc); err != nil {
+		if err := den.Save(ctx, db, doc); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -140,7 +140,7 @@ func runRWInsertMany(b *testing.B, db *den.DB, batch int) {
 		for j := range batch {
 			docs[j] = makeBenchArticle(i*batch+j, authorID)
 		}
-		if err := den.InsertMany(ctx, db, docs); err != nil {
+		if err := den.SaveAll(ctx, db, docs); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -356,7 +356,7 @@ func runRWUpdate(b *testing.B, db *den.DB) {
 			b.Fatal(err)
 		}
 		doc.Stock++
-		if err := den.Update(ctx, db, doc); err != nil {
+		if err := den.Save(ctx, db, doc); err != nil {
 			b.Fatal(err)
 		}
 		i++
@@ -406,7 +406,7 @@ func runRWTransaction(b *testing.B, db *den.DB) {
 				return err
 			}
 			doc.Stock++
-			return den.Update(ctx, tx, doc)
+			return den.Save(ctx, tx, doc)
 		})
 		if err != nil {
 			b.Fatal(err)

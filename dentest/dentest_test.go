@@ -25,7 +25,7 @@ func TestMustOpen_ReturnsUsableSQLite(t *testing.T) {
 
 	ctx := context.Background()
 	doc := &dentestProbe{Name: "hello"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 
 	found, err := den.FindByID[dentestProbe](ctx, db, doc.ID)
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestMustOpenPostgres_ReturnsUsablePostgres(t *testing.T) {
 
 	ctx := context.Background()
 	doc := &dentestProbe{Name: "hello-pg"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 }
 
 func TestMustOpenPostgresDefault_OpensViaPostgresURL(t *testing.T) {
@@ -55,7 +55,7 @@ func TestMustOpenPostgresDefault_OpensViaPostgresURL(t *testing.T) {
 	// MustOpenPostgres; this test pins the helper exists and works.
 	db := dentest.MustOpenPostgresDefault(t, &dentestProbe{})
 	require.NotNil(t, db)
-	require.NoError(t, den.Insert(context.Background(), db, &dentestProbe{Name: "default"}))
+	require.NoError(t, den.Save(context.Background(), db, &dentestProbe{Name: "default"}))
 }
 
 func TestPostgresURL_FallbackWhenEnvUnset(t *testing.T) {

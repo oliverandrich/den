@@ -55,7 +55,7 @@ func TestParity_InsertAndFindByID(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParityProduct{Name: "Widget", Price: 29.99, Category: "A"}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 			assert.NotEmpty(t, p.ID)
 
 			found, err := den.FindByID[ParityProduct](ctx, db, p.ID)
@@ -70,7 +70,7 @@ func TestParity_FindWithFilter(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "Y"},
 				{Name: "C", Price: 30, Category: "X"},
@@ -87,7 +87,7 @@ func TestParity_FindSortLimitSkip(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 30},
 				{Name: "B", Price: 10},
 				{Name: "C", Price: 20},
@@ -109,7 +109,7 @@ func TestParity_Count(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "Y"},
 				{Name: "C", Price: 30, Category: "X"},
@@ -127,7 +127,7 @@ func TestParity_Delete(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParityProduct{Name: "ToDelete", Price: 10}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 			require.NoError(t, den.Delete(ctx, db, p))
 
 			_, err := den.FindByID[ParityProduct](ctx, db, p.ID)
@@ -141,11 +141,11 @@ func TestParity_Update(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParityProduct{Name: "Original", Price: 10}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 
 			p.Name = "Updated"
 			p.Price = 99
-			require.NoError(t, den.Update(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 
 			found, err := den.FindByID[ParityProduct](ctx, db, p.ID)
 			require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestParity_FindOne(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "Alpha", Price: 10},
 				{Name: "Beta", Price: 20},
 			}))
@@ -175,7 +175,7 @@ func TestParity_Exists(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.Insert(ctx, db, &ParityProduct{Name: "Exists", Price: 10}))
+			require.NoError(t, den.Save(ctx, db, &ParityProduct{Name: "Exists", Price: 10}))
 
 			exists, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Exists")).Exists(ctx)
 			require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestParity_NumericSortOrder(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			// Prices that would sort wrong lexicographically: "9" > "10" > "100"
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "Cheap", Price: 9},
 				{Name: "Mid", Price: 10},
 				{Name: "Expensive", Price: 100},
@@ -213,7 +213,7 @@ func TestParity_StringComparison(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "Alpha", Price: 10},
 				{Name: "Beta", Price: 20},
 				{Name: "Gamma", Price: 30},
@@ -237,7 +237,7 @@ func TestParity_NestedFieldQuery(t *testing.T) {
 	for name, db := range parityPersonDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityPerson{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityPerson{
 				{Name: "Alice", Age: 30, Address: ParityAddress{City: "Berlin", Country: "DE"}},
 				{Name: "Bob", Age: 25, Address: ParityAddress{City: "Paris", Country: "FR"}},
 				{Name: "Carol", Age: 35, Address: ParityAddress{City: "Berlin", Country: "DE"}},
@@ -263,7 +263,7 @@ func TestParity_GroupBySQL(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "X"},
 				{Name: "C", Price: 30, Category: "Y"},
@@ -336,7 +336,7 @@ func TestParity_GroupBy_SortAndLimit(t *testing.T) {
 		// and Price — adequate for single-key GroupBy-with-sort.
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParitySoftProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParitySoftProduct{
 				{Name: "A", Price: 10},
 				{Name: "A", Price: 20},
 				{Name: "B", Price: 30},
@@ -381,7 +381,7 @@ func TestParity_GroupBy_MultiKey(t *testing.T) {
 	for name, db := range parityRegionDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityRegionProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityRegionProduct{
 				{Name: "a", Price: 10, Category: "X", Region: "north"},
 				{Name: "b", Price: 20, Category: "X", Region: "north"},
 				{Name: "c", Price: 30, Category: "X", Region: "south"},
@@ -420,7 +420,7 @@ func TestParity_GroupBy_NullAggregateValue(t *testing.T) {
 			// (ParityProduct does not define one), so json_extract / jsonb_path_text
 			// return NULL for every row and the SUM/AVG/MIN/MAX aggregates evaluate
 			// to SQL NULL. The scanner contract maps that to exactly 0.0.
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "X"},
 				{Name: "C", Price: 30, Category: "X"},
@@ -456,7 +456,7 @@ func TestParity_GroupBy_ZeroMatches(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "X"},
 			}))
@@ -481,7 +481,7 @@ func TestParity_StringContains_EscapesSpecialChars(t *testing.T) {
 			ctx := context.Background()
 			// Seed names containing each LIKE special character literally so a
 			// search for the same character must match exactly the seeded row.
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "100% off_sale", Price: 1, Category: "X"},
 				{Name: `back\slash`, Price: 2, Category: "X"},
 				{Name: "plain text", Price: 3, Category: "X"},
@@ -510,7 +510,7 @@ func TestParity_StringContains_Unicode(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "café noir", Price: 1, Category: "X"},
 				{Name: "日本語サンプル", Price: 2, Category: "X"},
 				{Name: "party 🎉 time", Price: 3, Category: "X"},
@@ -555,15 +555,12 @@ func TestParity_FindOneAndUpdate_MultipleMatches(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "Widget", Price: 10},
 				{Name: "Widget", Price: 20},
 			}))
 
-			_, err := den.FindOneAndUpdate[ParityProduct](ctx, db,
-				den.SetFields{"price": 99.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-			)
+			_, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Widget")).UpdateOne(ctx, den.SetFields{"price": 99.0})
 			require.ErrorIs(t, err, den.ErrMultipleMatches)
 		})
 	}
@@ -574,11 +571,7 @@ func TestParity_FindOneAndUpsert_Insert(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 
-			doc, inserted, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
-				&ParityProduct{Name: "Widget", Price: 1.0, Category: "X"},
-				den.SetFields{"price": 5.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-			)
+			doc, inserted, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &ParityProduct{Name: "Widget", Price: 1.0, Category: "X"}, den.SetFields{"price": 5.0})
 			require.NoError(t, err)
 			assert.True(t, inserted)
 			assert.InDelta(t, 5.0, doc.Price, 0.001)
@@ -592,13 +585,9 @@ func TestParity_FindOneAndUpsert_Update(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			seed := &ParityProduct{Name: "Widget", Price: 1.0, Category: "X"}
-			require.NoError(t, den.Insert(ctx, db, seed))
+			require.NoError(t, den.Save(ctx, db, seed))
 
-			doc, inserted, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
-				&ParityProduct{Name: "Widget", Price: 999.0},
-				den.SetFields{"price": 5.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-			)
+			doc, inserted, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &ParityProduct{Name: "Widget", Price: 999.0}, den.SetFields{"price": 5.0})
 			require.NoError(t, err)
 			assert.False(t, inserted)
 			assert.Equal(t, seed.ID, doc.ID)
@@ -611,16 +600,12 @@ func TestParity_FindOneAndUpsert_MultipleMatches(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "Widget", Price: 10},
 				{Name: "Widget", Price: 20},
 			}))
 
-			_, _, err := den.FindOneAndUpsert[ParityProduct](ctx, db,
-				&ParityProduct{Name: "Widget"},
-				den.SetFields{"price": 99.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-			)
+			_, _, err := den.NewQuery[ParityProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &ParityProduct{Name: "Widget"}, den.SetFields{"price": 99.0})
 			require.ErrorIs(t, err, den.ErrMultipleMatches)
 		})
 	}
@@ -631,14 +616,10 @@ func TestParity_FindOneAndUpsert_SoftDeletedSkippedByDefault(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			original := &ParitySoftProduct{Name: "Widget", Price: 1.0}
-			require.NoError(t, den.Insert(ctx, db, original))
+			require.NoError(t, den.Save(ctx, db, original))
 			require.NoError(t, den.Delete(ctx, db, original))
 
-			doc, inserted, err := den.FindOneAndUpsert[ParitySoftProduct](ctx, db,
-				&ParitySoftProduct{Name: "Widget", Price: 10.0},
-				den.SetFields{"price": 20.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-			)
+			doc, inserted, err := den.NewQuery[ParitySoftProduct](db, where.Field("name").Eq("Widget")).UpsertOne(ctx, &ParitySoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
 			require.NoError(t, err)
 			assert.True(t, inserted)
 			assert.NotEqual(t, original.ID, doc.ID)
@@ -672,7 +653,7 @@ func TestParity_SoftDelete_BumpsRevision(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParitySoftRevProduct{Name: "v1"}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 			revInsert := p.Rev
 
 			require.NoError(t, den.Delete(ctx, db, p))
@@ -688,7 +669,7 @@ func TestParity_SoftDelete_AuditFields(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParitySoftProduct{Name: "Widget"}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 			require.NoError(t, den.Delete(ctx, db, p,
 				den.SoftDeleteBy("usr_42"),
 				den.SoftDeleteReason("cleanup"),
@@ -711,7 +692,7 @@ func TestParity_SoftDelete_ConcurrentUpdateConflicts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &ParitySoftRevProduct{Name: "v1"}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 
 			a, err := den.FindByID[ParitySoftRevProduct](ctx, db, p.ID)
 			require.NoError(t, err)
@@ -721,7 +702,7 @@ func TestParity_SoftDelete_ConcurrentUpdateConflicts(t *testing.T) {
 			require.NoError(t, den.Delete(ctx, db, a))
 
 			b.Name = "clobber"
-			err = den.Update(ctx, db, b)
+			err = den.Save(ctx, db, b)
 			require.ErrorIs(t, err, den.ErrRevisionConflict)
 
 			found, err := den.FindByID[ParitySoftRevProduct](ctx, db, p.ID)
@@ -737,15 +718,12 @@ func TestParity_FindOneAndUpsert_IncludeDeleted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			original := &ParitySoftProduct{Name: "Widget", Price: 1.0}
-			require.NoError(t, den.Insert(ctx, db, original))
+			require.NoError(t, den.Save(ctx, db, original))
 			require.NoError(t, den.Delete(ctx, db, original))
 
-			doc, inserted, err := den.FindOneAndUpsert[ParitySoftProduct](ctx, db,
-				&ParitySoftProduct{Name: "Widget", Price: 10.0},
-				den.SetFields{"price": 20.0},
-				[]where.Condition{where.Field("name").Eq("Widget")},
-				den.IncludeDeleted(),
-			)
+			doc, inserted, err := den.NewQuery[ParitySoftProduct](db, where.Field("name").Eq("Widget")).
+				IncludeDeleted().
+				UpsertOne(ctx, &ParitySoftProduct{Name: "Widget", Price: 10.0}, den.SetFields{"price": 20.0})
 			require.NoError(t, err)
 			assert.False(t, inserted)
 			assert.Equal(t, original.ID, doc.ID)
@@ -774,17 +752,17 @@ func parityValidatedDBs(t *testing.T) map[string]*den.DB {
 	}
 }
 
-func TestParity_InsertMany_PreValidate_FailsAtEnd(t *testing.T) {
+func TestParity_SaveAll_ValidationFailureRollsBack(t *testing.T) {
 	for name, db := range parityValidatedDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			docs := []*ParityValidated{{Name: "A"}, {Name: "B"}, {Name: ""}}
-			err := den.InsertMany(ctx, db, docs, den.PreValidate())
+			err := den.SaveAll(ctx, db, docs)
 			require.ErrorIs(t, err, den.ErrValidation)
 
 			count, err := den.NewQuery[ParityValidated](db).Count(ctx)
 			require.NoError(t, err)
-			assert.Equal(t, int64(0), count, "no document is written when pre-validation fails")
+			assert.Equal(t, int64(0), count, "the transaction rolls back when any doc fails validation")
 		})
 	}
 }
@@ -800,7 +778,7 @@ func TestParity_QuerySetUpdate_HonorsCtxCancellation(t *testing.T) {
 				{Name: "d", Price: 4, Category: "bulk"},
 				{Name: "e", Price: 5, Category: "bulk"},
 			}
-			require.NoError(t, den.InsertMany(ctx, db, docs))
+			require.NoError(t, den.SaveAll(ctx, db, docs))
 
 			cancelCtx, cancel := context.WithCancel(context.Background())
 			cancel()
@@ -828,7 +806,7 @@ func TestParity_Iter_HonorsCtxCancellation(t *testing.T) {
 				{Name: "d", Price: 4.0, Category: "X"},
 				{Name: "e", Price: 5.0, Category: "X"},
 			}
-			require.NoError(t, den.InsertMany(ctx, db, docs))
+			require.NoError(t, den.SaveAll(ctx, db, docs))
 
 			iterCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -858,7 +836,7 @@ func TestParity_NumericEqConsistency(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10},
 				{Name: "B", Price: 20},
 			}))
@@ -886,7 +864,7 @@ func TestParity_GroupBy_InTransaction(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, den.InsertMany(ctx, db, []*ParityProduct{
+			require.NoError(t, den.SaveAll(ctx, db, []*ParityProduct{
 				{Name: "A", Price: 10, Category: "X"},
 				{Name: "B", Price: 20, Category: "X"},
 				{Name: "C", Price: 30, Category: "Y"},
@@ -928,7 +906,7 @@ func TestParity_QuerySetDelete_LargeBatch(t *testing.T) {
 			for i := range N {
 				docs[i] = &ParityProduct{Name: fmt.Sprintf("p%03d", i), Price: float64(i)}
 			}
-			require.NoError(t, den.InsertMany(ctx, db, docs))
+			require.NoError(t, den.SaveAll(ctx, db, docs))
 
 			count, err := den.NewQuery[ParityProduct](db,
 				where.Field("price").Lt(150.0),

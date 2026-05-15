@@ -14,16 +14,6 @@ import (
 	"github.com/oliverandrich/den/where"
 )
 
-// Insert adds a new document to the database.
-// If the document's ID is empty, a new ULID is generated.
-// Options: WithLinkRule to cascade writes to linked documents.
-//
-// The scope parameter accepts either a *DB (operating outside a transaction)
-// or a *Tx (operating inside RunInTransaction). See the Scope interface.
-func Insert[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
-	return insertCore(ctx, s.db(), s.readWriter(), document, opts...)
-}
-
 func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, opts ...CRUDOption) error {
 	o := applyCRUDOpts(opts)
 
@@ -34,21 +24,17 @@ func insertCore[T any](ctx context.Context, db *DB, b ReadWriter, document *T, o
 			return err
 		}
 	}
-
-	id, data, col, err := prepareInsert(ctx, db, document)
+	col, err := collectionFor[T](db)
 	if err != nil {
 		return err
 	}
-	return commitInsert(ctx, b, col, document, id, data)
+	return writeDocCore(ctx, db, b, document, col, true, false)
 }
 
 // runPrePersistHooks runs the mutating hook chain, struct-tag constraint
 // check, and custom Validate hook that every insert and update path
-// executes before touching the backend. Shared by prepareInsert,
-// updateCore, and writeDocCore so the chain lives in exactly one place.
-// Pick the right BeforeInsert / BeforeUpdate branch via isInsert —
-// downstream steps (setBaseFields, revision handling, encode, Put)
-// differ and remain at each call site.
+// executes before touching the backend. Pick the right BeforeInsert /
+// BeforeUpdate branch via isInsert.
 //
 // Order is load-bearing:
 //   - Mutating hooks run first so they can populate defaults, compute
@@ -74,72 +60,21 @@ func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 	return runValidationHooks(ctx, doc)
 }
 
-// prepareInsert runs the mutating hooks, validation, base-field assignment,
-// revision assignment, and encoding — every part of an insert that can happen
-// without touching the backend. It returns the encoded bytes ready for a
-// subsequent Put, plus the id and collection info the caller needs to perform
-// that Put and fire After-hooks.
+// writeDocCore is the shared single-doc write body used by insertCore,
+// updateCore, and cascade link-writes (saveSingleLinkedValue). Runs the
+// full persist chain in canonical order: pre-persist hooks → revision
+// handling → base field stamp → encode → Put → snapshot → after-hooks.
+// The branch is driven by isInsert.
 //
-// Cascade is NOT part of prepareInsert because cascade writes through the
-// backend; callers that opt into LinkWrite run cascadeWriteLinks themselves
-// before calling prepareInsert, so BeforeInsert sees populated link IDs.
-func prepareInsert[T any](ctx context.Context, db *DB, document *T) (string, []byte, *collectionInfo, error) {
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return "", nil, nil, err
-	}
-
-	if err := runPrePersistHooks(ctx, document, true); err != nil {
-		return "", nil, nil, err
-	}
-
-	rv := reflect.ValueOf(document).Elem()
-	setBaseFields(rv, col.structInfo, time.Now(), true)
-	if col.settings.UseRevision {
-		setRevision(rv, col.structInfo, newRevision())
-	}
-
-	data, err := db.encode(document)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("encode: %w", err)
-	}
-	return getID(rv, col.structInfo), data, col, nil
-}
-
-// commitInsert performs the backend Put, snapshots the written bytes for
-// change tracking, and fires the After-hooks. The encoded data must already
-// reflect every mutation the document will carry: cascade and every Before /
-// Validate hook must have run before commitInsert. Mutating document between
-// the prepare and commit calls desyncs the in-memory doc from the persisted
-// bytes — data is frozen at prepare time.
-func commitInsert[T any](ctx context.Context, b ReadWriter, col *collectionInfo, document *T, id string, data []byte) error {
-	if err := b.Put(ctx, col.meta.Name, id, data); err != nil {
-		return err
-	}
-	captureSnapshot(data, document)
-	return runAfterInsertHooks(ctx, document)
-}
-
-// writeDocCore is the shared write body used by updateCore and cascade
-// link-writes (saveSingleLinkedValue). Runs the full single-doc persist
-// chain in canonical order: pre-persist hooks → revision handling → base
-// field stamp → encode → Put → snapshot → after-hooks. The branch is
-// driven by isInsert.
-//
-// Order is load-bearing in the same way prepareInsert / updateCore are:
-// hooks fire first so they can populate defaults; revision handling next
-// so encoded bytes carry the right _rev; setBaseFields stamps _id and
-// timestamps last; encode captures the final post-mutation state.
+// Order is load-bearing: hooks fire first so they can populate defaults;
+// revision handling next so encoded bytes carry the right _rev;
+// setBaseFields stamps _id and timestamps last; encode captures the final
+// post-mutation state.
 //
 // Does NOT handle cascade-write or transaction wrapping — those decisions
 // pre-empt the write body and stay at the caller (updateCore wraps in a
 // tx for revision atomicity; cascadeWriteLinks runs ahead of the parent's
 // prepare chain).
-//
-// The insert-only single-doc path stays on prepareInsert + commitInsert
-// because InsertMany's PreValidate optimization splits validate-then-
-// commit across the tx boundary; writeDocCore is the all-in-one form for
-// paths that don't need that split.
 func writeDocCore(ctx context.Context, db *DB, b ReadWriter, target any, col *collectionInfo, isInsert, ignoreRevision bool) error {
 	tv := reflect.ValueOf(target).Elem()
 
@@ -208,24 +143,15 @@ func FindByIDs[T any](ctx context.Context, s Scope, ids []string, opts ...CRUDOp
 	return querySetFromOpts[T](s, []where.Condition{where.Field("_id").In(anyIDs...)}, opts).IncludeDeleted().All(ctx)
 }
 
-// Update updates an existing document in the database.
-// Options: WithLinkRule to cascade writes, IgnoreRevision to skip conflict check.
-func Update[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
-	return updateCore(ctx, s.db(), s.readWriter(), document, opts...)
-}
-
 // Save inserts the document if its ID is empty, otherwise updates it.
-// Convenience helper for the common "I have a *T; persist it" case where
-// the caller does not want to think about whether the row exists yet.
+// The single doc-in-hand persistence entry point: callers don't pick
+// branches, Save inspects the ID and routes accordingly.
 //
-// Trade-off vs explicit Insert / Update: Save loses control over the
-// branch — if a stale-rev Update would have failed with
-// ErrRevisionConflict, an empty-ID Save instead silently routes to
-// Insert. Use the explicit calls when conflict semantics matter.
+// Empty-ID docs follow the insert path (ULID assigned, BeforeInsert
+// hooks fire). ID-bearing docs follow the update path (revision check,
+// BeforeUpdate hooks fire). Exactly one branch runs.
 //
-// Options pass through to whichever underlying call runs. Hooks fire
-// on exactly one path (Insert hooks on the new-doc branch, Update
-// hooks on the existing-doc branch).
+// Options pass through to whichever underlying path runs.
 func Save[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
 	col, err := collectionFor[T](s.db())
 	if err != nil {
@@ -233,9 +159,9 @@ func Save[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) 
 	}
 	id := getID(reflect.ValueOf(document).Elem(), col.structInfo)
 	if id == "" {
-		return Insert(ctx, s, document, opts...)
+		return insertCore(ctx, s.db(), s.readWriter(), document, opts...)
 	}
-	return Update(ctx, s, document, opts...)
+	return updateCore(ctx, s.db(), s.readWriter(), document, opts...)
 }
 
 // SaveAll persists every doc in docs by routing each through Save: empty-ID
@@ -439,8 +365,8 @@ func RefreshAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOpti
 }
 
 // SetFields is a map of field names (as they appear in the `json` struct
-// tag) to new values for partial updates used by FindOneAndUpdate,
-// FindOneAndUpsert, and QuerySet.Update.
+// tag) to new values for partial updates via QuerySet.UpdateOne,
+// QuerySet.UpsertOne, and QuerySet.Update.
 //
 // Names are validated against the registered struct before the write
 // transaction opens; an unknown name aborts the call without touching
@@ -448,94 +374,9 @@ func RefreshAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOpti
 // iterate Meta[T].Fields and compare against a known set.
 type SetFields map[string]any
 
-// FindOneAndUpdate atomically finds the single matching document, applies
-// the field updates, and returns the modified document.
-// The find and replace are wrapped in a transaction for atomicity.
-//
-// Returns ErrNotFound if no document matches and ErrMultipleMatches if more
-// than one matches — the conditions must identify the document uniquely.
-//
-// Field names in fields are validated against the registered struct before
-// the write transaction opens; an unknown name aborts the call without
-// touching storage. Mirrors QuerySet.Update's pre-tx validation contract.
-//
-// When scope is a *DB, a new transaction is opened; when scope is a *Tx,
-// the operation runs inline in the caller's transaction.
-//
-// Pass IncludeDeleted to consider soft-deleted documents in the match.
-func FindOneAndUpdate[T any](ctx context.Context, s Scope, fields SetFields, conditions []where.Condition, opts ...CRUDOption) (*T, error) {
-	return querySetFromOpts[T](s, conditions, opts).UpdateOne(ctx, fields)
-}
-
-// FindOneAndUpsert atomically finds the single document matching conditions
-// and applies fields, or inserts a new document built from defaults with
-// fields applied on top. The third return value reports which path ran:
-// true means a new document was inserted, false means an existing one was
-// updated.
-//
-// Conditions must identify the document uniquely: ErrMultipleMatches is
-// returned if more than one document matches. The match-and-write happen in
-// a single transaction so the upsert is atomic against itself; concurrent
-// upserts on the same missing row rely on a unique constraint to fail one of
-// the inserters with ErrDuplicate — there is no internal retry, and no row
-// lock is taken on the lookup (an absent row cannot be locked).
-//
-// On the miss path the defaults pointer is mutated by Insert (ID, CreatedAt,
-// UpdatedAt are populated) and returned as the result. Callers reusing a
-// shared defaults template across upserts should pass a fresh value each
-// call — a stale ID would otherwise be carried into the next Insert.
-//
-// Hooks follow the standard Insert / Update order. Exactly one path runs:
-//   - Hit:  BeforeUpdate → BeforeSave → tag-validation → Validate → write → AfterUpdate → AfterSave
-//   - Miss: BeforeInsert → BeforeSave → tag-validation → Validate → write → AfterInsert → AfterSave
-//
-// Soft-deleted matches are ignored by default — pass IncludeDeleted to
-// have them satisfy the lookup. DeletedAt is left as-is when an existing
-// soft-deleted document is updated; clear it explicitly via fields if the
-// caller wants to resurrect.
-//
-// Field names in fields are validated against the registered struct before
-// the write transaction opens; an unknown name aborts the call without
-// touching storage. Mirrors QuerySet.Update's pre-tx validation contract.
-//
-// When scope is a *DB, a new transaction is opened; when scope is a *Tx, the
-// operation runs inline in the caller's transaction.
-func FindOneAndUpsert[T any](
-	ctx context.Context,
-	s Scope,
-	defaults *T,
-	fields SetFields,
-	conditions []where.Condition,
-	opts ...CRUDOption,
-) (*T, bool, error) {
-	return querySetFromOpts[T](s, conditions, opts).UpsertOne(ctx, defaults, fields)
-}
-
-// FindOrCreate is the find-or-create-with-defaults shorthand: returns the
-// existing document if conditions match exactly one row, otherwise inserts
-// `defaults` as a new row. Existing rows are never modified.
-//
-// Equivalent to `FindOneAndUpsert(ctx, s, defaults, SetFields{}, conditions, opts...)`
-// — same atomicity, same hook firing rules, same `ErrMultipleMatches` on
-// non-unique conditions, same `(doc, inserted, err)` return shape. Reach
-// for it when the typical "fetch this row by unique key, create with
-// these defaults if missing, leave the rest alone" pattern doesn't need
-// the post-find field updates FindOneAndUpsert can apply.
-func FindOrCreate[T any](
-	ctx context.Context,
-	s Scope,
-	defaults *T,
-	conditions []where.Condition,
-	opts ...CRUDOption,
-) (*T, bool, error) {
-	return querySetFromOpts[T](s, conditions, opts).GetOrCreate(ctx, defaults)
-}
-
 // querySetFromOpts translates the legacy CRUDOption surface (includeDeleted,
-// fetchMode) into the equivalent QuerySet state. Used by the top-level
-// FindOneAnd* and BackLinks wrappers to feed their conditions+opts into
-// the QuerySet terminals; removed together with those wrappers in Child 4
-// of the v0.12 redesign (see den-olop).
+// fetchMode) into the equivalent QuerySet state. Internal helper for FindByID
+// / FindByIDs, which still expose the option-based API.
 func querySetFromOpts[T any](s Scope, conditions []where.Condition, opts []CRUDOption) QuerySet[T] {
 	o := applyCRUDOpts(opts)
 	qs := NewQuery[T](s, conditions...)
@@ -557,218 +398,6 @@ func querySetFromOpts[T any](s Scope, conditions []where.Condition, opts []CRUDO
 type upsertResult[T any] struct {
 	doc      *T
 	inserted bool
-}
-
-// PreValidate makes InsertMany run the full insert hook + validation chain
-// on every document before opening the write transaction. If any document
-// fails, no writes are attempted.
-//
-// BeforeInsert / BeforeSave / Validate fire exactly once per document; the
-// pre-pass caches the encoded bytes and the in-transaction commit only runs
-// Put + AfterInsert / AfterSave. (When combined with WithLinkRule(LinkWrite),
-// cascade must run inside the tx so the hook chain runs again there — the
-// optimization does not apply to that combination.)
-func PreValidate() CRUDOption {
-	return func(o *crudOpts) {
-		o.preValidate = true
-	}
-}
-
-// ContinueOnError makes InsertMany write each document in its own short-lived
-// transaction instead of failing the whole batch on the first error. The
-// returned error (if any) is an *InsertManyError listing per-document
-// failures by input index.
-//
-// Loses cross-document atomicity — successful inserts are committed even when
-// later ones fail. Returns ErrIncompatibleScope when called with a *Tx scope;
-// returns ErrIncompatibleOptions when combined with PreValidate (each doc
-// gets its own transaction, so a global pre-pass would leave the per-doc
-// guarantee ill-defined).
-func ContinueOnError() CRUDOption {
-	return func(o *crudOpts) {
-		o.continueOnError = true
-	}
-}
-
-// defaultMaxRecordedFailures bounds the Failures list that InsertMany
-// collects under ContinueOnError when the caller does not override it. Keeps
-// pathological batches (millions of failures) from pinning megabytes of
-// memory in a single error value. Callers that want the full list must opt
-// in explicitly via MaxRecordedFailures(0).
-const defaultMaxRecordedFailures = 100
-
-// MaxRecordedFailures caps how many per-document failures InsertMany records
-// in the returned *InsertManyError when ContinueOnError is in effect. The
-// error's TotalFailures field always reports the uncapped count, and
-// Truncated flags that the list was sampled.
-//
-// Passing 0 disables the cap (records every failure). The default when the
-// option is not passed is a modest cap (currently 100) so that runaway
-// batches do not quietly allocate unbounded memory.
-//
-// Returns ErrIncompatibleOptions when combined without ContinueOnError —
-// without ContinueOnError InsertMany is fail-fast and never constructs an
-// *InsertManyError, so the cap would be a silent no-op.
-func MaxRecordedFailures(n int) CRUDOption {
-	return func(o *crudOpts) {
-		o.maxRecordedFailures = n
-		o.maxRecordedFailuresSet = true
-	}
-}
-
-// InsertMany inserts multiple documents in a single transaction.
-//
-// When scope is a *DB, a new transaction is opened for the batch; when
-// scope is a *Tx, the inserts run inline in the caller's transaction.
-//
-// See PreValidate and ContinueOnError for the available behavioral options.
-func InsertMany[T any](ctx context.Context, s Scope, documents []*T, opts ...CRUDOption) error {
-	if len(documents) == 0 {
-		return nil
-	}
-	o := applyCRUDOpts(opts)
-
-	if o.continueOnError && o.preValidate {
-		return fmt.Errorf("%w: PreValidate and ContinueOnError", ErrIncompatibleOptions)
-	}
-
-	if o.maxRecordedFailuresSet && !o.continueOnError {
-		return fmt.Errorf("%w: MaxRecordedFailures requires ContinueOnError", ErrIncompatibleOptions)
-	}
-
-	if o.continueOnError {
-		if _, ok := s.(*Tx); ok {
-			return fmt.Errorf("%w: ContinueOnError requires *DB", ErrIncompatibleScope)
-		}
-		return insertManyContinueOnError(ctx, s.db(), documents, opts, o)
-	}
-
-	if o.preValidate && o.linkRule != LinkWrite {
-		// Optimized path: cache encoded bytes between the pre-pass and the
-		// in-tx commit so the hook + validate + encode chain runs once.
-		db := s.db()
-		prepared := make([]preparedInsert[T], 0, len(documents))
-		for i, doc := range documents {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			id, data, col, err := prepareInsert(ctx, db, doc)
-			if err != nil {
-				return fmt.Errorf("den: pre-validation failed at index %d: %w", i, err)
-			}
-			prepared = append(prepared, preparedInsert[T]{doc: doc, id: id, data: data, col: col})
-		}
-		body := func(tx *Tx) error {
-			for i, p := range prepared {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if err := commitInsert(ctx, tx.tx, p.col, p.doc, p.id, p.data); err != nil {
-					return fmt.Errorf("den: insert failed at index %d: %w", i, err)
-				}
-			}
-			return nil
-		}
-		return runOnScopeVoid(ctx, s, body)
-	}
-
-	if o.preValidate {
-		// LinkWrite path: cascade must run inside the tx and before hooks
-		// so they see populated link IDs. The pre-pass only catches early
-		// validation failures; the full Insert chain (including hooks)
-		// runs again in the tx.
-		db := s.db()
-		for i, doc := range documents {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if _, _, _, err := prepareInsert(ctx, db, doc); err != nil {
-				return fmt.Errorf("den: pre-validation failed at index %d: %w", i, err)
-			}
-		}
-	}
-
-	body := func(tx *Tx) error {
-		for i, doc := range documents {
-			if err := Insert(ctx, tx, doc, opts...); err != nil {
-				return fmt.Errorf("den: insert failed at index %d: %w", i, err)
-			}
-		}
-		return nil
-	}
-	return runOnScopeVoid(ctx, s, body)
-}
-
-// preparedInsert carries the output of a prepareInsert call between the
-// PreValidate pre-pass and the commit pass inside the write transaction.
-type preparedInsert[T any] struct {
-	doc  *T
-	id   string
-	data []byte
-	col  *collectionInfo
-}
-
-func insertManyContinueOnError[T any](ctx context.Context, db *DB, docs []*T, opts []CRUDOption, o crudOpts) error {
-	limit := defaultMaxRecordedFailures
-	if o.maxRecordedFailuresSet {
-		limit = o.maxRecordedFailures
-	}
-
-	// Pre-allocate the failures slice to the best-case bound so the append
-	// loop does not grow the backing array for typical partial-failure batches.
-	initialCap := len(docs)
-	if limit != 0 && limit < initialCap {
-		initialCap = limit
-	}
-	failures := make([]InsertFailure, 0, initialCap)
-
-	var total int
-	for i, doc := range docs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		err := RunInTransaction(ctx, db, func(tx *Tx) error {
-			return Insert(ctx, tx, doc, opts...)
-		})
-		if err != nil {
-			total++
-			if limit == 0 || len(failures) < limit {
-				failures = append(failures, InsertFailure{Index: i, Err: err})
-			}
-		}
-	}
-	if total == 0 {
-		return nil
-	}
-	return &InsertManyError{
-		Failures:      failures,
-		Truncated:     limit != 0 && total > limit,
-		TotalFailures: total,
-	}
-}
-
-// UpdateMany applies fields to every document matching conditions. Returns
-// the number of modified documents.
-//
-// Top-level shorthand for `NewQuery[T](s, conditions...).Update(ctx, fields)`
-// — discoverable next to DeleteMany / Insert / Update instead of buried
-// in the QuerySet chain. All semantics (per-row hooks, fail-fast on error,
-// SetFields key validation, transaction wrapping) come from QuerySet.Update;
-// see [QuerySet.Update] for the full contract.
-func UpdateMany[T any](ctx context.Context, s Scope, conditions []where.Condition, fields SetFields) (int64, error) {
-	return NewQuery[T](s, conditions...).Update(ctx, fields)
-}
-
-// DeleteMany deletes every document matching the given conditions and
-// returns the number of rows affected.
-//
-// Top-level shorthand for `NewQuery[T](s, conditions...).Delete(ctx, opts...)`
-// — discoverable next to InsertMany / UpdateMany. All semantics (per-row
-// hooks, fail-fast on error, drain-first cursor handling on PostgreSQL,
-// soft-delete routing, HardDelete option) come from QuerySet.Delete; see
-// [QuerySet.Delete] for the full contract.
-func DeleteMany[T any](ctx context.Context, s Scope, conditions []where.Condition, opts ...CRUDOption) (int64, error) {
-	return NewQuery[T](s, conditions...).Delete(ctx, opts...)
 }
 
 // findOneStrict loads exactly one document matching conditions. Returns

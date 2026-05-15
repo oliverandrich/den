@@ -10,12 +10,12 @@ Import: `github.com/oliverandrich/den`
 
 | Error | Description | When Returned |
 |---|---|---|
-| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `FindOneAndUpdate`, `Refresh`, `Update`, `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
-| `ErrMultipleMatches` | A single-document lookup matched more than one row | `FindOneAndUpdate`, `FindOneAndUpsert` when conditions match more than one document. The conditions must identify the document uniquely |
-| `ErrDuplicate` | Unique index constraint violated | `Insert`, `Update` when a document with the same unique field value already exists |
-| `ErrRevisionConflict` | Optimistic concurrency check failed | `Update` when the document's `_rev` does not match the stored revision (another process modified it) |
+| `ErrNotFound` | Document lookup yielded no result | `FindByID`, `First`, `UpdateOne`, `Refresh`, `Save` (update branch), `Delete` when the document does not exist; also surfaced by `Iter` on a dangling link reached via `WithFetchLinks` |
+| `ErrMultipleMatches` | A single-document lookup matched more than one row | `QuerySet.UpdateOne` / `UpsertOne` / `GetOrCreate` when conditions match more than one document. The conditions must identify the document uniquely |
+| `ErrDuplicate` | Unique index constraint violated | `Save` when a document with the same unique field value already exists |
+| `ErrRevisionConflict` | Optimistic concurrency check failed | `Save` (update branch) when the document's `_rev` does not match the stored revision (another process modified it) |
 | `ErrNotRegistered` | Operating on an unregistered document type | Any CRUD or query operation on a type not passed to `den.Register()` |
-| `ErrValidation` | Validation hook returned an error | `Insert`, `Update` when the document's `Validate()` method or struct tag validation fails |
+| `ErrValidation` | Validation hook returned an error | `Save` when the document's `Validate()` method or struct tag validation fails |
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
@@ -24,10 +24,7 @@ Import: `github.com/oliverandrich/den`
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized | PostgreSQL SQLSTATE `40001`. Becomes relevant once callers opt into stricter isolation levels; standard Den operations using the default isolation level rarely see this |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend does not provide an `FTSProvider` implementation |
 | `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
-| `ErrIncompatibleScope` | A CRUDOption requires a different scope than the caller passed | `InsertMany` with `ContinueOnError()` called against a `*Tx` (the caller's transaction cannot be split into per-document transactions) |
-| `ErrIncompatibleOptions` | Two mutually-exclusive CRUDOptions were combined | `InsertMany` with both `PreValidate()` and `ContinueOnError()` |
 | `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
-| `*InsertManyError` | Per-document failures from `InsertMany` with `ContinueOnError()` | Carries `[]InsertFailure{Index, Err}`. Implements `Unwrap() []error`, so `errors.Is` matches any wrapped sentinel. Returned only when at least one document failed; nil otherwise |
 
 ---
 
@@ -42,7 +39,7 @@ if errors.Is(err, den.ErrNotFound) {
 ```
 
 ```go
-err := den.Insert(ctx, db, &product)
+err := den.Save(ctx, db, &product)
 if errors.Is(err, den.ErrDuplicate) {
     // handle unique constraint violation
     log.Println("a product with that SKU already exists")
@@ -50,7 +47,7 @@ if errors.Is(err, den.ErrDuplicate) {
 ```
 
 ```go
-err := den.Update(ctx, db, &product)
+err := den.Save(ctx, db, &product)
 if errors.Is(err, den.ErrRevisionConflict) {
     // re-read and retry, or inform the user
     log.Println("document was modified by another process")
@@ -64,7 +61,7 @@ if errors.Is(err, den.ErrRevisionConflict) {
 When using the `validate` sub-package (`github.com/oliverandrich/den/validate`), validation errors can be unwrapped to access per-field details:
 
 ```go
-err := den.Insert(ctx, db, &user)
+err := den.Save(ctx, db, &user)
 if errors.Is(err, den.ErrValidation) {
     var ve *validate.Errors
     if errors.As(err, &ve) {

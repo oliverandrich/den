@@ -104,13 +104,13 @@ Insert a Project, then a Task that links to it. `den.NewLink(parent)` extracts t
 
 ```go
 proj := &Project{Name: "Den Docs"}
-if err := den.Insert(ctx, db, proj); err != nil { log.Fatal(err) }
+if err := den.Save(ctx, db, proj); err != nil { log.Fatal(err) }
 
 task := &Task{
     ProjectLink: den.NewLink(proj),
     Title:       "Write 10-minute tour",
 }
-if err := den.Insert(ctx, db, task); err != nil { log.Fatal(err) }
+if err := den.Save(ctx, db, task); err != nil { log.Fatal(err) }
 
 fmt.Println("created", proj.ID, task.ID, "status:", task.Status)
 ```
@@ -145,13 +145,11 @@ For streaming over large result sets, swap `.All(ctx)` for [`.Iter(ctx)`](../gui
 
 ## 6. Update one field atomically
 
-The single-field update pattern: route through `FindOneAndUpdate` so you avoid the read-modify-write round-trip and any concurrent-update race.
+The single-field update pattern: route through `QuerySet.UpdateOne` so you avoid the read-modify-write round-trip and any concurrent-update race.
 
 ```go
-done, err := den.FindOneAndUpdate[Task](ctx, db,
-    den.SetFields{"status": "done"},
-    []where.Condition{where.Field(den.FieldID).Eq(task.ID)},
-)
+done, err := den.NewQuery[Task](db, where.Field(den.FieldID).Eq(task.ID)).
+    UpdateOne(ctx, den.SetFields{"status": "done"})
 if err != nil { log.Fatal(err) }
 fmt.Println("marked done:", done.Title, "→", done.Status)
 ```

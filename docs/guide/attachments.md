@@ -144,7 +144,7 @@ func uploadHandler(db *den.DB) http.HandlerFunc {
             Attachment:   att,
             OriginalName: header.Filename,
         }
-        if err := den.Insert(r.Context(), db, media); err != nil {
+        if err := den.Save(r.Context(), db, media); err != nil {
             // Clean up the stored bytes if the DB insert fails —
             // otherwise you have an orphan.
             _ = db.Storage().Delete(r.Context(), att)

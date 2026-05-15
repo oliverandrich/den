@@ -60,7 +60,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Title = note.Name
-                if err := den.Update(ctx, tx, note); err != nil {
+                if err := den.Save(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -72,7 +72,7 @@ func setupMigrations() *migrate.Registry {
                     return err
                 }
                 note.Name = note.Title
-                if err := den.Update(ctx, tx, note); err != nil {
+                if err := den.Save(ctx, tx, note); err != nil {
                     return err
                 }
             }
@@ -155,7 +155,7 @@ r.Register("20250410_001_normalize_prices", migrate.Migration{
                 return err
             }
             product.Price = math.Round(product.Price*100) / 100
-            if err := den.Update(ctx, tx, product); err != nil {
+            if err := den.Save(ctx, tx, product); err != nil {
                 return err
             }
         }

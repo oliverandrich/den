@@ -17,7 +17,7 @@ func TestIter(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Product{
+	require.NoError(t, den.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
@@ -47,7 +47,7 @@ func TestIter_Break(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Product{
+	require.NoError(t, den.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 1.0},
 		{Name: "B", Price: 2.0},
 		{Name: "C", Price: 3.0},
@@ -72,7 +72,7 @@ func TestIter_ExcludesSoftDeleted(t *testing.T) {
 		{Name: "Keep", Price: 10.0},
 		{Name: "Delete", Price: 20.0},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, products))
+	require.NoError(t, den.SaveAll(ctx, db, products))
 	require.NoError(t, den.Delete(ctx, db, products[1]))
 
 	var names []string
@@ -99,13 +99,13 @@ func TestIter_WithFetchLinks(t *testing.T) {
 	ctx := context.Background()
 
 	ref := &IterRefItem{Label: "Target"}
-	require.NoError(t, den.Insert(ctx, db, ref))
+	require.NoError(t, den.Save(ctx, db, ref))
 
 	docs := []*IterLinkedDoc{
 		{Name: "A", Ref: den.NewLink(ref)},
 		{Name: "B", Ref: den.NewLink(ref)},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, docs))
+	require.NoError(t, den.SaveAll(ctx, db, docs))
 
 	count := 0
 	for d, err := range den.NewQuery[IterLinkedDoc](db).WithFetchLinks().Iter(ctx) {
@@ -127,11 +127,11 @@ func TestIter_WithFetchLinks_InsideTxSeesUncommittedTarget(t *testing.T) {
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		ref := &IterRefItem{Label: "in-tx"}
-		if err := den.Insert(ctx, tx, ref); err != nil {
+		if err := den.Save(ctx, tx, ref); err != nil {
 			return err
 		}
 		doc := &IterLinkedDoc{Name: "A", Ref: den.NewLink(ref)}
-		if err := den.Insert(ctx, tx, doc); err != nil {
+		if err := den.Save(ctx, tx, doc); err != nil {
 			return err
 		}
 
@@ -153,7 +153,7 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	ctx := context.Background()
 
 	ref := &IterRefItem{Label: "ok"}
-	require.NoError(t, den.Insert(ctx, db, ref))
+	require.NoError(t, den.Save(ctx, db, ref))
 
 	// Seed three rows with known IDs so iteration visits them in order.
 	// The middle row has a dangling link; the third must never be yielded.
@@ -164,9 +164,9 @@ func TestIter_TerminatesOnFetchLinksError(t *testing.T) {
 	last := &IterLinkedDoc{Name: "C", Ref: den.NewLink(ref)}
 	last.ID = "03-last"
 
-	require.NoError(t, den.Insert(ctx, db, good))
-	require.NoError(t, den.Insert(ctx, db, bad))
-	require.NoError(t, den.Insert(ctx, db, last))
+	require.NoError(t, den.Save(ctx, db, good))
+	require.NoError(t, den.Save(ctx, db, bad))
+	require.NoError(t, den.Save(ctx, db, last))
 
 	var errs []error
 	var names []string
@@ -194,7 +194,7 @@ func TestIter_HonorsCtxCancellation(t *testing.T) {
 		{Name: "d", Price: 4.0},
 		{Name: "e", Price: 5.0},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, docs))
+	require.NoError(t, den.SaveAll(ctx, db, docs))
 
 	iterCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -222,7 +222,7 @@ func TestIter_WithConditions(t *testing.T) {
 	db := dentest.MustOpen(t, &Product{})
 	ctx := context.Background()
 
-	require.NoError(t, den.InsertMany(ctx, db, []*Product{
+	require.NoError(t, den.SaveAll(ctx, db, []*Product{
 		{Name: "A", Price: 10.0},
 		{Name: "B", Price: 20.0},
 		{Name: "C", Price: 30.0},

@@ -47,18 +47,14 @@ Use `IncludeDeleted()` to bypass the automatic filter:
 all, _ := den.NewQuery[Product](db).IncludeDeleted().All(ctx)
 ```
 
-For the CRUD operations `FindOneAndUpdate` and `FindOneAndUpsert`, the same name is also available as a **CRUDOption** (`den.IncludeDeleted()`) that opts the atomic lookup step into matching soft-deleted rows:
+`IncludeDeleted()` is a QuerySet modifier — chain it before any terminal (`.All`, `.First`, `.UpdateOne`, `.UpsertOne`, `.Delete`, …) to opt that whole pipeline into matching soft-deleted rows:
 
 ```go
 // Find a soft-deleted product and bring it back
-p, err := den.FindOneAndUpdate[Product](ctx, db,
-    den.SetFields{"_deleted_at": nil},
-    []where.Condition{where.Field("sku").Eq("abc")},
-    den.IncludeDeleted(),
-)
+p, err := den.NewQuery[Product](db, where.Field("sku").Eq("abc")).
+    IncludeDeleted().
+    UpdateOne(ctx, den.SetFields{"_deleted_at": nil})
 ```
-
-The QuerySet method (`qs.IncludeDeleted()`) and the CRUDOption (`den.IncludeDeleted()`) are different identifiers in different namespaces, but they share the name on purpose — both mean "consider soft-deleted documents as well."
 
 ## Permanent Removal
 
@@ -147,7 +143,7 @@ func (a Article) DenSettings() den.Settings {
 _ = den.Delete(ctx, db, a) // bumps _rev, records DeletedAt
 
 b.Title = "stale update"
-err := den.Update(ctx, db, b)
+err := den.Save(ctx, db, b)
 // err == den.ErrRevisionConflict — b held the pre-delete revision
 ```
 

@@ -32,7 +32,7 @@ p, _ := den.FindByID[Product](ctx, db, "prod_001")
 p.Price = 29.99
 
 // If someone else updated this document since we read it:
-err := den.Update(ctx, db, p)
+err := den.Save(ctx, db, p)
 // err == den.ErrRevisionConflict
 ```
 
@@ -44,12 +44,12 @@ A typical conflict-handling pattern is to re-read and retry:
 p, _ := den.FindByID[Product](ctx, db, "prod_001")
 p.Price = 29.99
 
-err := den.Update(ctx, db, p)
+err := den.Save(ctx, db, p)
 if errors.Is(err, den.ErrRevisionConflict) {
     // Re-read the latest version and decide how to proceed
     latest, _ := den.FindByID[Product](ctx, db, p.ID)
     latest.Price = 29.99
-    err = den.Update(ctx, db, latest)
+    err = den.Save(ctx, db, latest)
 }
 ```
 
@@ -58,7 +58,7 @@ if errors.Is(err, den.ErrRevisionConflict) {
 Use `den.IgnoreRevision()` to bypass the revision check and force-write:
 
 ```go
-err := den.Update(ctx, db, p, den.IgnoreRevision())
+err := den.Save(ctx, db, p, den.IgnoreRevision())
 ```
 
 !!! warning
@@ -82,7 +82,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
     // The revision check ensures no one modified the document
     // between our read and this write.
-    return den.Update(ctx, tx, p)
+    return den.Save(ctx, tx, p)
 })
 ```
 
@@ -96,7 +96,7 @@ for range 3 {
             return err
         }
         p.Price = 29.99
-        return den.Update(ctx, tx, p)
+        return den.Save(ctx, tx, p)
     })
     if !errors.Is(err, den.ErrRevisionConflict) {
         break

@@ -24,7 +24,7 @@ func TestSoftDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	require.NoError(t, den.Delete(ctx, db, p))
 	assert.True(t, p.IsDeleted())
@@ -40,7 +40,7 @@ func TestSoftDelete_IncludeDeleted(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// IncludeDeleted shows soft-deleted docs
@@ -55,7 +55,7 @@ func TestSoftDelete_FindByID_StillAccessible(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// FindByID still returns the document (it's a direct key lookup)
@@ -69,7 +69,7 @@ func TestHardDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	// Hard delete permanently removes
@@ -87,7 +87,7 @@ func TestSoftDelete_AuditFields_Defaults(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p))
 
 	assert.True(t, p.IsDeleted())
@@ -102,7 +102,7 @@ func TestSoftDelete_AuditFields_Populated(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p,
 		den.SoftDeleteBy("usr_42"),
 		den.SoftDeleteReason("violated terms"),
@@ -126,7 +126,7 @@ func TestSoftDelete_AuditFields_IgnoredOnHardDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "Widget"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 	require.NoError(t, den.Delete(ctx, db, p,
 		den.HardDelete(),
 		den.SoftDeleteBy("usr_42"),
@@ -143,8 +143,8 @@ func TestSoftDelete_Count(t *testing.T) {
 
 	p1 := &SoftProduct{Name: "Keep", Price: 10.0}
 	p2 := &SoftProduct{Name: "Delete", Price: 20.0}
-	require.NoError(t, den.Insert(ctx, db, p1))
-	require.NoError(t, den.Insert(ctx, db, p2))
+	require.NoError(t, den.Save(ctx, db, p1))
+	require.NoError(t, den.Save(ctx, db, p2))
 	require.NoError(t, den.Delete(ctx, db, p2))
 
 	count, err := den.NewQuery[SoftProduct](db).Count(ctx)

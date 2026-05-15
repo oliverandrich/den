@@ -21,7 +21,7 @@ func TestRunInTransaction_Commit(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		found, err := den.FindByID[Product](ctx, tx, p.ID)
@@ -29,7 +29,7 @@ func TestRunInTransaction_Commit(t *testing.T) {
 			return err
 		}
 		found.Price = 99.0
-		return den.Update(ctx, tx, found)
+		return den.Save(ctx, tx, found)
 	})
 	require.NoError(t, err)
 
@@ -43,7 +43,7 @@ func TestRunInTransaction_Rollback(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		found, err := den.FindByID[Product](ctx, tx, p.ID)
@@ -51,7 +51,7 @@ func TestRunInTransaction_Rollback(t *testing.T) {
 			return err
 		}
 		found.Price = 99.0
-		if err := den.Update(ctx, tx, found); err != nil {
+		if err := den.Save(ctx, tx, found); err != nil {
 			return err
 		}
 		return errors.New("abort")
@@ -71,7 +71,7 @@ func TestTxInsert(t *testing.T) {
 	var insertedID string
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		p := &Product{Name: "InTx", Price: 42.0}
-		if err := den.Insert(ctx, tx, p); err != nil {
+		if err := den.Save(ctx, tx, p); err != nil {
 			return err
 		}
 		insertedID = p.ID
@@ -89,7 +89,7 @@ func TestTxDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "ToDelete", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		return den.Delete(ctx, tx, p)
@@ -105,7 +105,7 @@ func TestTxDelete_SoftDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p := &SoftProduct{Name: "SoftInTx", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		return den.Delete(ctx, tx, p)
@@ -132,7 +132,7 @@ func TestTxInsert_AfterHooks(t *testing.T) {
 
 	d := &AfterSaveDoc{Name: "InTx"}
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Insert(ctx, tx, d)
+		return den.Save(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "called", d.SavedAt)
@@ -143,11 +143,11 @@ func TestTxUpdate_AfterHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &UpdateHookDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	d.Name = "Updated"
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Update(ctx, tx, d)
+		return den.Save(ctx, tx, d)
 	})
 	require.NoError(t, err)
 	assert.True(t, d.BeforeUpdated)
@@ -159,7 +159,7 @@ func TestTxDelete_AfterHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &DeleteHookDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		return den.Delete(ctx, tx, d)
@@ -175,7 +175,7 @@ func TestTxInsert_Revision(t *testing.T) {
 
 	p := &RevProduct{Name: "Widget", Price: 10.0}
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		return den.Insert(ctx, tx, p)
+		return den.Save(ctx, tx, p)
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, p.Rev, "revision should be set on TxInsert")
@@ -190,9 +190,9 @@ func TestDeleteMany_SoftDelete(t *testing.T) {
 		{Name: "Delete1", Price: 15.0},
 		{Name: "Delete2", Price: 25.0},
 	}
-	require.NoError(t, den.InsertMany(ctx, db, products))
+	require.NoError(t, den.SaveAll(ctx, db, products))
 
-	count, err := den.DeleteMany[SoftProduct](ctx, db, []where.Condition{where.Field("price").Gt(10.0)})
+	count, err := den.NewQuery[SoftProduct](db, where.Field("price").Gt(10.0)).Delete(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 
@@ -213,7 +213,7 @@ func TestRunInTransaction_PanicRecovery(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// RunInTransaction catches panics, rolls back, and re-panics
 	assert.Panics(t, func() {
@@ -235,7 +235,7 @@ func TestTx_Transaction_RawRead(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		data, err := tx.Transaction().Get(ctx, "product", p.ID)
@@ -256,7 +256,7 @@ func TestTx_Transaction_RawWrite(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 		return tx.Transaction().Put(ctx, "product", p.ID,
@@ -290,7 +290,7 @@ func TestInsertMany_Rollback(t *testing.T) {
 		{Name: "First"}, // BeforeInsert always fails
 		{Name: "Second"},
 	}
-	err := den.InsertMany(ctx, db, products)
+	err := den.SaveAll(ctx, db, products)
 	require.Error(t, err)
 
 	// No documents should persist after transaction rollback
@@ -308,7 +308,7 @@ func TestTxLockByID(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			p := &Product{Name: "Widget", Price: 10.0}
-			require.NoError(t, den.Insert(ctx, db, p))
+			require.NoError(t, den.Save(ctx, db, p))
 
 			err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 				locked, err := den.LockByID[Product](ctx, tx, p.ID)
@@ -346,7 +346,7 @@ func TestTxLockByID_SerializesConcurrentWriters(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Contended", Price: 1.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	assertSerializesUnderContention(t, db, func(ctx context.Context, tx *den.Tx) error {
 		_, err := den.LockByID[Product](ctx, tx, p.ID)
@@ -394,7 +394,7 @@ func TestTxLockByID_SkipLocked_ReturnsNotFoundOnContention(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "SkipLocked"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	locked, release := runContendedTx(t, db, p.ID)
 	<-locked
@@ -419,7 +419,7 @@ func TestTxLockByID_NoWait_ReturnsErrLockedOnContention(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "NoWait"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	locked, release := runContendedTx(t, db, p.ID)
 	<-locked
@@ -444,7 +444,7 @@ func TestTxLockByID_Options_SQLiteNoop(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Widget", Price: 10.0}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	for name, opt := range map[string]den.LockOption{
 		"SkipLocked": den.SkipLocked(),
@@ -469,7 +469,7 @@ func TestTxLockByID_ConflictingOptions_Rejected(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "Conflict"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	// SkipLocked and NoWait are mutually exclusive in PG; passing both used
 	// to silently let the second win. Now it must return a clear error.
@@ -493,7 +493,7 @@ func TestLockByID_NGoroutines_ExactlyOneHolder(t *testing.T) {
 	ctx := context.Background()
 
 	p := &Product{Name: "NWay"}
-	require.NoError(t, den.Insert(ctx, db, p))
+	require.NoError(t, den.Save(ctx, db, p))
 
 	const N = 5
 	var currentHolders atomic.Int32
@@ -665,7 +665,7 @@ func TestScope_CRUDWorksWithBothDBAndTx(t *testing.T) {
 	run := func(t *testing.T, ctx context.Context, s den.Scope) {
 		t.Helper()
 		p := &Product{Name: "Scope", Price: 12.5}
-		require.NoError(t, den.Insert(ctx, s, p))
+		require.NoError(t, den.Save(ctx, s, p))
 		require.NotEmpty(t, p.ID)
 
 		got, err := den.FindByID[Product](ctx, s, p.ID)
@@ -673,7 +673,7 @@ func TestScope_CRUDWorksWithBothDBAndTx(t *testing.T) {
 		assert.Equal(t, "Scope", got.Name)
 
 		got.Price = 20
-		require.NoError(t, den.Update(ctx, s, got))
+		require.NoError(t, den.Save(ctx, s, got))
 
 		refreshed, err := den.FindByID[Product](ctx, s, p.ID)
 		require.NoError(t, err)

@@ -85,7 +85,7 @@ func TestHookOrder_Insert_FullChain(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	require.NoError(t, den.Insert(ctx, db, &orderingDoc{Name: "x"}))
+	require.NoError(t, den.Save(ctx, db, &orderingDoc{Name: "x"}))
 	assert.Equal(t,
 		[]string{"BeforeInsert", "BeforeSave", "Validate", "AfterInsert", "AfterSave"},
 		hookOrderCalls)
@@ -96,7 +96,7 @@ func TestHookOrder_Insert_BeforeInsertError_StopsImmediately(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	err := den.Insert(ctx, db, &orderingDoc{Name: "x", FailHook: "BeforeInsert"})
+	err := den.Save(ctx, db, &orderingDoc{Name: "x", FailHook: "BeforeInsert"})
 	require.Error(t, err)
 	assert.Equal(t, []string{"BeforeInsert"}, hookOrderCalls)
 
@@ -110,7 +110,7 @@ func TestHookOrder_Insert_BeforeSaveError_StopsBeforeValidate(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	err := den.Insert(ctx, db, &orderingDoc{Name: "x", FailHook: "BeforeSave"})
+	err := den.Save(ctx, db, &orderingDoc{Name: "x", FailHook: "BeforeSave"})
 	require.Error(t, err)
 	assert.Equal(t, []string{"BeforeInsert", "BeforeSave"}, hookOrderCalls)
 }
@@ -120,7 +120,7 @@ func TestHookOrder_Insert_ValidateError_StopsBeforeWrite(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	err := den.Insert(ctx, db, &orderingDoc{Name: "x", FailHook: "Validate"})
+	err := den.Save(ctx, db, &orderingDoc{Name: "x", FailHook: "Validate"})
 	require.ErrorIs(t, err, den.ErrValidation)
 	assert.Equal(t, []string{"BeforeInsert", "BeforeSave", "Validate"}, hookOrderCalls)
 
@@ -134,7 +134,7 @@ func TestHookOrder_Insert_AfterInsertError_StopsBeforeAfterSave(t *testing.T) {
 	ctx := context.Background()
 	resetHookOrderCalls(t)
 
-	err := den.Insert(ctx, db, &orderingDoc{Name: "x", FailHook: "AfterInsert"})
+	err := den.Save(ctx, db, &orderingDoc{Name: "x", FailHook: "AfterInsert"})
 	require.Error(t, err)
 	assert.Equal(t,
 		[]string{"BeforeInsert", "BeforeSave", "Validate", "AfterInsert"},
@@ -155,11 +155,11 @@ func TestHookOrder_Update_FullChain(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t) // discard insert-side hooks
 
 	doc.Name = "updated"
-	require.NoError(t, den.Update(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	assert.Equal(t,
 		[]string{"BeforeUpdate", "BeforeSave", "Validate", "AfterUpdate", "AfterSave"},
 		hookOrderCalls)
@@ -170,12 +170,12 @@ func TestHookOrder_Update_ValidateError_StopsBeforeWrite(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 
 	doc.Name = "updated"
 	doc.FailHook = "Validate"
-	err := den.Update(ctx, db, doc)
+	err := den.Save(ctx, db, doc)
 	require.ErrorIs(t, err, den.ErrValidation)
 	assert.Equal(t, []string{"BeforeUpdate", "BeforeSave", "Validate"}, hookOrderCalls)
 
@@ -191,7 +191,7 @@ func TestHookOrder_Delete_FullChain(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 
 	require.NoError(t, den.Delete(ctx, db, doc))
@@ -204,7 +204,7 @@ func TestHookOrder_Delete_BeforeError_StopsImmediately(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 	doc.FailHook = "BeforeDelete"
 
@@ -224,7 +224,7 @@ func TestHookOrder_SoftDelete_FullChain(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingSoftDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 
 	require.NoError(t, den.Delete(ctx, db, doc))
@@ -240,7 +240,7 @@ func TestHookOrder_SoftDelete_BeforeError_StopsImmediately(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingSoftDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 	doc.FailHook = "BeforeDelete"
 
@@ -259,7 +259,7 @@ func TestHookOrder_SoftDelete_BeforeSoftError_SkipsWrite(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingSoftDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 	doc.FailHook = "BeforeSoftDelete"
 
@@ -282,7 +282,7 @@ func TestHookOrder_HardDeleteOfSoftDoc_SkipsSoftHooks(t *testing.T) {
 	ctx := context.Background()
 
 	doc := &orderingSoftDoc{Name: "seed"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	resetHookOrderCalls(t)
 
 	require.NoError(t, den.Delete(ctx, db, doc, den.HardDelete()))
@@ -301,7 +301,7 @@ func TestHookOrder_InsertMany_PerDoc(t *testing.T) {
 	resetHookOrderCalls(t)
 
 	docs := []*orderingDoc{{Name: "a"}, {Name: "b"}, {Name: "c"}}
-	require.NoError(t, den.InsertMany(ctx, db, docs))
+	require.NoError(t, den.SaveAll(ctx, db, docs))
 
 	chain := []string{"BeforeInsert", "BeforeSave", "Validate", "AfterInsert", "AfterSave"}
 	expected := slices.Repeat(chain, len(docs))
@@ -313,7 +313,7 @@ func TestHookOrder_InsertMany_FailMidBatch_RollsBack(t *testing.T) {
 	db := dentest.MustOpen(t, &orderingDoc{})
 	ctx := context.Background()
 
-	require.NoError(t, den.Insert(ctx, db, &orderingDoc{Name: "preexisting"}))
+	require.NoError(t, den.Save(ctx, db, &orderingDoc{Name: "preexisting"}))
 	resetHookOrderCalls(t)
 
 	// Doc 0 succeeds; doc 1 fails at Validate; doc 2 must never be touched.
@@ -322,7 +322,7 @@ func TestHookOrder_InsertMany_FailMidBatch_RollsBack(t *testing.T) {
 		{Name: "fails", FailHook: "Validate"},
 		{Name: "2"},
 	}
-	err := den.InsertMany(ctx, db, docs)
+	err := den.SaveAll(ctx, db, docs)
 	require.ErrorIs(t, err, den.ErrValidation)
 
 	expected := []string{

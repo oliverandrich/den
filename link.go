@@ -123,31 +123,27 @@ const (
 type CRUDOption func(*crudOpts)
 
 type crudOpts struct {
-	linkRule               LinkRule
-	ignoreRevision         bool
-	hardDelete             bool
-	includeDeleted         bool
-	suppressFetchLinks     bool
-	softDeleteBy           string
-	softDeleteReason       string
-	preValidate            bool
-	continueOnError        bool
-	maxRecordedFailures    int
-	maxRecordedFailuresSet bool
+	linkRule           LinkRule
+	ignoreRevision     bool
+	hardDelete         bool
+	includeDeleted     bool
+	suppressFetchLinks bool
+	softDeleteBy       string
+	softDeleteReason   string
 }
 
-// WithLinkRule sets the link cascading rule for Insert/Update/Delete.
+// WithLinkRule sets the link cascading rule for Save / Delete and the
+// QuerySet write terminals.
 func WithLinkRule(rule LinkRule) CRUDOption {
 	return func(o *crudOpts) {
 		o.linkRule = rule
 	}
 }
 
-// WithoutFetchLinks suppresses link hydration on a CRUD-style read,
+// WithoutFetchLinks suppresses link hydration on a doc-in-hand read,
 // including fields tagged `den:"eager"`. Mirrors the QuerySet modifier
-// of the same name; honored by FindByID, FindByIDs, Refresh, BackLinks,
-// BackLinksField, FindOneAndUpdate, FindOneAndUpsert, and FindOrCreate.
-// On a type with no eager-tagged links it's a no-op.
+// of the same name; honored by FindByID, FindByIDs, and Refresh. On a
+// type with no eager-tagged links it's a no-op.
 func WithoutFetchLinks() CRUDOption {
 	return func(o *crudOpts) {
 		o.suppressFetchLinks = true

@@ -242,7 +242,7 @@ func TestRegister_CustomCollectionName(t *testing.T) {
 
 	// CRUD should work with the custom name
 	doc := &CustomNameDoc{Title: "Hello"}
-	require.NoError(t, den.Insert(ctx, db, doc))
+	require.NoError(t, den.Save(ctx, db, doc))
 	assert.NotEmpty(t, doc.ID)
 
 	found, err := den.FindByID[CustomNameDoc](ctx, db, doc.ID)
@@ -308,20 +308,20 @@ func TestRegister_CompositeUniqueIndex_EnforcesDuplicates(t *testing.T) {
 	ctx := context.Background()
 
 	doc1 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
-	require.NoError(t, den.Insert(ctx, db, doc1))
+	require.NoError(t, den.Save(ctx, db, doc1))
 
 	// Same composite key → ErrDuplicate
 	doc2 := &CompositeUniqueDoc{UserID: "user1", Name: "alice"}
-	err := den.Insert(ctx, db, doc2)
+	err := den.Save(ctx, db, doc2)
 	require.ErrorIs(t, err, den.ErrDuplicate)
 
 	// Different user, same name → OK
 	doc3 := &CompositeUniqueDoc{UserID: "user2", Name: "alice"}
-	require.NoError(t, den.Insert(ctx, db, doc3))
+	require.NoError(t, den.Save(ctx, db, doc3))
 
 	// Same user, different name → OK
 	doc4 := &CompositeUniqueDoc{UserID: "user1", Name: "bob"}
-	require.NoError(t, den.Insert(ctx, db, doc4))
+	require.NoError(t, den.Save(ctx, db, doc4))
 }
 
 func TestRegister_CompositeNonUniqueIndex(t *testing.T) {
@@ -363,10 +363,10 @@ func TestRegister_SettingsIndexes(t *testing.T) {
 
 	// Enforce uniqueness
 	doc1 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
-	require.NoError(t, den.Insert(ctx, db, doc1))
+	require.NoError(t, den.Save(ctx, db, doc1))
 
 	doc2 := &SettingsIndexDoc{TenantID: "t1", Email: "a@b.com"}
-	err = den.Insert(ctx, db, doc2)
+	err = den.Save(ctx, db, doc2)
 	require.ErrorIs(t, err, den.ErrDuplicate)
 }
 
@@ -417,7 +417,7 @@ func TestOpenURL_WithTypes(t *testing.T) {
 	assert.Contains(t, cols, "product")
 	assert.Contains(t, cols, "note")
 
-	require.NoError(t, den.Insert(ctx, db, &Product{Name: "W", Price: 1.0}))
+	require.NoError(t, den.Save(ctx, db, &Product{Name: "W", Price: 1.0}))
 }
 
 func TestOpenURL_WithTypes_PropagatesRegistrationError(t *testing.T) {

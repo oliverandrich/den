@@ -24,10 +24,10 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     sender.Balance -= amount
     receiver.Balance += amount
 
-    if err := den.Update(ctx, tx, sender); err != nil {
+    if err := den.Save(ctx, tx, sender); err != nil {
         return err // rolls back
     }
-    if err := den.Update(ctx, tx, receiver); err != nil {
+    if err := den.Save(ctx, tx, receiver); err != nil {
         return err // rolls back
     }
 
@@ -37,15 +37,15 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 ## Transaction Functions
 
-CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Insert(ctx, scope, &doc)` works outside and inside a transaction:
+CRUD functions accept a `den.Scope` interface satisfied by both `*den.DB` and `*den.Tx` — pass whichever you have. The same `den.Save(ctx, scope, &doc)` works outside and inside a transaction:
 
 ```go
 // Outside a transaction
-den.Insert(ctx, db, &product)
+den.Save(ctx, db, &product)
 
 // Inside a transaction — same function, same signature
 den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-    return den.Insert(ctx, tx, &product)
+    return den.Save(ctx, tx, &product)
 })
 ```
 
@@ -74,7 +74,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
         return ErrOutOfStock
     }
     item.Stock -= qty
-    return den.Update(ctx, tx, item)
+    return den.Save(ctx, tx, item)
 })
 ```
 
@@ -135,7 +135,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     }
     for _, o := range orders {
         o.Status = "processing"
-        if err := den.Update(ctx, tx, o); err != nil {
+        if err := den.Save(ctx, tx, o); err != nil {
             return err
         }
     }
@@ -209,9 +209,9 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
     job.Status = "running"
     job.StartedAt = time.Now()
 
-    return den.Update(ctx, tx, job)
+    return den.Save(ctx, tx, job)
 })
 ```
 
 !!! note
-    For single-document atomic updates, consider `den.FindOneAndUpdate` which handles the find-modify-save pattern in one call without requiring an explicit transaction.
+    For single-document atomic updates, consider `QuerySet.UpdateOne` which handles the find-modify-save pattern in one call without requiring an explicit transaction.

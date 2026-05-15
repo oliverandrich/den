@@ -142,7 +142,7 @@ Den uses [ULID](https://github.com/oklog/ulid) for document IDs -- lexicographic
 
 ```go
 p := &Product{Name: "Widget", Price: 9.99}
-den.Insert(ctx, db, p)
+den.Save(ctx, db, p)
 fmt.Println(p.ID) // "01HQ3K8V2X..."
 ```
 
@@ -153,7 +153,7 @@ You can set an ID manually before insert. If `ID` is empty, Den generates a ULID
 ```go
 p := &Product{Name: "Widget"}
 p.ID = "my-custom-id"
-den.Insert(ctx, db, p) // uses "my-custom-id"
+den.Save(ctx, db, p) // uses "my-custom-id"
 ```
 
 ## DenSettings Interface
@@ -337,12 +337,12 @@ type User struct {
 }
 
 // Both users have nil Email -- no conflict:
-den.Insert(ctx, db, &User{Username: "alice"})  // Email: nil
-den.Insert(ctx, db, &User{Username: "bob"})    // Email: nil
+den.Save(ctx, db, &User{Username: "alice"})  // Email: nil
+den.Save(ctx, db, &User{Username: "bob"})    // Email: nil
 
 // But duplicate non-nil values are rejected:
-den.Insert(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) // ok
-den.Insert(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
+den.Save(ctx, db, &User{Username: "carol", Email: ptr("carol@example.com")}) // ok
+den.Save(ctx, db, &User{Username: "dave",  Email: ptr("carol@example.com")}) // ErrDuplicate
 ```
 
 === "SQLite"

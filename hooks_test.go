@@ -242,7 +242,7 @@ func TestBeforeSave_Hook(t *testing.T) {
 	ctx := context.Background()
 
 	a := &Article{Title: "Hello"}
-	require.NoError(t, den.Insert(ctx, db, a))
+	require.NoError(t, den.Save(ctx, db, a))
 
 	assert.Equal(t, "slug-Hello", a.Slug)
 	assert.Equal(t, 5, a.WordCount)
@@ -257,10 +257,10 @@ func TestBeforeSave_OnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	a := &Article{Title: "First"}
-	require.NoError(t, den.Insert(ctx, db, a))
+	require.NoError(t, den.Save(ctx, db, a))
 
 	a.Title = "Updated"
-	require.NoError(t, den.Update(ctx, db, a))
+	require.NoError(t, den.Save(ctx, db, a))
 	assert.Equal(t, "slug-Updated", a.Slug)
 }
 
@@ -269,7 +269,7 @@ func TestValidateOnSave(t *testing.T) {
 	ctx := context.Background()
 
 	v := &Validated{Name: ""}
-	err := den.Insert(ctx, db, v)
+	err := den.Save(ctx, db, v)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
 }
@@ -279,7 +279,7 @@ func TestValidateOnSave_Valid(t *testing.T) {
 	ctx := context.Background()
 
 	v := &Validated{Name: "OK"}
-	require.NoError(t, den.Insert(ctx, db, v))
+	require.NoError(t, den.Save(ctx, db, v))
 }
 
 // CtxAwareValidated returns the ctx's error from Validate so the test
@@ -304,7 +304,7 @@ func TestValidate_PropagatesContext(t *testing.T) {
 	cancel()
 
 	v := &CtxAwareValidated{Name: "Anything"}
-	err := den.Insert(ctx, db, v)
+	err := den.Save(ctx, db, v)
 	require.Error(t, err)
 	require.ErrorIs(t, err, den.ErrValidation,
 		"validation failure must wrap ErrValidation")
@@ -324,7 +324,7 @@ func TestBeforeInsertPopulatesFieldForValidate(t *testing.T) {
 	// from Title. Validate() requires Slug to be non-empty. If the hook
 	// order is correct, the insert succeeds.
 	d := &DefaultingDoc{Title: "Hello"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.Equal(t, "auto-Hello", d.Slug)
 }
 
@@ -336,14 +336,14 @@ func TestUpdateHookOrderRunsBeforeValidate(t *testing.T) {
 	ctx := context.Background()
 
 	d := &DefaultingDoc{Title: "First"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	// Clear the slug; without the hook order fix, Validate would fail.
 	// With the fix, BeforeSave (which DefaultingDoc does not have) would
 	// run first. Since DefaultingDoc only implements BeforeInsert (not
 	// BeforeSave or BeforeUpdate), Update with an empty slug must fail.
 	d.Slug = ""
-	err := den.Update(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
 }
@@ -353,7 +353,7 @@ func TestBeforeInsert_Hook(t *testing.T) {
 	ctx := context.Background()
 
 	d := &BeforeInsertDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.True(t, d.Touched)
 }
 
@@ -362,7 +362,7 @@ func TestAfterInsert_Hook(t *testing.T) {
 	ctx := context.Background()
 
 	d := &AfterInsertDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.True(t, d.Notified)
 }
 
@@ -371,7 +371,7 @@ func TestBeforeInsert_BlocksInsert(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailBeforeDoc{Name: "Blocked"}
-	err := den.Insert(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "insert blocked")
 
@@ -385,10 +385,10 @@ func TestUpdateHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &UpdateHookDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	d.Name = "Updated"
-	require.NoError(t, den.Update(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.True(t, d.BeforeUpdated)
 	assert.True(t, d.AfterUpdated)
 }
@@ -398,7 +398,7 @@ func TestDeleteHooks(t *testing.T) {
 	ctx := context.Background()
 
 	d := &DeleteHookDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	require.NoError(t, den.Delete(ctx, db, d))
 	assert.True(t, d.BeforeDeleted)
 	assert.True(t, d.AfterDeleted)
@@ -409,7 +409,7 @@ func TestAfterSave_OnInsert(t *testing.T) {
 	ctx := context.Background()
 
 	d := &AfterSaveDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.Equal(t, "called", d.SavedAt)
 }
 
@@ -418,10 +418,10 @@ func TestAfterSave_OnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	d := &AfterSaveDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	d.SavedAt = "" // reset
 	d.Name = "Updated"
-	require.NoError(t, den.Update(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 	assert.Equal(t, "called", d.SavedAt)
 }
 
@@ -430,7 +430,7 @@ func TestAfterInsert_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailAfterInsertDoc{Name: "Test"}
-	err := den.Insert(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after insert failed")
 }
@@ -440,7 +440,7 @@ func TestAfterSave_ErrorOnInsert(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailAfterSaveOnInsertDoc{Name: "Test"}
-	err := den.Insert(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after save failed")
 }
@@ -450,10 +450,10 @@ func TestBeforeUpdate_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailBeforeUpdateDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	d.Name = "Updated"
-	err := den.Update(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "before update blocked")
 }
@@ -463,10 +463,10 @@ func TestBeforeSave_ErrorOnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailBeforeSaveOnUpdateDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d)) // count=1, passes
+	require.NoError(t, den.Save(ctx, db, d)) // count=1, passes
 
 	d.Name = "Updated"
-	err := den.Update(ctx, db, d) // count=2, fails
+	err := den.Save(ctx, db, d) // count=2, fails
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "before save blocked on update")
 }
@@ -476,10 +476,10 @@ func TestAfterUpdate_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailAfterUpdateDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	d.Name = "Updated"
-	err := den.Update(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after update failed")
 }
@@ -489,10 +489,10 @@ func TestAfterSave_ErrorOnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailAfterSaveOnUpdateDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d)) // count=1, passes
+	require.NoError(t, den.Save(ctx, db, d)) // count=1, passes
 
 	d.Name = "Updated"
-	err := den.Update(ctx, db, d) // count=2, fails
+	err := den.Save(ctx, db, d) // count=2, fails
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after save failed on update")
 }
@@ -502,7 +502,7 @@ func TestBeforeDelete_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailBeforeDeleteDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	err := den.Delete(ctx, db, d)
 	require.Error(t, err)
@@ -514,7 +514,7 @@ func TestAfterDelete_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &FailAfterDeleteDoc{Name: "Test"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	err := den.Delete(ctx, db, d)
 	require.Error(t, err)
@@ -526,10 +526,10 @@ func TestValidateOnUpdate_Error(t *testing.T) {
 	ctx := context.Background()
 
 	d := &ValidateOnUpdateDoc{Name: "valid"}
-	require.NoError(t, den.Insert(ctx, db, d))
+	require.NoError(t, den.Save(ctx, db, d))
 
 	d.Name = "invalid"
-	err := den.Update(ctx, db, d)
+	err := den.Save(ctx, db, d)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, den.ErrValidation)
 }

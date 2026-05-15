@@ -126,19 +126,19 @@ func TestLink_Serialization(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	w1 := &Window{X: 100, Y: 50}
 	w2 := &Window{X: 200, Y: 50}
-	require.NoError(t, den.Insert(ctx, db, w1))
-	require.NoError(t, den.Insert(ctx, db, w2))
+	require.NoError(t, den.Save(ctx, db, w1))
+	require.NoError(t, den.Save(ctx, db, w2))
 
 	house := &House{
 		Name:    "Lakehouse",
 		Door:    den.NewLink(door),
 		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	// Retrieve — links should contain only IDs (lazy by default)
 	found, err := den.FindByID[House](ctx, db, house.ID)
@@ -156,13 +156,13 @@ func TestFetchLink(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Cottage",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	found, err := den.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
@@ -199,16 +199,16 @@ func TestEagerLink_DefaultHydratesEagerField(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Alice"}
-	require.NoError(t, den.Insert(ctx, db, owner))
+	require.NoError(t, den.Save(ctx, db, owner))
 
 	h := &EagerHouse{
 		Name:  "EagerCottage",
 		Door:  den.NewLink(door),
 		Owner: den.NewLink(owner),
 	}
-	require.NoError(t, den.Insert(ctx, db, h))
+	require.NoError(t, den.Save(ctx, db, h))
 
 	results, err := den.NewQuery[EagerHouse](db).All(ctx)
 	require.NoError(t, err)
@@ -233,10 +233,10 @@ func TestEagerLink_WithFetchLinksHydratesEverything(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 	owner := &EagerOwner{Name: "Bob"}
-	require.NoError(t, den.Insert(ctx, db, owner))
-	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+	require.NoError(t, den.Save(ctx, db, owner))
+	require.NoError(t, den.Save(ctx, db, &EagerHouse{
 		Name: "FullCottage", Door: den.NewLink(door), Owner: den.NewLink(owner),
 	}))
 
@@ -258,8 +258,8 @@ func TestEagerLink_WithoutFetchLinksSuppressesEager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
-	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, &EagerHouse{
 		Name: "Bare", Door: den.NewLink(door),
 	}))
 
@@ -281,8 +281,8 @@ func TestEagerLink_IterRespectsEager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
-	require.NoError(t, den.Insert(ctx, db, &EagerHouse{
+	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, &EagerHouse{
 		Name: "IterCottage", Door: den.NewLink(door),
 	}))
 
@@ -313,13 +313,13 @@ func TestEagerLink_SliceField(t *testing.T) {
 
 	w1 := &Window{X: 100, Y: 50}
 	w2 := &Window{X: 200, Y: 60}
-	require.NoError(t, den.Insert(ctx, db, w1))
-	require.NoError(t, den.Insert(ctx, db, w2))
+	require.NoError(t, den.Save(ctx, db, w1))
+	require.NoError(t, den.Save(ctx, db, w2))
 	h := &EagerSliceHouse{
 		Name:    "SlicedCottage",
 		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
 	}
-	require.NoError(t, den.Insert(ctx, db, h))
+	require.NoError(t, den.Save(ctx, db, h))
 
 	got, err := den.FindByID[EagerSliceHouse](ctx, db, h.ID)
 	require.NoError(t, err)
@@ -359,11 +359,11 @@ func TestEagerLink_NestedDepth(t *testing.T) {
 	ctx := context.Background()
 
 	inner := &EagerInner{Label: "leaf"}
-	require.NoError(t, den.Insert(ctx, db, inner))
+	require.NoError(t, den.Save(ctx, db, inner))
 	mid := &EagerMiddle{Inner: den.NewLink(inner)}
-	require.NoError(t, den.Insert(ctx, db, mid))
+	require.NoError(t, den.Save(ctx, db, mid))
 	outer := &EagerOuter{Middle: den.NewLink(mid)}
-	require.NoError(t, den.Insert(ctx, db, outer))
+	require.NoError(t, den.Save(ctx, db, outer))
 
 	t.Run("All recurses through nested eager under default depth", func(t *testing.T) {
 		results, err := den.NewQuery[EagerOuter](db,
@@ -412,11 +412,11 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	ctx := context.Background()
 
 	inner := &EagerInner{Label: "leaf"}
-	require.NoError(t, den.Insert(ctx, db, inner))
+	require.NoError(t, den.Save(ctx, db, inner))
 	mid := &EagerMiddle{Inner: den.NewLink(inner)}
-	require.NoError(t, den.Insert(ctx, db, mid))
+	require.NoError(t, den.Save(ctx, db, mid))
 	outer := &EagerOuter{Note: "initial", Middle: den.NewLink(mid)}
-	require.NoError(t, den.Insert(ctx, db, outer))
+	require.NoError(t, den.Save(ctx, db, outer))
 
 	t.Run("Iter recurses with WithNestingDepth(2)", func(t *testing.T) {
 		var got *EagerOuter
@@ -444,10 +444,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	})
 
 	t.Run("FindOneAndUpdate recurses", func(t *testing.T) {
-		got, err := den.FindOneAndUpdate[EagerOuter](ctx, db,
-			den.SetFields{"note": "after-update"},
-			[]where.Condition{where.Field("_id").Eq(outer.ID)},
-		)
+		got, err := den.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpdateOne(ctx, den.SetFields{"note": "after-update"})
 		require.NoError(t, err)
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
 		require.NotNil(t, got.Middle.Value)
@@ -456,11 +453,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 	})
 
 	t.Run("FindOneAndUpsert update branch recurses", func(t *testing.T) {
-		got, inserted, err := den.FindOneAndUpsert[EagerOuter](ctx, db,
-			&EagerOuter{Note: "should-not-apply"},
-			den.SetFields{"note": "via-upsert"},
-			[]where.Condition{where.Field("_id").Eq(outer.ID)},
-		)
+		got, inserted, err := den.NewQuery[EagerOuter](db, where.Field("_id").Eq(outer.ID)).UpsertOne(ctx, &EagerOuter{Note: "should-not-apply"}, den.SetFields{"note": "via-upsert"})
 		require.NoError(t, err)
 		require.False(t, inserted, "row exists — must take update branch")
 		require.True(t, got.Middle.IsLoaded(), "first eager level fires")
@@ -471,9 +464,9 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 
 	t.Run("FindOneAndUpsert insert branch recurses", func(t *testing.T) {
 		freshInner := &EagerInner{Label: "leaf-2"}
-		require.NoError(t, den.Insert(ctx, db, freshInner))
+		require.NoError(t, den.Save(ctx, db, freshInner))
 		freshMid := &EagerMiddle{Inner: den.NewLink(freshInner)}
-		require.NoError(t, den.Insert(ctx, db, freshMid))
+		require.NoError(t, den.Save(ctx, db, freshMid))
 
 		// Construct the link by ID only — den.NewLink(freshMid) would carry
 		// freshMid.Inner's pre-loaded state into the defaults and mask what
@@ -483,11 +476,7 @@ func TestEagerLink_AllReadTerminalsRecurse(t *testing.T) {
 			Middle: den.Link[EagerMiddle]{ID: freshMid.ID},
 		}
 
-		got, inserted, err := den.FindOneAndUpsert[EagerOuter](ctx, db,
-			defaults,
-			den.SetFields{},
-			[]where.Condition{where.Field("note").Eq("does-not-exist-yet")},
-		)
+		got, inserted, err := den.NewQuery[EagerOuter](db, where.Field("note").Eq("does-not-exist-yet")).UpsertOne(ctx, defaults, den.SetFields{})
 		require.NoError(t, err)
 		require.True(t, inserted, "no match — must take insert branch")
 		require.True(t, got.Middle.IsLoaded())
@@ -524,9 +513,9 @@ func TestEagerLink_SoftDeletedTarget(t *testing.T) {
 	ctx := context.Background()
 
 	target := &SoftDeletableTarget{Name: "doomed"}
-	require.NoError(t, den.Insert(ctx, db, target))
+	require.NoError(t, den.Save(ctx, db, target))
 	h := &HouseWithSoftLink{Name: "House", Ref: den.NewLink(target)}
-	require.NoError(t, den.Insert(ctx, db, h))
+	require.NoError(t, den.Save(ctx, db, h))
 
 	require.NoError(t, den.Delete(ctx, db, target))
 
@@ -551,10 +540,10 @@ func TestFetchLinkField(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{Name: "Cottage", Door: den.NewLink(door)}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	found, err := den.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
@@ -573,7 +562,7 @@ func TestFetchLinkField_AlreadyLoaded(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	link := den.NewLink(door) // Loaded=true, Value=door
 	require.True(t, link.IsLoaded())
@@ -599,14 +588,14 @@ func TestFetchLink_SliceLink(t *testing.T) {
 
 	w1 := &Window{X: 10, Y: 20}
 	w2 := &Window{X: 30, Y: 40}
-	require.NoError(t, den.Insert(ctx, db, w1))
-	require.NoError(t, den.Insert(ctx, db, w2))
+	require.NoError(t, den.Save(ctx, db, w1))
+	require.NoError(t, den.Save(ctx, db, w2))
 
 	house := &House{
 		Name:    "Villa",
 		Windows: []den.Link[Window]{den.NewLink(w1), den.NewLink(w2)},
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	found, err := den.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
@@ -622,7 +611,7 @@ func TestFetchLink_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	house := &House{Name: "Empty"}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	err := den.FetchLink(ctx, db, house, "nonexistent")
 	require.Error(t, err)
@@ -634,15 +623,15 @@ func TestFetchAllLinks(t *testing.T) {
 
 	door := &Door{Height: 200, Width: 80}
 	w1 := &Window{X: 10, Y: 20}
-	require.NoError(t, den.Insert(ctx, db, door))
-	require.NoError(t, den.Insert(ctx, db, w1))
+	require.NoError(t, den.Save(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, w1))
 
 	house := &House{
 		Name:    "Villa",
 		Door:    den.NewLink(door),
 		Windows: []den.Link[Window]{den.NewLink(w1)},
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	found, err := den.FindByID[House](ctx, db, house.ID)
 	require.NoError(t, err)
@@ -668,11 +657,11 @@ func TestFetchAllLinks_SingleLevel(t *testing.T) {
 	ctx := context.Background()
 
 	leaf := &NestLeaf{Label: "leaf"}
-	require.NoError(t, den.Insert(ctx, db, leaf))
+	require.NoError(t, den.Save(ctx, db, leaf))
 	mid := &NestMid{Leaf: den.NewLink(leaf)}
-	require.NoError(t, den.Insert(ctx, db, mid))
+	require.NoError(t, den.Save(ctx, db, mid))
 	root := &NestRoot{Mid: den.NewLink(mid)}
-	require.NoError(t, den.Insert(ctx, db, root))
+	require.NoError(t, den.Save(ctx, db, root))
 
 	found, err := den.FindByID[NestRoot](ctx, db, root.ID)
 	require.NoError(t, err)
@@ -691,13 +680,13 @@ func TestWithFetchLinks_Eager(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Bungalow",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	results, err := den.NewQuery[House](db,
 		where.Field("name").Eq("Bungalow"),
@@ -719,13 +708,13 @@ func TestWithFetchLinks_BatchDedup(t *testing.T) {
 
 	door1 := &Door{Height: 200, Width: 80}
 	door2 := &Door{Height: 210, Width: 85}
-	require.NoError(t, den.Insert(ctx, db, door1))
-	require.NoError(t, den.Insert(ctx, db, door2))
+	require.NoError(t, den.Save(ctx, db, door1))
+	require.NoError(t, den.Save(ctx, db, door2))
 
 	cabinA := &House{Name: "BatchA", Door: den.NewLink(door1)}
 	cabinB := &House{Name: "BatchB", Door: den.NewLink(door2)}
 	cabinC := &House{Name: "BatchC", Door: den.NewLink(door1)}
-	require.NoError(t, den.InsertMany(ctx, db, []*House{cabinA, cabinB, cabinC}))
+	require.NoError(t, den.SaveAll(ctx, db, []*House{cabinA, cabinB, cabinC}))
 
 	results, err := den.NewQuery[House](db).
 		Where(where.Field("name").In("BatchA", "BatchB", "BatchC")).
@@ -754,8 +743,8 @@ func TestWithFetchLinks_SliceField(t *testing.T) {
 
 	w1 := &Window{X: 1, Y: 1}
 	w2 := &Window{X: 2, Y: 2}
-	require.NoError(t, den.Insert(ctx, db, w1))
-	require.NoError(t, den.Insert(ctx, db, w2))
+	require.NoError(t, den.Save(ctx, db, w1))
+	require.NoError(t, den.Save(ctx, db, w2))
 
 	house1 := &House{
 		Name:    "SliceA",
@@ -765,7 +754,7 @@ func TestWithFetchLinks_SliceField(t *testing.T) {
 		Name:    "SliceB",
 		Windows: []den.Link[Window]{den.NewLink(w1)}, // shares w1 with house1
 	}
-	require.NoError(t, den.InsertMany(ctx, db, []*House{house1, house2}))
+	require.NoError(t, den.SaveAll(ctx, db, []*House{house1, house2}))
 
 	results, err := den.NewQuery[House](db).
 		Where(where.Field("name").In("SliceA", "SliceB")).
@@ -815,11 +804,11 @@ func TestWithFetchLinks_DanglingLinkErrors(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	good := &House{Name: "Good", Door: den.NewLink(door)}
 	bad := &House{Name: "Dangling", Door: den.Link[Door]{ID: "does-not-exist"}}
-	require.NoError(t, den.InsertMany(ctx, db, []*House{good, bad}))
+	require.NoError(t, den.SaveAll(ctx, db, []*House{good, bad}))
 
 	_, err := den.NewQuery[House](db).
 		Where(where.Field("name").In("Good", "Dangling")).
@@ -838,13 +827,13 @@ func TestWithFetchLinks_NestedDepthTwo(t *testing.T) {
 	ctx := context.Background()
 
 	leaf := &NestLeaf{Label: "bottom"}
-	require.NoError(t, den.Insert(ctx, db, leaf))
+	require.NoError(t, den.Save(ctx, db, leaf))
 
 	mid := &NestMid{Tag: "middle", Leaf: den.NewLink(leaf)}
-	require.NoError(t, den.Insert(ctx, db, mid))
+	require.NoError(t, den.Save(ctx, db, mid))
 
 	root := &NestRoot{Name: "top", Mid: den.NewLink(mid)}
-	require.NoError(t, den.Insert(ctx, db, root))
+	require.NoError(t, den.Save(ctx, db, root))
 
 	results, err := den.NewQuery[NestRoot](db).
 		Where(where.Field("name").Eq("top")).
@@ -873,7 +862,7 @@ func TestWithLinkRule_Write(t *testing.T) {
 	}
 
 	// Door has no ID yet — LinkWrite should cascade insert
-	require.NoError(t, den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
 
 	assert.NotEmpty(t, door.ID, "door should have been inserted")
 
@@ -895,7 +884,7 @@ func TestWithLinkRule_Write_TransactionRollback(t *testing.T) {
 
 	// Insert with cascade inside a transaction that rolls back
 	err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
-		if err := den.Insert(ctx, tx, house, den.WithLinkRule(den.LinkWrite)); err != nil {
+		if err := den.Save(ctx, tx, house, den.WithLinkRule(den.LinkWrite)); err != nil {
 			return err
 		}
 		return errors.New("force rollback")
@@ -921,7 +910,7 @@ func TestWithLinkRule_Write_SetsTimestamps(t *testing.T) {
 		Name: "Timestamps",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
 
 	// Linked door should have timestamps set
 	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
@@ -968,7 +957,7 @@ func TestWithLinkRule_Write_RunsInsertHooks(t *testing.T) {
 	insertHookedPartBeforeInsertCalled = false
 	insertHookedPartAfterInsertCalled = false
 
-	require.NoError(t, den.Insert(ctx, db, assembly, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, den.Save(ctx, db, assembly, den.WithLinkRule(den.LinkWrite)))
 
 	assert.True(t, insertHookedPartBeforeInsertCalled, "BeforeInsert should fire on cascade-written linked part")
 	assert.True(t, insertHookedPartAfterInsertCalled, "AfterInsert should fire on cascade-written linked part")
@@ -979,13 +968,13 @@ func TestWithLinkRule_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Demolish",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
 
@@ -1003,10 +992,10 @@ func TestWithNestingDepth(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{Name: "Depth", Door: den.NewLink(door)}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	results, err := den.NewQuery[House](db,
 		where.Field("name").Eq("Depth"),
@@ -1052,13 +1041,13 @@ func TestWithLinkRule_Delete_SoftDeleteLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftDoor{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &SoftHouse{
 		Name: "SoftCascade",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	// Cascade delete should soft-delete the linked door, not hard-delete it
 	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkDelete)))
@@ -1103,13 +1092,13 @@ func TestWithLinkRule_Delete_HooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	part := &HookedPart{Label: "Motor"}
-	require.NoError(t, den.Insert(ctx, db, part))
+	require.NoError(t, den.Save(ctx, db, part))
 
 	assembly := &HookedAssembly{
 		Name: "Machine",
 		Part: den.NewLink(part),
 	}
-	require.NoError(t, den.Insert(ctx, db, assembly))
+	require.NoError(t, den.Save(ctx, db, assembly))
 
 	hookedPartBeforeDeleteCalled = false
 	hookedPartAfterDeleteCalled = false
@@ -1158,10 +1147,10 @@ func TestWithLinkRule_Delete_FiresSoftDeleteHooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftHookedDoor{Label: "Main"}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &SoftHookedHouse{Name: "H", Door: den.NewLink(door)}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	softHookedBeforeSoftDeleteCalled = false
 	softHookedAfterSoftDeleteCalled = false
@@ -1188,10 +1177,10 @@ func TestParity_WithLinkRule_HardDelete_CascadeHardDeletesSoftLinked(t *testing.
 			ctx := context.Background()
 
 			door := &SoftDoor{Height: 200, Width: 80}
-			require.NoError(t, den.Insert(ctx, db, door))
+			require.NoError(t, den.Save(ctx, db, door))
 
 			house := &SoftHouse{Name: "HardCascade", Door: den.NewLink(door)}
-			require.NoError(t, den.Insert(ctx, db, house))
+			require.NoError(t, den.Save(ctx, db, house))
 
 			require.NoError(t, den.Delete(ctx, db, house,
 				den.HardDelete(),
@@ -1262,10 +1251,10 @@ func TestWithLinkRule_HardDelete_SkipsSoftDeleteHooksOnLinked(t *testing.T) {
 	ctx := context.Background()
 
 	door := &SoftSkipHookedDoor{Label: "Main"}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &SoftSkipHouse{Name: "H", Door: den.NewLink(door)}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	softSkipBeforeSoftDeleteCalled = false
 	softSkipAfterSoftDeleteCalled = false
@@ -1288,17 +1277,17 @@ func TestWithLinkRule_Write_OnUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{
 		Name: "Home",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	// Update door via cascade write
 	house.Door.Value.Height = 250
-	require.NoError(t, den.Update(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, den.Save(ctx, db, house, den.WithLinkRule(den.LinkWrite)))
 
 	// Door should be updated
 	foundDoor, err := den.FindByID[Door](ctx, db, door.ID)
@@ -1311,13 +1300,13 @@ func TestWithLinkRule_DeleteIgnore(t *testing.T) {
 	ctx := context.Background()
 
 	door := &Door{Height: 200, Width: 80}
-	require.NoError(t, den.Insert(ctx, db, door))
+	require.NoError(t, den.Save(ctx, db, door))
 
 	house := &House{
 		Name: "KeepDoor",
 		Door: den.NewLink(door),
 	}
-	require.NoError(t, den.Insert(ctx, db, house))
+	require.NoError(t, den.Save(ctx, db, house))
 
 	require.NoError(t, den.Delete(ctx, db, house, den.WithLinkRule(den.LinkIgnore)))
 
@@ -1362,7 +1351,7 @@ func TestWithLinkRule_Write_RunsValidation(t *testing.T) {
 		Part:  den.NewLink(invalidPart),
 	}
 
-	err := den.Insert(ctx, db, machine, den.WithLinkRule(den.LinkWrite))
+	err := den.Save(ctx, db, machine, den.WithLinkRule(den.LinkWrite))
 	require.ErrorIs(t, err, den.ErrValidation)
 
 	// Part with valid name should succeed
@@ -1372,6 +1361,6 @@ func TestWithLinkRule_Write_RunsValidation(t *testing.T) {
 		Part:  den.NewLink(validPart),
 	}
 
-	require.NoError(t, den.Insert(ctx, db, machine2, den.WithLinkRule(den.LinkWrite)))
+	require.NoError(t, den.Save(ctx, db, machine2, den.WithLinkRule(den.LinkWrite)))
 	assert.NotEmpty(t, validPart.ID)
 }

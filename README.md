@@ -28,7 +28,7 @@ Each Go struct you register is a *document*, stored as a JSONB row in a SQL tabl
 - **Chainable QuerySet** — `NewQuery[T](db).Where(...).Sort(...).Limit(n).All(ctx)` with lazy evaluation
 - **Range iteration** — `Iter()` returns `iter.Seq2[*T, error]` for memory-efficient streaming with Go's `range`
 - **Typed relations** — `Link[T]` for one-to-one, `[]Link[T]` for one-to-many, with cascade write/delete and eager/lazy fetch
-- **Back-references** — `BackLinks[T]` finds all documents referencing a given target
+- **Back-references** — `QuerySet.BackLinks` finds all documents referencing a given target
 - **Native aggregation** — `Avg`, `Sum`, `Min`, `Max` pushed down to SQL; `GroupBy` and `Project` for analytics
 - **Full-text search** — FTS5 for SQLite, tsvector for PostgreSQL, same `Search()` API
 - **Lifecycle hooks** — BeforeInsert, AfterUpdate, Validate, and more — interfaces on your struct, no registration
@@ -124,28 +124,25 @@ db, err := den.OpenURL(ctx, "postgres://user:pass@localhost/mydb")
 
 ```
 den/
-├── den.go, crud.go, queryset.go    Core API: Open, CRUD, QuerySet
-├── iter.go                         Iter() — iter.Seq2 for range loops
-├── aggregate.go                    Avg, Sum, Min, Max, GroupBy, Project
-├── link.go, backlinks.go           Link[T] relations, BackLinks
-├── search.go                       Full-text search (FTSProvider)
-├── track.go                        Change tracking: IsChanged, GetChanges
-├── soft_delete.go                  Soft delete, HardDelete
-├── hooks.go                        Lifecycle hook interfaces
-├── revision.go                     Optimistic concurrency
-├── tx.go                           Transactions
-├── storage.go                      Storage interface
+├── den.go, crud.go, query.go       Public API: Open, Save, FindByID, NewQuery, …
+├── aliases.go, options.go          Type aliases + CRUDOption / LockOption constructors
+├── errors.go                       Error sentinels (re-exports)
+├── internal/core/                  Engine — every implementation file, plus tests
+├── internal/util/                  Shared helpers (reflect, sql safety, field validation)
 ├── storage/                        Storage backend registry + OpenURL
 ├── storage/file/                   Local filesystem backend (file:// scheme)
+├── storage/s3/                     S3-compatible backend (s3:// scheme)
 ├── document/                       Base + composable SoftDelete, Tracked, Attachment embeds
 ├── where/                          Query condition builders
 ├── backend/
 │   ├── sqlite/                     SQLite backend (pure Go, no CGO)
 │   └── postgres/                   PostgreSQL backend (pgx)
-├── validate/                       Optional struct tag validation
+├── validate/                       Struct tag validation entry point
 ├── migrate/                        Migration framework
 └── dentest/                        Test helpers
 ```
+
+The root package is a thin API skin — six files of type aliases and one-line wrapper functions. Everything load-bearing lives in `internal/core/`, hidden from consumers by Go's `internal/` visibility rule. Aliases preserve identity (`den.QuerySet[T]` IS `core.QuerySet[T]`), so the indirection is free at runtime.
 
 ### Backend Interface
 
@@ -251,21 +248,21 @@ Single-goroutine latency per operation. Lower is better.
 <!-- BENCH:SERIAL -->
 | Scenario | SQLite | Postgres | SQLite allocs | Postgres allocs |
 |---|---:|---:|---:|---:|
-| Save (insert) | 146.3 µs | 177.1 µs | 31 | 29 |
-| SaveAll (100) | 9.75 ms | 13.30 ms | 3412 | 2916 |
-| SaveAll (1000) | 90.86 ms | 139.34 ms | 34020 | 29062 |
-| FindByID | 5.0 µs | 36.6 µs | 43 | 32 |
-| FindByIDs (10) | 275.3 µs | 948.0 µs | 340 | 326 |
-| Query + Sort + Limit(10) | 727.9 µs | 2.18 ms | 327 | 291 |
-| Query + Sort + Limit(100) | 1.35 ms | 4.08 ms | 2940 | 2544 |
-| Iter (1000 rows) | 2.73 ms | 2.83 ms | 29048 | 25036 |
-| Count(filter) | 25.6 µs | 833.5 µs | 29 | 31 |
-| Sum(filter) | 177.3 µs | 1.09 ms | 35 | 41 |
-| FTS Search | 895.9 µs | 2.14 ms | 604 | 513 |
-| WithFetchLinks (20 rows) | 75.3 µs | 681.5 µs | 656 | 570 |
-| Save (update) | 121.4 µs | 279.6 µs | 63 | 50 |
-| QuerySet.Update (100) | 9.03 ms | 18.21 ms | 5249 | 4343 |
-| RunInTransaction | 160.8 µs | 296.5 µs | 79 | 56 |
+| Save (insert) | 150.1 µs | 159.0 µs | 49 | 47 |
+| SaveAll (100) | 9.95 ms | 13.58 ms | 5211 | 4716 |
+| SaveAll (1000) | 91.94 ms | 139.92 ms | 52026 | 47071 |
+| FindByID | 104.0 µs | 424.4 µs | 62 | 59 |
+| FindByIDs (10) | 264.2 µs | 947.7 µs | 343 | 329 |
+| Query + Sort + Limit(10) | 723.8 µs | 1.84 ms | 327 | 291 |
+| Query + Sort + Limit(100) | 1.90 ms | 4.69 ms | 2939 | 2544 |
+| Iter (1000 rows) | 2.65 ms | 2.78 ms | 29044 | 25029 |
+| Count(filter) | 25.3 µs | 780.7 µs | 29 | 31 |
+| Sum(filter) | 177.2 µs | 1.04 ms | 35 | 41 |
+| FTS Search | 902.6 µs | 2.13 ms | 604 | 513 |
+| WithFetchLinks (20 rows) | 74.0 µs | 438.5 µs | 656 | 570 |
+| Save (update) | 140.3 µs | 349.8 µs | 100 | 96 |
+| QuerySet.Update (100) | 9.28 ms | 21.22 ms | 7049 | 6143 |
+| RunInTransaction | 181.0 µs | 330.1 µs | 116 | 102 |
 
 <!-- /BENCH:SERIAL -->
 
@@ -276,10 +273,10 @@ Single-goroutine latency per operation. Lower is better.
 <!-- BENCH:CONCURRENT -->
 | Scenario | SQLite | Postgres |
 |---|---:|---:|
-| FindByID | 69.0k ops/s | 82.4k ops/s |
-| Save (insert) | 5.1k ops/s | 29.3k ops/s |
-| Mixed reads/writes 80/20 | 29.2k ops/s | 63.3k ops/s |
-| Queue consumer (SkipLocked) | 25.1k ops/s | 19.4k ops/s |
+| FindByID | 8.6k ops/s | 3.1k ops/s |
+| Save (insert) | 4.7k ops/s | 30.3k ops/s |
+| Mixed reads/writes 80/20 | 14.8k ops/s | 3.7k ops/s |
+| Queue consumer (SkipLocked) | 24.7k ops/s | 21.9k ops/s |
 
 <!-- /BENCH:CONCURRENT -->
 

@@ -2,31 +2,42 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
+## 0.12.0 — 2026-05-15
+
+The doc-in-hand and by-condition write surfaces collapse into one verb each. `Save` (with `SaveAll`/`DeleteAll`/`RefreshAll` for slices) is the only top-level write entry point — its branch is decided by the document's ID, not by the caller picking `Insert` vs `Update`. Everything by-condition lives on `QuerySet` as a chainable terminal. Tag validation is unconditionally always-on. One small marker interface (`document.Document`) gates `validate.Document` at compile time.
 
 ### Added
 
-- **`Save` / `SaveAll` / `DeleteAll` / `RefreshAll`** as the doc-in-hand top-level entry points. `Save` inspects the document ID and routes to the insert or update path; `SaveAll` / `DeleteAll` / `RefreshAll` apply the same per-doc operation across a slice inside a single transaction.
-
-- **`QuerySet.Delete` / `UpdateOne` / `UpsertOne` / `GetOrCreate` / `BackLinks`** write terminals. By-condition mutations now live on the QuerySet so the same chain (`Where(...).IncludeDeleted()…`) composes for read and write paths. `QuerySet.Delete` drains its iterator before issuing per-row writes, which fixes a latent pgx "conn busy" failure under cursor pinning, and runs the drain in chunks of 1000 rows so unbounded-size match sets cannot OOM the process.
+- **`Save` / `SaveAll` / `DeleteAll` / `RefreshAll`** as the doc-in-hand top-level entry points. `Save` inspects the document ID and routes to the insert or update path; the `*All` helpers apply the same per-doc operation across a slice inside a single transaction (fail-fast).
+- **`QuerySet.Delete` / `UpdateOne` / `UpsertOne` / `GetOrCreate` / `BackLinks`** write terminals. By-condition mutations now compose with the same chain (`Where(...).IncludeDeleted()…`) as reads. `QuerySet.Delete` drains its iterator in chunks of 1000 rows before issuing per-row writes — fixes a latent pgx "conn busy" failure under cursor pinning and keeps memory bounded on unbounded-size match sets.
+- **`den.NewID()`** as the public entry point for generating a fresh ULID outside a save (worker IDs, correlation IDs, pre-assigned doc IDs, deterministic test fixtures).
+- **`document.Document` marker interface.** Any type embedding `document.Base` satisfies it automatically. Used as the parameter type on `validate.Document` so non-document structs fail at compile time.
 
 ### Changed
 
-- **Hydration depth is now uniform across every read terminal.** `FindByID`, `Refresh`, `Iter`, and the upsert insert branch used to be silently single-level even when the caller had requested deeper recursion (e.g. via `WithNestingDepth`); they now route through the same batched resolver as `All` / `AllWithCount` / `Search` and recurse up to `nestDepth` (or `defaultNestingDepth=3` for the non-QuerySet reads). `FetchAllLinks` keeps its fixed one-hop contract — callers needing transitive hydration use a QuerySet terminal. Affects only docs with nested eager-tagged or `WithFetchLinks` link chains; flat-graph reads are unchanged.
+- **Hydration depth is uniform across every read terminal.** `FindByID`, `Refresh`, `Iter`, and the upsert insert branch used to be silently single-level even when the caller had requested deeper recursion (e.g. via `WithNestingDepth`); they now route through the same batched resolver as `All` / `AllWithCount` / `Search` and recurse up to `nestDepth` (or `defaultNestingDepth=3` for the non-QuerySet reads). `FetchAllLinks` keeps its fixed one-hop contract — callers needing transitive hydration use a QuerySet terminal. Affects only docs with nested eager-tagged or `WithFetchLinks` link chains.
+- **`validate.Struct(any)` → `validate.Document(document.Document)`.** The function only ever validated Den documents; the typed signature rejects non-document structs at compile time. Use go-playground/validator/v10 directly for arbitrary struct validation. Migration: rename the call.
 
 ### Removed
 
-- **`Insert` / `Update` / `InsertMany` / `UpdateMany` / `DeleteMany` / `FindOneAndUpdate` / `FindOneAndUpsert` / `FindOrCreate` / `BackLinks` / `BackLinksField` top-level functions.** Doc-in-hand writes go through `Save` / `SaveAll`; by-condition writes go through the new `QuerySet` terminals (`Delete`, `UpdateOne`, `UpsertOne`, `GetOrCreate`, `BackLinks`). The two-surface split (CRUD vs QuerySet) is gone — there is one chainable builder for filtering and one set of `Save*` / `Delete*` helpers for in-hand docs. Mapping: `Insert(...)` and `Update(...)` → `Save(...)`; `InsertMany(...)` → `SaveAll(...)`; `UpdateMany(...)` → `NewQuery[T](s, conds...).Update(ctx, fields)`; `DeleteMany(...)` → `NewQuery[T](s, conds...).Delete(ctx)`; `FindOneAndUpdate(...)` → `NewQuery[T](s, conds...).UpdateOne(ctx, fields)`; `FindOneAndUpsert(...)` → `NewQuery[T](s, conds...).UpsertOne(ctx, defaults, fields)`; `FindOrCreate(...)` → `NewQuery[T](s, conds...).GetOrCreate(ctx, defaults)`; `BackLinks[T](...)` → `NewQuery[T](s).BackLinks(field, id).All(ctx)`; `BackLinksField` has no direct replacement — pick the field name explicitly.
+- **All deprecated top-level CRUD wrappers.** `Insert`, `Update`, `InsertMany`, `UpdateMany`, `DeleteMany`, `FindOneAndUpdate`, `FindOneAndUpsert`, `FindOrCreate`, `BackLinks`, `BackLinksField` are gone. Migration:
 
-- **`PreValidate` / `ContinueOnError` / `MaxRecordedFailures` options, `InsertManyError` / `InsertFailure` types, `ErrIncompatibleScope` / `ErrIncompatibleOptions` sentinels.** All scaffolding for the removed `InsertMany`. Validation is always-on (see below) so the `PreValidate` opt-in is no-op-equivalent; partial-failure batching has no equivalent on `SaveAll`, which is fail-fast and rolls back the transaction on the first error.
+    | Removed | Replacement |
+    |---|---|
+    | `Insert(...)`, `Update(...)` | `Save(...)` |
+    | `InsertMany(...)` | `SaveAll(...)` |
+    | `UpdateMany(...)` | `NewQuery[T](s, conds...).Update(ctx, fields)` |
+    | `DeleteMany(...)` | `NewQuery[T](s, conds...).Delete(ctx)` |
+    | `FindOneAndUpdate(...)` | `NewQuery[T](s, conds...).UpdateOne(ctx, fields)` |
+    | `FindOneAndUpsert(...)` | `NewQuery[T](s, conds...).UpsertOne(ctx, defaults, fields)` |
+    | `FindOrCreate(...)` | `NewQuery[T](s, conds...).GetOrCreate(ctx, defaults)` |
+    | `BackLinks[T](...)` | `NewQuery[T](s).BackLinks(field, id).All(ctx)` |
+    | `BackLinksField` | no direct replacement — pick the field name explicitly |
 
-- **`den.WithTagValidator` option and `validate.WithValidation()` helper.** Tag-based field validation is now always-on: Den runs `validate.Struct(doc)` automatically on every Insert and Update — there is no opt-in, no way to bypass `validate:` constraints from inside Den. Migration: delete `den.WithTagValidator(...)` and `validate.WithValidation()` calls from the `Open` / `OpenURL` argument list. Struct tags stay unchanged. `validate.ValidateStruct` renamed to `validate.Struct` for callers that validate outside the Den boundary (HTTP handlers, form parsers).
-
-- **`den.Encoder` interface and `Backend.Encoder()` method.** The Encoder abstraction had a single concrete implementation across all backends (an `*internal.Encoder` doing `goccy/go-json` Marshal/Unmarshal) and no documented seam for non-JSON storage — Den is JSON-only by design (JSONB on both backends). Inlined into `db.encode` / `db.decode` as the single JSON seam; consumers that referenced `den.Encoder` directly need to drop the import. The `goccy/go-json` library remains in use; a future revisit when `encoding/json/v2` stabilizes in Go 1.27 will swap libraries inside `db.encode` only.
-
-- **`den/id` subpackage and `document.NewID()` helper.** Three hops to generate one ULID was two hops too many. The ULID body now lives inline in `den.NewID()`; users wanting an ID call `den.NewID()` directly. Migration: replace `document.NewID()` and `id.New()` with `den.NewID()`.
-
-- **`validate.Struct(any)` renamed to `validate.Document(document.Document)`.** The function only ever validated Den documents — the `any` signature accepted anything, which invited confusion. `document.Document` is a marker interface satisfied automatically by every type embedding `document.Base`; non-Den structs no longer compile, which catches "validate this random DTO" mistakes at build time. Use go-playground/validator/v10 directly for arbitrary struct validation. Migration: rename the call.
+- **`InsertMany` scaffolding.** `PreValidate` / `ContinueOnError` / `MaxRecordedFailures` options, `InsertManyError` / `InsertFailure` types, `ErrIncompatibleScope` / `ErrIncompatibleOptions` sentinels. `SaveAll` is fail-fast and rolls back on the first error; validation is always-on so the pre-validate opt-in had nothing to opt into.
+- **`den.WithTagValidator` option and `validate.WithValidation()` helper.** Tag validation is now unconditionally always-on. Migration: drop the call from `Open`/`OpenURL`. Struct tags stay unchanged.
+- **`den.Encoder` interface and `Backend.Encoder()` method.** Single concrete implementation across all backends (`goccy/go-json` Marshal/Unmarshal); inlined as `db.encode` / `db.decode`. Den is JSON-only by design.
+- **`den/id` subpackage and `document.NewID()` helper.** Three hops to generate one ULID was two too many. Body now lives in `den.NewID()`; callers replace `id.New()` and `document.NewID()` with `den.NewID()`.
 
 ## 0.11.2 — 2026-05-03
 

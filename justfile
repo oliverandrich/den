@@ -64,7 +64,7 @@ coverage-check: coverage
 
 # Run benchmarks (use count=N for statistical significance)
 bench count="1":
-    go test -bench=. -benchmem -count={{count}} -run='^$$' .
+    go test -bench=. -benchmem -count={{count}} -run='^$$' ./internal/core
 
 # Run realworld + concurrent benchmarks and refresh the README tables.
 # Requires a reachable PostgreSQL via DEN_POSTGRES_URL; falls back to the
@@ -74,7 +74,7 @@ bench-readme:
     set -euo pipefail
     out=$(mktemp -t den-bench.XXXXXX)
     trap 'rm -f "$out"' EXIT
-    go test -bench='Benchmark(RW|Concurrent)_' -benchmem -run='^$$' -benchtime=2s . | tee "$out"
+    go test -bench='Benchmark(RW|Concurrent)_' -benchmem -run='^$$' -benchtime=2s ./internal/core | tee "$out"
     go run ./scripts/bench_report.go -readme=README.md < "$out"
     echo "README.md benchmark tables updated."
 

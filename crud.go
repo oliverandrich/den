@@ -207,7 +207,11 @@ func Update[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption
 // on exactly one path (Insert hooks on the new-doc branch, Update
 // hooks on the existing-doc branch).
 func Save[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOption) error {
-	id, _ := extractBaseID(reflect.ValueOf(document).Elem())
+	col, err := collectionFor[T](s.db())
+	if err != nil {
+		return err
+	}
+	id := getID(reflect.ValueOf(document).Elem(), col.structInfo)
 	if id == "" {
 		return Insert(ctx, s, document, opts...)
 	}

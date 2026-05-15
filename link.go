@@ -66,11 +66,16 @@ func NewLink[T any](doc *T) Link[T] {
 	return Link[T]{ID: id, Value: doc, Loaded: true}
 }
 
-// extractBaseID walks v's struct tree and returns the ID of the first
-// document.Base it finds. Robust against renamed embeds, deep
-// composition, and ambiguous-promotion cases that defeat
-// reflect.Value.FieldByName("ID"). Returns ("", false) when no
-// document.Base is present anywhere in the tree.
+// extractBaseID walks v's anonymous-embed chain and returns the ID of the
+// first document.Base it finds. Recursion follows the same rule as
+// internal.AnalyzeStruct's collectFields — only anonymous struct fields
+// are descended — so this function and the StructInfo.BaseID lookup
+// always agree on what counts as an ID-bearing Base. Returns ("", false)
+// when no document.Base is reachable through anonymous embeds.
+//
+// Used by NewLink, which has no registered StructInfo available at the
+// call site, to obtain the ID without going through the collection
+// registry.
 func extractBaseID(v reflect.Value) (string, bool) {
 	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -84,7 +89,11 @@ func extractBaseID(v reflect.Value) (string, bool) {
 	if v.Type() == documentBaseType {
 		return v.FieldByName("ID").String(), true
 	}
+	t := v.Type()
 	for i := range v.NumField() {
+		if !t.Field(i).Anonymous {
+			continue
+		}
 		if id, ok := extractBaseID(v.Field(i)); ok {
 			return id, true
 		}

@@ -94,6 +94,26 @@ func TestNewLink_PanicsWithoutBase(t *testing.T) {
 	)
 }
 
+// namedBaseDoc carries document.Base as a NAMED field, not anonymous.
+// extractBaseID only walks anonymous embeds — matching the rule
+// internal.AnalyzeStruct uses to populate StructInfo.BaseID — so a
+// named-Base field does not count as a Base-bearing doc and NewLink
+// must panic the same way it does for noBaseDoc.
+type namedBaseDoc struct {
+	Embedded document.Base
+	Name     string `json:"name"`
+}
+
+func TestNewLink_PanicsOnNamedBase(t *testing.T) {
+	d := &namedBaseDoc{Name: "named"}
+	d.Embedded.ID = "should-not-be-found"
+	assert.PanicsWithValue(t,
+		"den: NewLink: type den_test.namedBaseDoc does not embed document.Base",
+		func() { _ = den.NewLink(d) },
+		"a named document.Base field is not an embed — extractBaseID and AnalyzeStruct must agree on this",
+	)
+}
+
 func TestLink_ZeroValue(t *testing.T) {
 	var link den.Link[Door]
 	assert.Empty(t, link.ID)

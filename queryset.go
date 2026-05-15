@@ -538,12 +538,21 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 	return count, nil
 }
 
+// deleteChunkSize caps how many rows QuerySet.Delete materialises per
+// round-trip. The chunked loop drains the iterator before issuing per-row
+// writes (pgx pins the connection while a cursor is open; in-loop writes
+// would surface "conn busy"), and the cap keeps the in-memory buffer
+// bounded so unbounded match sets cannot OOM the process.
+var deleteChunkSize = 1000
+
 // Delete removes every document matching the QuerySet's conditions and
 // returns the number of rows affected. The scan + writes run in one
-// transaction (or inline in the caller's tx when bound to a *Tx); the
-// iterator is drained before any write fires, which is required on
-// PostgreSQL because pgx pins the transaction's connection while a
-// cursor is open and an in-loop write would surface a "conn busy" error.
+// transaction (or inline in the caller's tx when bound to a *Tx); each
+// chunk is drained from the iterator before its writes fire, which is
+// required on PostgreSQL because pgx pins the connection while a cursor
+// is open and an in-loop write would surface "conn busy". The loop
+// repeats LIMIT-bounded chunks until the match set is empty, so memory
+// stays bounded regardless of total match-set size.
 //
 // Per-row hooks fire: BeforeDelete, then on the soft path BeforeSoftDelete
 // → AfterSoftDelete → AfterDelete, on the hard path just AfterDelete.
@@ -552,6 +561,11 @@ func (qs QuerySet[T]) Update(ctx context.Context, fields SetFields) (int64, erro
 //
 // Fail-fast: a per-row error stops the loop, rolls back the transaction,
 // and returns (0, err). No partial commit.
+//
+// Skip is honoured on the first chunk only — subsequent chunks see fresh
+// LIMIT windows over the still-matching rows. After/Before cursor
+// pagination is honoured every chunk because deleted rows naturally drop
+// out of the next chunk's match set.
 func (qs QuerySet[T]) Delete(ctx context.Context, opts ...CRUDOption) (int64, error) {
 	if err := qs.preflight(); err != nil {
 		return 0, err
@@ -562,30 +576,59 @@ func (qs QuerySet[T]) Delete(ctx context.Context, opts ...CRUDOption) (int64, er
 		return 0, err
 	}
 
-	q := qs.buildBackendQuery(col)
-
 	var count int64
 	body := func(tx *Tx) error {
-		iter, err := tx.tx.Query(ctx, col.meta.Name, q)
-		if err != nil {
-			return err
-		}
-		docs, err := drainIter[T](ctx, db, iter, qs.limitN)
-		_ = iter.Close()
-		if err != nil {
-			return err
-		}
-
-		for _, doc := range docs {
+		chunk := qs
+		for {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := Delete(ctx, tx, doc, opts...); err != nil {
+
+			chunk.limitN = deleteChunkSize
+			if qs.limitN > 0 {
+				remaining := int64(qs.limitN) - count
+				if remaining <= 0 {
+					return nil
+				}
+				if int64(chunk.limitN) > remaining {
+					chunk.limitN = int(remaining)
+				}
+			}
+
+			iter, err := tx.tx.Query(ctx, col.meta.Name, chunk.buildBackendQuery(col))
+			if err != nil {
 				return err
 			}
-			count++
+			docs, err := drainIter[T](ctx, db, iter, chunk.limitN)
+			_ = iter.Close()
+			if err != nil {
+				return err
+			}
+
+			if len(docs) == 0 {
+				return nil
+			}
+
+			for _, doc := range docs {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := Delete(ctx, tx, doc, opts...); err != nil {
+					return err
+				}
+				count++
+			}
+
+			// Skip applies to the original match set; after the first
+			// chunk the deleted rows are gone and a fresh LIMIT window
+			// already starts at "the next still-matching row" — keeping
+			// skipN would over-shoot.
+			chunk.skipN = 0
+
+			if len(docs) < chunk.limitN {
+				return nil
+			}
 		}
-		return nil
 	}
 
 	if err := runOnScopeVoid(ctx, qs.scope, body); err != nil {

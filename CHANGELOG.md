@@ -8,7 +8,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`Save` / `SaveAll` / `DeleteAll` / `RefreshAll`** as the doc-in-hand top-level entry points. `Save` inspects the document ID and routes to the insert or update path; `SaveAll` / `DeleteAll` / `RefreshAll` apply the same per-doc operation across a slice inside a single transaction.
 
-- **`QuerySet.Delete` / `UpdateOne` / `UpsertOne` / `GetOrCreate` / `BackLinks`** write terminals. By-condition mutations now live on the QuerySet so the same chain (`Where(...).IncludeDeleted()…`) composes for read and write paths. `QuerySet.Delete` drains its iterator before issuing per-row writes, which fixes a latent pgx "conn busy" failure under cursor pinning.
+- **`QuerySet.Delete` / `UpdateOne` / `UpsertOne` / `GetOrCreate` / `BackLinks`** write terminals. By-condition mutations now live on the QuerySet so the same chain (`Where(...).IncludeDeleted()…`) composes for read and write paths. `QuerySet.Delete` drains its iterator before issuing per-row writes, which fixes a latent pgx "conn busy" failure under cursor pinning, and runs the drain in chunks of 1000 rows so unbounded-size match sets cannot OOM the process.
 
 ### Changed
 

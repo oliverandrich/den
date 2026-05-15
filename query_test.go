@@ -886,6 +886,56 @@ func TestQuerySet_Delete(t *testing.T) {
 	assert.Equal(t, "Keep", remaining[0].Name)
 }
 
+// TestQuerySet_Delete_MultiChunk pins that Delete handles match sets
+// larger than its internal chunk size (1000 rows). N=1100 forces a full
+// 1000-row chunk plus a 100-row tail chunk. Without chunking the path
+// works fine; the test exists to pin the chunk-boundary behaviour so a
+// refactor cannot silently regress to "stops after the first chunk".
+func TestQuerySet_Delete_MultiChunk(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	const N = 1100
+	docs := make([]*QueryProduct, N)
+	for i := range N {
+		docs[i] = &QueryProduct{Name: fmt.Sprintf("p%04d", i), Price: float64(i)}
+	}
+	require.NoError(t, den.SaveAll(ctx, db, docs))
+
+	count, err := den.NewQuery[QueryProduct](db,
+		where.Field("price").Lt(900.0),
+	).Delete(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(900), count, "must delete every row matching the predicate across chunk boundaries")
+
+	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(200), remaining, "non-matching rows untouched, chunk tail does not over-delete")
+}
+
+// TestQuerySet_Delete_HonorsLimit pins that Limit(n) caps the total
+// deletes even when n is smaller than the internal chunk size, and that
+// chunking does not bypass the cap when n straddles a chunk boundary.
+func TestQuerySet_Delete_HonorsLimit(t *testing.T) {
+	db := dentest.MustOpen(t, &QueryProduct{})
+	ctx := context.Background()
+
+	const N = 1500
+	docs := make([]*QueryProduct, N)
+	for i := range N {
+		docs[i] = &QueryProduct{Name: fmt.Sprintf("p%04d", i), Price: float64(i)}
+	}
+	require.NoError(t, den.SaveAll(ctx, db, docs))
+
+	count, err := den.NewQuery[QueryProduct](db).Limit(1200).Delete(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1200), count, "Limit(1200) caps the chunked delete loop after one full + one partial chunk")
+
+	remaining, err := den.NewQuery[QueryProduct](db).Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), remaining)
+}
+
 func TestQuerySet_UpdateOne(t *testing.T) {
 	db := dentest.MustOpen(t, &QueryProduct{})
 	ctx := context.Background()

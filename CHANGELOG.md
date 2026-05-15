@@ -26,6 +26,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`den/id` subpackage and `document.NewID()` helper.** Three hops to generate one ULID was two hops too many. The ULID body now lives inline in `den.NewID()`; users wanting an ID call `den.NewID()` directly. Migration: replace `document.NewID()` and `id.New()` with `den.NewID()`.
 
+- **`validate.Struct(any)` renamed to `validate.Document(document.Document)`.** The function only ever validated Den documents — the `any` signature accepted anything, which invited confusion. `document.Document` is a marker interface satisfied automatically by every type embedding `document.Base`; non-Den structs no longer compile, which catches "validate this random DTO" mistakes at build time. Use go-playground/validator/v10 directly for arbitrary struct validation. Migration: rename the call.
+
 ## 0.11.2 — 2026-05-03
 
 ### Added

@@ -1,11 +1,11 @@
 // Package validate exposes the struct-tag constraint helper used by Den.
 //
-// Den runs Struct automatically on every Insert and Update — there is no
-// opt-in option, and there is no way to bypass tag-level constraints from
-// inside Den. Call Struct directly only at boundaries before the doc
-// reaches Den (typical use: HTTP handlers that want to reject bad input
-// before opening a database transaction). The returned *Errors mirrors
-// what Den's write path would have produced.
+// Den runs Document automatically on every Insert and Update — there is
+// no opt-in option, and there is no way to bypass tag-level constraints
+// from inside Den. Call Document directly only at boundaries before the
+// doc reaches Den (typical use: HTTP handlers that want to reject bad
+// input before opening a database transaction). The returned *Errors
+// mirrors what Den's write path would have produced.
 //
 // The struct-tag syntax follows go-playground/validator/v10:
 //
@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+
+	"github.com/oliverandrich/den/document"
 )
 
 // FieldError describes a single field that failed validation.
@@ -56,14 +58,19 @@ func (e *Errors) Error() string {
 // both surfaces.
 var DefaultValidator = validator.New()
 
-// Struct validates doc against its `validate` struct tags using
+// Document validates doc against its `validate` struct tags using
 // DefaultValidator. Returns nil on success, *Errors on validation
 // failure, or a raw error for malformed input (e.g. a nil pointer).
 //
-// Den's write path calls Struct automatically; this entry point is for
-// validating outside the Den boundary (HTTP handlers, form parsers,
+// The parameter type is the marker interface every Den document type
+// satisfies by embedding document.Base, so attempts to validate
+// arbitrary non-document structs fail at compile time — use
+// go-playground/validator/v10 directly for that case.
+//
+// Den's write path calls Document automatically; this entry point is
+// for validating outside the Den boundary (HTTP handlers, form parsers,
 // pre-save checks).
-func Struct(doc any) error {
+func Document(doc document.Document) error {
 	err := DefaultValidator.Struct(doc)
 	if err == nil {
 		return nil

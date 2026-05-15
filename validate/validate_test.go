@@ -224,7 +224,7 @@ func TestMultipleFieldErrors(t *testing.T) {
 
 func TestValidateStructDirectly(t *testing.T) {
 	doc := &ValidatedDoc{Name: "ab", Email: "bad", Age: -1}
-	err := validate.Struct(doc)
+	err := validate.Document(doc)
 	require.Error(t, err)
 
 	var ve *validate.Errors
@@ -234,12 +234,12 @@ func TestValidateStructDirectly(t *testing.T) {
 
 func TestValidateStructValid(t *testing.T) {
 	doc := &ValidatedDoc{Name: "Alice", Email: "alice@example.com", Age: 25}
-	err := validate.Struct(doc)
+	err := validate.Document(doc)
 	require.NoError(t, err)
 }
 
 func TestValidateStructNilReturnsError(t *testing.T) {
-	err := validate.Struct(nil)
+	err := validate.Document(nil)
 	require.Error(t, err)
 }
 

@@ -40,7 +40,7 @@ type User struct {
 }
 ```
 
-The `validate/` package also exports `validate.Struct(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The returned `*validate.Errors` mirrors what Den's write path would have produced.
+The `validate/` package also exports `validate.Document(doc)` for callers that want to run the same checks outside the Den boundary — typical use is an HTTP handler that rejects bad input before opening a database transaction. The parameter type is `document.Document`, so it accepts any type that embeds `document.Base`; passing a non-document struct fails at compile time. The returned `*validate.Errors` mirrors what Den's write path would have produced.
 
 ## Execution Order
 

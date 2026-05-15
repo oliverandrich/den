@@ -8,6 +8,7 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal"
 	"github.com/oliverandrich/den/validate"
 )
@@ -20,11 +21,16 @@ import (
 // Order is load-bearing:
 //   - Mutating hooks run first so they can populate defaults, compute
 //     derived fields, and normalize values before validation sees them.
-//   - validate.Struct runs next — `validate:` struct-tag constraints
-//     check the final post-hook state. Always-on, not opt-in: a doc with
-//     constraint tags has those constraints enforced by Den itself.
+//   - validate.Document runs next — `validate:` struct-tag constraints
+//     check the final post-hook state. Always-on, not opt-in: a doc
+//     with constraint tags has those constraints enforced by Den itself.
 //   - Custom Validator.Validate() runs last so it can perform cross-field
 //     checks against that same post-hook state.
+//
+// Every doc reaching this path has been through Register, which rejects
+// types that don't embed document.Base — the document.Document assertion
+// below is therefore guaranteed to hold and used purely to satisfy the
+// typed signature on validate.Document.
 func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 	if isInsert {
 		if err := runBeforeInsertHooks(ctx, doc); err != nil {
@@ -35,7 +41,11 @@ func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 			return err
 		}
 	}
-	if err := validate.Struct(doc); err != nil {
+	d, ok := doc.(document.Document)
+	if !ok {
+		return fmt.Errorf("%w: type %T does not embed document.Base", ErrValidation, doc)
+	}
+	if err := validate.Document(d); err != nil {
 		return fmt.Errorf("%w: %w", ErrValidation, err)
 	}
 	return runValidationHooks(ctx, doc)

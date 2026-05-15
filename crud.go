@@ -174,73 +174,38 @@ func writeDocCore(ctx context.Context, db *DB, b ReadWriter, target any, col *co
 	return runAfterUpdateHooks(ctx, target)
 }
 
+// FindByID retrieves a document by its ID. Returns ErrNotFound if no
+// row matches.
+//
+// `den:"eager"`-tagged link fields on T are hydrated by default; pass
+// WithoutFetchLinks to suppress hydration. Soft-deleted documents are
+// returned: explicit-by-ID lookups bypass the soft-delete filter that
+// QuerySet read terminals apply on filtered queries — callers can check
+// Value.IsDeleted() to react.
+//
+// Top-level shorthand for `NewQuery[T](s).Where(where.Field("_id").Eq(id)).IncludeDeleted().First(ctx)`
+// — discoverable next to Save / Delete / Refresh.
+func FindByID[T any](ctx context.Context, s Scope, id string, opts ...CRUDOption) (*T, error) {
+	return querySetFromOpts[T](s, []where.Condition{where.Field("_id").Eq(id)}, opts).IncludeDeleted().First(ctx)
+}
+
 // FindByIDs retrieves multiple documents by their IDs in a single query.
 // Missing IDs are silently skipped. Order is not guaranteed.
 //
 // `den:"eager"`-tagged link fields on T are batch-resolved by default;
-// pass WithoutFetchLinks to suppress hydration.
+// pass WithoutFetchLinks to suppress hydration. Soft-deleted documents
+// are returned (see FindByID for the rationale).
+//
+// Top-level shorthand for `NewQuery[T](s).Where(where.Field("_id").In(ids...)).IncludeDeleted().All(ctx)`.
 func FindByIDs[T any](ctx context.Context, s Scope, ids []string, opts ...CRUDOption) ([]*T, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-
 	anyIDs := make([]any, len(ids))
 	for i, id := range ids {
 		anyIDs[i] = id
 	}
-
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return nil, err
-	}
-
-	rw := s.readWriter()
-	q := NewQuery[T](db, where.Field("_id").In(anyIDs...)).buildBackendQuery(col)
-	iter, err := rw.Query(ctx, col.meta.Name, q)
-	if err != nil {
-		return nil, err
-	}
-	results, err := drainIter[T](ctx, db, iter, len(ids))
-	_ = iter.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	o := applyCRUDOpts(opts)
-	if err := batchResolveLinks(ctx, db, rw, results, defaultNestingDepth, crudFetchMode(o)); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-// FindByID retrieves a document by its ID.
-//
-// `den:"eager"`-tagged link fields on T are hydrated by default; pass
-// WithoutFetchLinks to suppress hydration.
-func FindByID[T any](ctx context.Context, s Scope, id string, opts ...CRUDOption) (*T, error) {
-	db := s.db()
-	col, err := collectionFor[T](db)
-	if err != nil {
-		return nil, err
-	}
-
-	rw := s.readWriter()
-	data, err := rw.Get(ctx, col.meta.Name, id)
-	if err != nil {
-		return nil, err
-	}
-
-	result := new(T)
-	if err := decodeWithSnapshot(db, data, result); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-
-	o := applyCRUDOpts(opts)
-	if err := batchResolveLinks(ctx, db, rw, []*T{result}, defaultNestingDepth, crudFetchMode(o)); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return querySetFromOpts[T](s, []where.Condition{where.Field("_id").In(anyIDs...)}, opts).IncludeDeleted().All(ctx)
 }
 
 // Update updates an existing document in the database.

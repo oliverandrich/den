@@ -2,6 +2,12 @@
 
 All notable changes to Den are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+### Changed
+
+- **Write path skips `validate.Document` for types without `validate:` tags.** Detected once at Register time by scanning the registered type's reachable type tree (including named struct fields, pointers, slices, maps). Behavior is unchanged for users — tagged types still validate on every Save; the `Validator.Validate(ctx)` hook is untouched. Internal optimization: `BenchmarkRW_SQLite_Insert` allocs drop 49 → 31/op (-37%) on a tagless fixture.
+
 ## 0.12.0 — 2026-05-15
 
 The doc-in-hand and by-condition write surfaces collapse into one verb each. `Save` (with `SaveAll`/`DeleteAll`/`RefreshAll` for slices) is the only top-level write entry point — its branch is decided by the document's ID, not by the caller picking `Insert` vs `Update`. Everything by-condition lives on `QuerySet` as a chainable terminal. Tag validation is unconditionally always-on. One small marker interface (`document.Document`) gates `validate.Document` at compile time.

@@ -24,6 +24,11 @@ import (
 //   - validate.Document runs next — `validate:` struct-tag constraints
 //     check the final post-hook state. Always-on, not opt-in: a doc
 //     with constraint tags has those constraints enforced by Den itself.
+//     Short-circuited when the registered type has no validate: tags
+//     anywhere in its reachable type tree (col.structInfo.HasValidateTags
+//     is false) — the reflective walk is the hottest allocator on the
+//     write path and skipping it for tagless types is the dominant
+//     observed win in profiles.
 //   - Custom Validator.Validate() runs last so it can perform cross-field
 //     checks against that same post-hook state.
 //
@@ -31,7 +36,7 @@ import (
 // types that don't embed document.Base — the document.Document assertion
 // below is therefore guaranteed to hold and used purely to satisfy the
 // typed signature on validate.Document.
-func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
+func runPrePersistHooks(ctx context.Context, col *collectionInfo, doc any, isInsert bool) error {
 	if isInsert {
 		if err := runBeforeInsertHooks(ctx, doc); err != nil {
 			return err
@@ -41,12 +46,14 @@ func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 			return err
 		}
 	}
-	d, ok := doc.(document.Document)
-	if !ok {
-		return fmt.Errorf("%w: type %T does not embed document.Base", ErrValidation, doc)
-	}
-	if err := validate.Document(d); err != nil {
-		return fmt.Errorf("%w: %w", ErrValidation, err)
+	if col.structInfo.HasValidateTags {
+		d, ok := doc.(document.Document)
+		if !ok {
+			return fmt.Errorf("%w: type %T does not embed document.Base", ErrValidation, doc)
+		}
+		if err := validate.Document(d); err != nil {
+			return fmt.Errorf("%w: %w", ErrValidation, err)
+		}
 	}
 	return runValidationHooks(ctx, doc)
 }
@@ -69,7 +76,7 @@ func runPrePersistHooks(ctx context.Context, doc any, isInsert bool) error {
 func writeDocCore(ctx context.Context, db *DB, b ReadWriter, target any, col *collectionInfo, isInsert, ignoreRevision bool) error {
 	tv := reflect.ValueOf(target).Elem()
 
-	if err := runPrePersistHooks(ctx, target, isInsert); err != nil {
+	if err := runPrePersistHooks(ctx, col, target, isInsert); err != nil {
 		return err
 	}
 

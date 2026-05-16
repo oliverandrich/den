@@ -274,6 +274,48 @@ func TestValidateOnSave(t *testing.T) {
 	assert.ErrorIs(t, err, core.ErrValidation)
 }
 
+// TagValidated carries a struct-tag constraint via go-playground/validator
+// rather than a Validate() method hook. Used to pin that struct-tag
+// validation still runs after the runPrePersistHooks short-circuit was
+// introduced — types with validate: tags must still have those tags
+// enforced on every Save.
+type TagValidated struct {
+	document.Base
+	Name string `json:"name" validate:"required,min=3"`
+}
+
+func TestStructTagValidation_RejectsInvalidInsert(t *testing.T) {
+	db := dentest.MustOpen(t, &TagValidated{})
+	ctx := context.Background()
+
+	v := &TagValidated{Name: ""}
+	err := core.Save(ctx, db, v)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, core.ErrValidation,
+		"types with validate: tags must still be rejected when constraints fail")
+}
+
+func TestStructTagValidation_RejectsInvalidUpdate(t *testing.T) {
+	db := dentest.MustOpen(t, &TagValidated{})
+	ctx := context.Background()
+
+	v := &TagValidated{Name: "Valid"}
+	require.NoError(t, core.Save(ctx, db, v))
+
+	v.Name = "no"
+	err := core.Save(ctx, db, v)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, core.ErrValidation)
+}
+
+func TestStructTagValidation_AcceptsValid(t *testing.T) {
+	db := dentest.MustOpen(t, &TagValidated{})
+	ctx := context.Background()
+
+	v := &TagValidated{Name: "Valid"}
+	require.NoError(t, core.Save(ctx, db, v))
+}
+
 func TestValidateOnSave_Valid(t *testing.T) {
 	db := dentest.MustOpen(t, &Validated{})
 	ctx := context.Background()

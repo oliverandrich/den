@@ -298,6 +298,146 @@ func TestAnalyzeStruct(t *testing.T) {
 	})
 }
 
+type validateTaggedDoc struct {
+	testBase
+	Name string `json:"name" validate:"required,min=3"`
+}
+
+type embeddedValidateInner struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type validateTaggedEmbeddedDoc struct {
+	testBase
+	embeddedValidateInner
+	Title string `json:"title"`
+}
+
+type validateDashTaggedDoc struct {
+	testBase
+	Ignored string `json:"ignored" validate:"-"`
+}
+
+type validateInnerNamedStruct struct {
+	StoragePath string `json:"storage_path" validate:"required,max=1024"`
+	Mime        string `json:"mime"         validate:"required,max=100"`
+}
+
+type validateTaggedNamedStructDoc struct {
+	testBase
+	Hero validateInnerNamedStruct `json:"hero"`
+}
+
+type validateTaggedPointerStructDoc struct {
+	testBase
+	Hero *validateInnerNamedStruct `json:"hero,omitempty"`
+}
+
+type validateTaggedSliceStructDoc struct {
+	testBase
+	Items []validateInnerNamedStruct `json:"items"`
+}
+
+type plainNamedStruct struct {
+	StoragePath string `json:"storage_path"`
+	Mime        string `json:"mime"`
+}
+
+type plainNamedStructDoc struct {
+	testBase
+	Hero plainNamedStruct `json:"hero"`
+}
+
+func TestAnalyzeStruct_HasValidateTags(t *testing.T) {
+	t.Run("no validate tags", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[noTagDoc]())
+		require.NoError(t, err)
+		assert.False(t, info.HasValidateTags)
+	})
+
+	t.Run("no validate tags only den tags", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[taggedDoc]())
+		require.NoError(t, err)
+		assert.False(t, info.HasValidateTags)
+	})
+
+	t.Run("validate tag on top-level field", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[validateTaggedDoc]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags)
+	})
+
+	t.Run("validate tag on embedded struct field", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[validateTaggedEmbeddedDoc]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags,
+			"validate: tags on fields of an anonymous embedded struct must be detected")
+	})
+
+	t.Run("validate dash is treated as no tag", func(t *testing.T) {
+		// go-playground/validator treats validate:"-" as an explicit skip
+		// for the field and its children — no constraints fire. Mirror
+		// that: a doc whose only validate: tag is "-" should short-circuit
+		// like a tagless type and avoid the walker cost.
+		info, err := AnalyzeStruct(reflect.TypeFor[validateDashTaggedDoc]())
+		require.NoError(t, err)
+		assert.False(t, info.HasValidateTags)
+	})
+
+	t.Run("validate dash on parent struct blocks descent", func(t *testing.T) {
+		// A `validate:"-"` on a parent field stops the validator from
+		// recursing into the nested type. The scanner must mirror that or
+		// it would flag types as needing validation that the validator
+		// itself would skip.
+		type outer struct {
+			testBase
+			Inner validateInnerNamedStruct `json:"inner" validate:"-"`
+		}
+		info, err := AnalyzeStruct(reflect.TypeFor[outer]())
+		require.NoError(t, err)
+		assert.False(t, info.HasValidateTags)
+	})
+
+	t.Run("validate dash mixed with real tag still flags", func(t *testing.T) {
+		type mixed struct {
+			testBase
+			Skipped string `json:"skipped" validate:"-"`
+			Name    string `json:"name"    validate:"required"`
+		}
+		info, err := AnalyzeStruct(reflect.TypeFor[mixed]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags)
+	})
+
+	t.Run("validate tag inside a named struct field", func(t *testing.T) {
+		// go-playground/validator descends into named (non-anonymous) struct
+		// fields by default, so a doc whose only validate: tags live inside
+		// a named struct field (e.g. Hero document.Attachment) must still
+		// trigger the walk. Skipping it would silently disable validation.
+		info, err := AnalyzeStruct(reflect.TypeFor[validateTaggedNamedStructDoc]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags)
+	})
+
+	t.Run("validate tag inside a pointer-to-struct field", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[validateTaggedPointerStructDoc]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags)
+	})
+
+	t.Run("validate tag inside a slice element type", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[validateTaggedSliceStructDoc]())
+		require.NoError(t, err)
+		assert.True(t, info.HasValidateTags)
+	})
+
+	t.Run("nested struct field without validate tags", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[plainNamedStructDoc]())
+		require.NoError(t, err)
+		assert.False(t, info.HasValidateTags)
+	})
+}
+
 func TestCollectionName(t *testing.T) {
 	tests := []struct {
 		name     string

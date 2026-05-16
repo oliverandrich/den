@@ -128,6 +128,59 @@ func runRWInsert(b *testing.B, db *core.DB) {
 func BenchmarkRW_SQLite_Insert(b *testing.B)   { runRWInsert(b, rwBenchDB(b)) }
 func BenchmarkRW_Postgres_Insert(b *testing.B) { runRWInsert(b, rwBenchDBPostgres(b)) }
 
+// BenchValidatedArticle is the validate:-tagged counterpart to BenchArticle.
+type BenchValidatedArticle struct {
+	document.Base
+	Title       string                 `json:"title" den:"index" validate:"required,min=1,max=200"`
+	Slug        string                 `json:"slug" den:"unique" validate:"required"`
+	Body        string                 `json:"body" den:"fts"`
+	Summary     string                 `json:"summary"`
+	Status      string                 `json:"status" den:"index" validate:"required,oneof=draft published archived"`
+	Category    string                 `json:"category" den:"index"`
+	Tags        []string               `json:"tags" den:"index"`
+	Price       float64                `json:"price" den:"index"`
+	Stock       int                    `json:"stock"`
+	PublishedAt time.Time              `json:"published_at" den:"index"`
+	Author      core.Link[BenchAuthor] `json:"author"`
+	Meta        map[string]any         `json:"meta"`
+}
+
+func makeBenchValidatedArticle(i int, authorID string) *BenchValidatedArticle {
+	return &BenchValidatedArticle{
+		Title:       fmt.Sprintf("Article %06d: The quick brown fox", i),
+		Slug:        fmt.Sprintf("article-%06d", i),
+		Body:        benchBody,
+		Summary:     "A short summary describing what the article covers in a sentence or two.",
+		Status:      benchStatuses[i%len(benchStatuses)],
+		Category:    benchCategories[i%len(benchCategories)],
+		Tags:        []string{"go", "database", "jsonb"},
+		Price:       float64(i%100) + 0.99,
+		Stock:       i % 1000,
+		PublishedAt: time.Unix(1700000000+int64(i*3600), 0),
+		Author:      core.Link[BenchAuthor]{ID: authorID},
+		Meta: map[string]any{
+			"views":    i * 17,
+			"featured": i%7 == 0,
+			"locale":   "en-US",
+		},
+	}
+}
+
+func BenchmarkRW_SQLite_Insert_Validated(b *testing.B) {
+	db := dentest.MustOpen(b, &BenchValidatedArticle{}, &BenchAuthor{})
+	ctx := context.Background()
+	authorID := seedAuthor(b, db)
+	b.ResetTimer()
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		if err := core.Save(ctx, db, makeBenchValidatedArticle(i, authorID)); err != nil {
+			b.Fatal(err)
+		}
+		i++
+	}
+}
+
 // --- InsertMany ---
 
 func runRWInsertMany(b *testing.B, db *core.DB, batch int) {

@@ -36,6 +36,14 @@ type StructInfo struct {
 	GoType         reflect.Type
 	HasDeletedAt   bool
 
+	// HasValidateTags is true when at least one field — including fields of
+	// anonymous embedded structs — carries a non-empty `validate:` struct
+	// tag. The write path uses this to skip the go-playground reflective
+	// walk for types that have nothing to validate (the dominant case in
+	// profiled workloads). Custom Validator.Validate(ctx) hooks are
+	// unaffected; only the tag-driven walk is gated.
+	HasValidateTags bool
+
 	// Pre-resolved pointers to the base fields embedded by document.Base /
 	// document.SoftDelete / document.Tracked. Populated once by
 	// AnalyzeStruct so hot paths can skip per-op FieldByName lookups. Any
@@ -146,6 +154,8 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 		return nil, err
 	}
 
+	info.HasValidateTags = scanValidateTags(t, make(map[reflect.Type]bool))
+
 	// Build index for O(1) FieldByName lookups
 	for i, f := range info.Fields {
 		info.fieldIndex[f.JSONName] = i
@@ -162,7 +172,59 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 	return info, nil
 }
 
-var timePtrType = reflect.TypeFor[*time.Time]()
+var (
+	timePtrType = reflect.TypeFor[*time.Time]()
+	timeType    = reflect.TypeFor[time.Time]()
+)
+
+// scanValidateTags reports whether any field reachable from t — through
+// anonymous embeds, named struct fields, pointers, slices, arrays, and
+// map values — carries a non-empty `validate:` struct tag. Mirrors the
+// type-tree traversal go-playground/validator performs at runtime: if
+// scanValidateTags returns false, validator.Struct(t) has no work to do
+// and the write path can skip the call entirely.
+//
+// seen breaks recursion on self-referential types (e.g. a struct that
+// holds a pointer to its own kind).
+func scanValidateTags(t reflect.Type, seen map[reflect.Type]bool) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+
+	switch t.Kind() { //nolint:exhaustive // scalars and unsupported kinds cannot carry validate tags
+	case reflect.Struct:
+		// time.Time is the one stdlib value type Den documents commonly
+		// hold by value. Skip it explicitly so the walk does not descend
+		// into stdlib internals looking for tags that cannot exist.
+		if t == timeType {
+			return false
+		}
+		for i := range t.NumField() {
+			f := t.Field(i)
+			tag := f.Tag.Get("validate")
+			// go-playground/validator treats `validate:"-"` as an explicit
+			// skip that also blocks descent into the field's type. Mirror
+			// that so a type whose only tags are `"-"` short-circuits like
+			// a tagless type and does not pay the walker cost.
+			if tag == "-" {
+				continue
+			}
+			if tag != "" {
+				return true
+			}
+			if scanValidateTags(f.Type, seen) {
+				return true
+			}
+		}
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return scanValidateTags(t.Elem(), seen)
+	}
+	return false
+}
 
 func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
 	for i := range t.NumField() {

@@ -1022,6 +1022,67 @@ func TestLink_UnmarshalJSON(t *testing.T) {
 	assert.False(t, link.IsLoaded())
 }
 
+func TestLink_UnmarshalJSON_Null(t *testing.T) {
+	// `null` is a valid JSON literal for a Link field. Den persists Links
+	// as strings, but a hand-crafted payload with `null` must still
+	// round-trip cleanly: ID resets to "", Loaded false.
+	link := core.Link[Door]{ID: "old", Loaded: true}
+	err := link.UnmarshalJSON([]byte(`null`))
+	require.NoError(t, err)
+	assert.Empty(t, link.ID)
+	assert.False(t, link.IsLoaded())
+}
+
+func TestLink_UnmarshalJSON_EscapeSequences(t *testing.T) {
+	// IDs in production are ULIDs (no escapes), but the JSON contract
+	// requires correct round-trip for any string. Pins escape handling so
+	// the fast-path optimisation cannot silently corrupt unusual IDs.
+	cases := []string{
+		`with "quote"`,
+		"with\nnewline",
+		`with\backslash`,
+		"with\ttab",
+		`unicode ä`,
+		"",
+	}
+	for _, want := range cases {
+		t.Run(want, func(t *testing.T) {
+			orig := core.Link[Door]{ID: want}
+			data, err := orig.MarshalJSON()
+			require.NoError(t, err)
+
+			var got core.Link[Door]
+			require.NoError(t, got.UnmarshalJSON(data))
+			assert.Equal(t, want, got.ID)
+			assert.False(t, got.IsLoaded())
+		})
+	}
+}
+
+func TestLink_UnmarshalJSON_RejectsMalformed(t *testing.T) {
+	// Defensive contract: anything that isn't a JSON string (or `null`)
+	// must surface an error rather than silently producing a zero Link.
+	// Pre-seed the link to pin a stronger invariant: on error the link's
+	// fields must stay untouched (no partial mutation).
+	cases := []string{
+		`123`,
+		`true`,
+		`[]`,
+		`{"id":"x"}`,
+		``,
+		`"unterminated`,
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			link := core.Link[Door]{ID: "sentinel", Loaded: true}
+			err := link.UnmarshalJSON([]byte(in))
+			require.Error(t, err)
+			assert.Equal(t, "sentinel", link.ID, "ID must stay untouched on error")
+			assert.True(t, link.IsLoaded(), "Loaded must stay untouched on error")
+		})
+	}
+}
+
 // SoftDoor is a soft-deletable variant of Door for cascade tests.
 type SoftDoor struct {
 	document.Base

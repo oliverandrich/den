@@ -27,7 +27,40 @@ func (l Link[T]) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON deserializes a JSON string into the link.
+//
+// Link bodies in persisted JSON are almost always escape-free IDs
+// (ULIDs are pure ASCII). The fast path takes the quoted bytes directly
+// instead of re-entering the goccy decoder for what is structurally one
+// string field — the round-trip dominated alloc profiles on read paths
+// with many Link fields per row. Anything with escapes or unusual shape
+// falls through to json.Unmarshal so the error and unescaping contract
+// stays identical.
 func (l *Link[T]) UnmarshalJSON(data []byte) error {
+	// The compiler folds `string(data) == "null"` to a byte-compare
+	// without allocating a new string (string conversion in a comparison
+	// context is alloc-free).
+	if string(data) == "null" {
+		l.ID = ""
+		l.Value = nil
+		l.Loaded = false
+		return nil
+	}
+	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
+		body := data[1 : len(data)-1]
+		clean := true
+		for _, b := range body {
+			if b == '\\' || b == '"' {
+				clean = false
+				break
+			}
+		}
+		if clean {
+			l.ID = string(body)
+			l.Value = nil
+			l.Loaded = false
+			return nil
+		}
+	}
 	var id string
 	if err := json.Unmarshal(data, &id); err != nil {
 		return err

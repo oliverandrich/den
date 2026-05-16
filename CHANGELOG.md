@@ -7,6 +7,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 ### Changed
 
 - **Write path skips `validate.Document` for types without `validate:` tags.** Detected once at Register time by scanning the registered type's reachable type tree (including named struct fields, pointers, slices, maps). Behavior is unchanged for users — tagged types still validate on every Save; the `Validator.Validate(ctx)` hook is untouched. Internal optimization: `BenchmarkRW_SQLite_Insert` allocs drop 49 → 31/op (-37%) on a tagless fixture.
+- **`Link[T].UnmarshalJSON` fast-path for escape-free IDs.** ULID-shaped (and other escape-free) link bodies are taken directly from the JSON bytes instead of re-entering the goccy decoder. Payloads with escapes or unusual shape still fall through to `json.Unmarshal`. Read-path optimization: `BenchmarkRW_SQLite_Iter1000` allocs drop ~1000/op (-3.5%) on docs carrying one Link per row.
 
 ## 0.12.0 — 2026-05-15
 

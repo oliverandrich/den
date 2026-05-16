@@ -22,8 +22,34 @@ type Link[T any] struct {
 }
 
 // MarshalJSON serializes the link as a JSON string (the ID).
+//
+// Symmetric fast path to UnmarshalJSON: ULID-shaped IDs need no
+// escaping, so re-entering the goccy encoder is wasted work. The byte-
+// for-byte contract with json.Marshal(l.ID) is preserved — anything
+// that would force an escape falls through.
 func (l Link[T]) MarshalJSON() ([]byte, error) {
+	if idIsJSONClean(l.ID) {
+		out := make([]byte, len(l.ID)+2)
+		out[0] = '"'
+		copy(out[1:], l.ID)
+		out[len(out)-1] = '"'
+		return out, nil
+	}
 	return json.Marshal(l.ID)
+}
+
+// idIsJSONClean reports whether s can be embedded between JSON quotes
+// without any escaping. Mirrors the JSON spec: only control bytes
+// (< 0x20), the quote, and the backslash require escapes. UTF-8
+// continuation bytes are valid in JSON strings as-is.
+func idIsJSONClean(s string) bool {
+	for i := range len(s) {
+		b := s[i]
+		if b < 0x20 || b == '"' || b == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 // UnmarshalJSON deserializes a JSON string into the link.

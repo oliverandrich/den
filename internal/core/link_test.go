@@ -5,8 +5,10 @@ import (
 
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	json "github.com/goccy/go-json"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"
@@ -1012,6 +1014,60 @@ func TestLink_MarshalJSON(t *testing.T) {
 	data, err := link.MarshalJSON()
 	require.NoError(t, err)
 	assert.Equal(t, `"door-1"`, string(data))
+}
+
+// TestLink_MarshalJSON_GoccyParity pins the byte-for-byte invariant that
+// the MarshalJSON fast path must preserve: whatever goccy would have
+// produced for the same ID, the optimized path produces too. Anything
+// that cannot be reproduced byte-exact falls through to goccy.
+func TestLink_MarshalJSON_GoccyParity(t *testing.T) {
+	cases := []string{
+		"01HZK0NJK8T3K6F8KX27YZAQXV", // ULID — clean ASCII alphanumeric
+		"plain-ascii-with-dashes",
+		"with spaces and unicode ä",
+		"",
+		`with "quote"`,
+		"with\nnewline",
+		`with\backslash`,
+		"with\ttab",
+		"control\x01char",
+	}
+	for _, id := range cases {
+		t.Run(fmt.Sprintf("%q", id), func(t *testing.T) {
+			link := core.Link[Door]{ID: id}
+			got, err := link.MarshalJSON()
+			require.NoError(t, err)
+
+			want, err := json.Marshal(id)
+			require.NoError(t, err)
+
+			assert.Equal(t, string(want), string(got))
+		})
+	}
+}
+
+func TestLink_MarshalJSON_RoundTrip(t *testing.T) {
+	cases := []string{
+		"01HZK0NJK8T3K6F8KX27YZAQXV",
+		`with "quote"`,
+		"with\nnewline",
+		`with\backslash`,
+		"with\ttab",
+		"control\x01char",
+		"unicode ä",
+		"",
+	}
+	for _, want := range cases {
+		t.Run(fmt.Sprintf("%q", want), func(t *testing.T) {
+			orig := core.Link[Door]{ID: want}
+			data, err := orig.MarshalJSON()
+			require.NoError(t, err)
+
+			var got core.Link[Door]
+			require.NoError(t, got.UnmarshalJSON(data))
+			assert.Equal(t, want, got.ID)
+		})
+	}
 }
 
 func TestLink_UnmarshalJSON(t *testing.T) {

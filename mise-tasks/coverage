@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Run tests with coverage and report per-package coverage"
+#MISE sources=["**/*.go", "go.mod", "go.sum"]
+#MISE outputs=["coverage.out", "coverage.html"]
+set -euo pipefail
+
+# Two runs so both views are meaningful:
+#   1. Plain `-cover` for tparse — its Cover column shows each
+#      package's self-coverage (its own _test.go files vs its own
+#      statements). Legitimate, just not the whole story.
+#   2. `-coverpkg=./...` for the merged coverage.out — credits
+#      coverage to every package, including code reached only via
+#      cross-package tests (parity_test.go → backend/*). This is
+#      what `mise run coverage-check` and the HTML report consume.
+go test -race -json -cover ./... > test.json
+tparse -file=test.json
+rm -f test.json
+go test -race -coverpkg=./... -coverprofile=coverage.out ./... > /dev/null
+go tool cover -html=coverage.out -o coverage.html
+echo "HTML report: coverage.html  (run \`mise run coverage-check\` for cross-package per-package numbers)"

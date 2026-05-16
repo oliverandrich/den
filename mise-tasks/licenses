@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
-# Generates THIRD_PARTY_LICENSES.md by resolving Go module dependencies
-# via go-licenses.
+#MISE description="Regenerate THIRD_PARTY_LICENSES.md from go-licenses"
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUTPUT="$ROOT_DIR/THIRD_PARTY_LICENSES.md"
-MODULE="github.com/oliverandrich/den"
+# Resolves Go module dependencies via go-licenses (pinned in .mise.toml).
 
-if ! command -v go-licenses &>/dev/null; then
-    echo "Error: go-licenses not found. Install with:"
-    echo "  go install github.com/google/go-licenses@latest"
-    exit 1
-fi
+OUTPUT=THIRD_PARTY_LICENSES.md
+MODULE="github.com/oliverandrich/den"
 
 cat > "$OUTPUT" <<'HEADER'
 # Third-Party Licenses
 
 This file lists all third-party Go module dependencies used by Den.
 
-This file is auto-generated. Run `just licenses` to regenerate it.
+This file is auto-generated. Run `mise run licenses` to regenerate it.
 
 ## Go Module Dependencies
 

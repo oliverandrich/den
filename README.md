@@ -239,7 +239,7 @@ func TestMyFeature(t *testing.T) {
 
 Measured on an Apple M4 Pro (14 cores), Go 1.25, PostgreSQL 17 on localhost. The fixture is a ~1 KB article document (title, body, status, category, tags, price, indexed timestamp, embedded author link, metadata map) — closer to a real blog or catalog entry than a minimal struct.
 
-Reproduce locally with `just bench-readme`. Numbers exclude connection-setup overhead (the bench helper opens the DB once and reuses it).
+Reproduce locally with `mise run bench-readme`. Numbers exclude connection-setup overhead (the bench helper opens the DB once and reuses it).
 
 ### Serial workloads
 
@@ -282,21 +282,22 @@ Single-goroutine latency per operation. Lower is better.
 
 ## Development
 
-Den uses [just](https://github.com/casey/just) as command runner:
+Den uses [mise](https://mise.jdx.dev/) for tool pinning and task running. `.mise.toml` pins the Go toolchain plus `tparse`, `golangci-lint`, `goimports`, `govulncheck`, `go-licenses`, and `pre-commit`:
 
 ```bash
-just setup      # Check that all required dev tools are installed
-just test       # Run all tests (SQLite only)
-just test-all   # Run all tests including PostgreSQL
-just lint       # Run golangci-lint
-just fmt        # Format all Go files
-just coverage   # Run tests with coverage report
-just vuln       # Run vulnerability check
-just tidy       # Tidy module dependencies
-just beans      # List active beans (issue tracker)
+mise install                # Install pinned tools from .mise.toml
+mise run setup              # Verify dev environment (also installs tools)
+mise run test               # Run all tests (SQLite + PostgreSQL)
+mise run lint               # Run golangci-lint
+mise run fmt                # Format all Go files
+mise run coverage           # Run tests with coverage report
+mise run coverage-check     # Enforce per-package coverage threshold
+mise run vuln               # Run vulnerability check
+mise run tidy               # Tidy module dependencies
+mise run beans              # List active beans (issue tracker)
 ```
 
-Requires Go 1.25+. Run `just setup` to verify your dev environment.
+Requires Go 1.25+ (managed by mise). Run `mise run setup` to verify your dev environment.
 
 ## Dependencies
 

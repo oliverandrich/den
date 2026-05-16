@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Run realworld + concurrent benchmarks and refresh the README tables"
+set -euo pipefail
+
+# Requires a reachable PostgreSQL via DEN_POSTGRES_URL; falls back to the
+# default local DSN used by dentest when unset.
+out=$(mktemp -t den-bench.XXXXXX)
+trap 'rm -f "$out"' EXIT
+go test -bench='Benchmark(RW|Concurrent)_' -benchmem -run='^$' -benchtime=2s ./internal/core | tee "$out"
+go run ./internal/cmd/bench-report -readme=README.md < "$out"
+echo "README.md benchmark tables updated."

@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# Regenerates docs/llms-full.txt by concatenating the individual doc
-# pages in mkdocs navigation order, separated by "---" dividers.
-#
-# Run this after editing any docs/*.md so the single-file mirror stays
-# in sync. Keep the PAGES list aligned with the nav: in mkdocs.yml.
+#MISE description="Regenerate docs/llms-full.txt from the individual doc pages"
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# Concatenates the individual doc pages in mkdocs navigation order,
+# separated by "---" dividers. Keep PAGES aligned with the nav: in
+# mkdocs.yml — run this after editing any docs/*.md.
 
 OUT=docs/llms-full.txt
 

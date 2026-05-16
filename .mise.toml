@@ -1,0 +1,43 @@
+[tools]
+go = "1.25"
+"go:github.com/mfridman/tparse" = "latest"
+"go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint" = "latest"
+"go:golang.org/x/tools/cmd/goimports" = "latest"
+"go:golang.org/x/vuln/cmd/govulncheck" = "latest"
+"go:github.com/google/go-licenses" = "latest"
+"pipx:pre-commit" = "latest"
+
+[env]
+COVERAGE_THRESHOLD = "80.0"
+
+[tasks.test]
+description = "Run all tests (SQLite + PostgreSQL)"
+run = 'go test -race -json "$@" ./... | tparse'
+
+[tasks.lint]
+description = "Run linter"
+run = "golangci-lint run ./..."
+
+[tasks.fmt]
+description = "Format all Go files"
+run = [
+    "gofmt -w .",
+    "goimports -w .",
+]
+
+[tasks.bench]
+description = "Run benchmarks (set count=N for statistical significance)"
+run = 'go test -bench=. -benchmem -count="${count:-1}" -run="^$" ./internal/core'
+
+[tasks.tidy]
+description = "Tidy module dependencies"
+run = "go mod tidy"
+
+[tasks.vuln]
+description = "Run vulnerability check"
+run = "govulncheck ./..."
+
+[tasks.beans]
+description = "List active beans (excludes completed and scrapped)"
+run = "beans list --no-status completed --no-status scrapped"
+

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build documentation as a static site"
+#MISE depends=["docs-prep"]
+set -euo pipefail
+
+uv run --with zensical zensical build

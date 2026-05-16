@@ -1,14 +1,11 @@
-// bench_report reads `go test -bench` output on stdin and splices the
-// benchmark results into README.md between the sentinel markers
+// Command bench-report reads `go test -bench` output on stdin and splices
+// the benchmark results into README.md between the sentinel markers
 //
 //	<!-- BENCH:SERIAL -->   ... <!-- /BENCH:SERIAL -->
 //	<!-- BENCH:CONCURRENT --> ... <!-- /BENCH:CONCURRENT -->
 //
-// Run via `just bench-readme`. The tool intentionally does no statistics —
+// Run via `mise run bench-readme`. The tool intentionally does no statistics —
 // callers who want significance testing should use benchstat separately.
-//
-//go:build ignore
-
 package main
 
 import (
@@ -269,7 +266,7 @@ func main() {
 		}
 	}
 
-	if err := os.WriteFile(*readmePath, []byte(updated), 0o644); err != nil {
+	if err := os.WriteFile(*readmePath, []byte(updated), 0o600); err != nil { // #nosec G703 -- dev-only tool, path is a CLI flag
 		log.Fatalf("write readme: %v", err)
 	}
 	fmt.Fprintf(os.Stderr, "updated %s: serial=%d, concurrent=%d\n", *readmePath, len(serial), len(concurrent))

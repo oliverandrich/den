@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Enforce per-package coverage threshold (COVERAGE_THRESHOLD%)"
+#MISE depends=["coverage"]
+set -euo pipefail
+
+failed=0
+while read -r pkg pct; do
+    if awk -v a="$pct" -v t="$COVERAGE_THRESHOLD" 'BEGIN { exit !(a < t) }'; then
+        echo "FAIL: $pkg at $pct% (below ${COVERAGE_THRESHOLD}%)"
+        failed=1
+    fi
+done < <(./mise-tasks/coverage-summary)
+if [ $failed -eq 1 ]; then
+    echo
+    echo "Coverage gate failed: tighten tests or lower COVERAGE_THRESHOLD (${COVERAGE_THRESHOLD}%)."
+    exit 1
+fi
+echo "All packages meet the ${COVERAGE_THRESHOLD}% coverage threshold."

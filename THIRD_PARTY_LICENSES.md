@@ -2,7 +2,7 @@
 
 This file lists all third-party Go module dependencies used by Den.
 
-This file is auto-generated. Run `just licenses` to regenerate it.
+This file is auto-generated. Run `mise run licenses` to regenerate it.
 
 ## Go Module Dependencies
 

@@ -9,14 +9,13 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oliverandrich/den"
 )
 
 const metadataTableName = "_den_indexes"
 
-func ensureMetadataTable(ctx context.Context, pool *pgxpool.Pool) error {
+func ensureMetadataTable(ctx context.Context, pool pgPool) error {
 	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 		collection TEXT NOT NULL,
 		name TEXT NOT NULL,
@@ -29,7 +28,7 @@ func ensureMetadataTable(ctx context.Context, pool *pgxpool.Pool) error {
 	return err
 }
 
-func recordIndex(ctx context.Context, pool *pgxpool.Pool, collection string, idx den.IndexDefinition) error {
+func recordIndex(ctx context.Context, pool pgPool, collection string, idx den.IndexDefinition) error {
 	fieldsJSON, err := json.Marshal(idx.Fields)
 	if err != nil {
 		return err
@@ -43,13 +42,13 @@ func recordIndex(ctx context.Context, pool *pgxpool.Pool, collection string, idx
 	return err
 }
 
-func forgetIndex(ctx context.Context, pool *pgxpool.Pool, name string) error {
+func forgetIndex(ctx context.Context, pool pgPool, name string) error {
 	query := fmt.Sprintf(`DELETE FROM %s WHERE name = $1`, quoteIdent(metadataTableName))
 	_, err := pool.Exec(ctx, query, name)
 	return err
 }
 
-func listRecordedIndexes(ctx context.Context, pool *pgxpool.Pool, collection string) ([]den.RecordedIndex, error) {
+func listRecordedIndexes(ctx context.Context, pool pgPool, collection string) ([]den.RecordedIndex, error) {
 	query := fmt.Sprintf(`SELECT name, fields, is_unique FROM %s WHERE collection = $1 ORDER BY name`, quoteIdent(metadataTableName))
 	rows, err := pool.Query(ctx, query, collection)
 	if err != nil {
@@ -78,7 +77,7 @@ func listRecordedIndexes(ctx context.Context, pool *pgxpool.Pool, collection str
 	return result, rows.Err()
 }
 
-func createTable(ctx context.Context, pool *pgxpool.Pool, name string) error {
+func createTable(ctx context.Context, pool pgPool, name string) error {
 	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 		id TEXT PRIMARY KEY,
 		data JSONB NOT NULL
@@ -93,7 +92,7 @@ func createTable(ctx context.Context, pool *pgxpool.Pool, name string) error {
 	return ensureConcurrentIndex(ctx, pool, ginIndexName, ginQuery)
 }
 
-func createExpressionIndex(ctx context.Context, pool *pgxpool.Pool, collection string, idx den.IndexDefinition) error {
+func createExpressionIndex(ctx context.Context, pool pgPool, collection string, idx den.IndexDefinition) error {
 	if len(idx.Fields) == 0 {
 		return nil
 	}
@@ -126,7 +125,7 @@ func createExpressionIndex(ctx context.Context, pool *pgxpool.Pool, collection s
 // ensureConcurrentIndex drops any existing invalid index with the same name
 // (left behind by an aborted CREATE INDEX CONCURRENTLY) and then runs the
 // provided create statement, which must use CREATE INDEX CONCURRENTLY IF NOT EXISTS.
-func ensureConcurrentIndex(ctx context.Context, pool *pgxpool.Pool, indexName, createSQL string) error {
+func ensureConcurrentIndex(ctx context.Context, pool pgPool, indexName, createSQL string) error {
 	invalid, err := isIndexInvalid(ctx, pool, indexName)
 	if err != nil {
 		return err
@@ -143,7 +142,7 @@ func ensureConcurrentIndex(ctx context.Context, pool *pgxpool.Pool, indexName, c
 
 // isIndexInvalid reports whether an index with the given name exists in the
 // current schema and is marked invalid.
-func isIndexInvalid(ctx context.Context, pool *pgxpool.Pool, indexName string) (bool, error) {
+func isIndexInvalid(ctx context.Context, pool pgPool, indexName string) (bool, error) {
 	var valid bool
 	err := pool.QueryRow(ctx, `
 		SELECT i.indisvalid

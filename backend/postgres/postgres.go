@@ -25,8 +25,23 @@ type sqlSet struct {
 	delete string
 }
 
+// pgPool is the subset of *pgxpool.Pool that this backend depends on.
+// Holding the pool as an interface lets the test suite swap in a
+// pgxmock-backed pool to exercise SQLSTATE error mapping and SQL
+// emission without a live PostgreSQL server. Every method below is
+// present on *pgxpool.Pool with matching signatures, so production
+// code passes the real pool in unchanged.
+type pgPool interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Ping(ctx context.Context) error
+	Close()
+}
+
 type backend struct {
-	pool *pgxpool.Pool
+	pool pgPool
 	sqls sync.Map // collection name → *sqlSet
 }
 
@@ -180,6 +195,8 @@ func (b *backend) Close() error {
 }
 
 // pgQuerier abstracts pgxpool.Pool and pgx.Tx for GROUP BY scanning.
+// Stays separate from pgPool because pgx.Tx satisfies this minimal
+// interface but not the broader pool surface (no Begin / Ping / Close).
 type pgQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }

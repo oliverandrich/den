@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // minPGVersion is the minimum supported PostgreSQL major version.
@@ -15,7 +13,7 @@ const minPGVersion = 13
 
 // serverVersion queries the PostgreSQL server_version_num setting and returns it as an integer.
 // SHOW returns text, so we scan into a string and convert.
-func serverVersion(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+func serverVersion(ctx context.Context, pool pgPool) (int, error) {
 	var raw string
 	err := pool.QueryRow(ctx, "SHOW server_version_num").Scan(&raw)
 	if err != nil {

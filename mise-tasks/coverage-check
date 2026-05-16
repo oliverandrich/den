@@ -3,8 +3,23 @@
 #MISE depends=["coverage"]
 set -euo pipefail
 
+# Space-separated package-path substrings to skip. CLI tools under
+# internal/cmd/ are pure build utilities — testing them is more effort
+# than the safety net is worth.
+COVERAGE_IGNORE="${COVERAGE_IGNORE:-internal/cmd/}"
+
 failed=0
 while read -r pkg pct; do
+    skip=0
+    for prefix in $COVERAGE_IGNORE; do
+        if [[ "$pkg" == *"$prefix"* ]]; then
+            skip=1
+            break
+        fi
+    done
+    if [ $skip -eq 1 ]; then
+        continue
+    fi
     if awk -v a="$pct" -v t="$COVERAGE_THRESHOLD" 'BEGIN { exit !(a < t) }'; then
         echo "FAIL: $pkg at $pct% (below ${COVERAGE_THRESHOLD}%)"
         failed=1

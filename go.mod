@@ -3,6 +3,7 @@ module github.com/oliverandrich/den
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/goccy/go-json v0.10.6
 	github.com/jackc/pgx/v5 v5.9.2

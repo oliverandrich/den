@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.12.1 — 2026-05-16
+
 ### Changed
 
 - **Dev tooling migrated from `justfile` to mise.** `.mise.toml` pins the Go toolchain and dev tools; tasks live in `[tasks.*]` or `mise-tasks/`. `just <recipe>` → `mise run <task>`. Aligns Den with the rest of the Burrow ecosystem.
@@ -13,6 +15,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 - **S3 backend tests run against an in-process `gofakes3` server.** Replaces the `testcontainers-go` MinIO container, dropping Docker as a developer prerequisite and removing the entire `moby/containerd/docker` indirect-dep tree from `go.mod`. Test runtime drops from container-boot seconds to sub-second.
 - **SQLite backend test surface widened with go-sqlmock.** Mirrors the pgxmock layer for Postgres — `backend/sqlite/mock_test.go` drives the error paths the file-backed driver can't easily trigger: `getStmts` Prepare failures (each of the three statements), `Put`/`Delete`/`Query`/`Count`/`Exists`/`Aggregate`/`GroupBy` exec/query errors, ErrNoRows → `ErrNotFound` mapping, mid-stream iterator errors, `DropIndex` failures. SQLite operates on `*sql.DB` directly so the mock slots in without a production interface. Three-tier test convention now documented on the SQLite side too (`backend/sqlite/doc.go`).
 - **Postgres backend test surface widened with pgxmock.** A new `pgPool` interface in `backend/postgres` lets a `pgxmock`-backed pool substitute for `*pgxpool.Pool` in tests, closing the coverage gap on advisory-lock SQL emission, `FOR UPDATE` lock-mode SQL (with `55P03 → ErrLocked` propagation), mid-stream iterator errors, and pool-acquire failures. No production behavior change; pgxmock is a test-only dependency. Three-tier convention documented in `backend/postgres/doc.go` (pgxmock for error paths, parity_test.go for cross-backend behavior, real PG for concurrency-driven failures).
+
+### Fixed
+
+- **`QuerySet.GroupBy` on PostgreSQL returned wrong results when combining `Where(...)` with `After()` / `Before()` cursors.** `buildGroupBySQL` discarded the next-placeholder index from `buildWhereClauses` and hardcoded the cursor's first placeholder to `$1`, colliding with the first WHERE arg — pgx then bound both placeholders to the WHERE arg, so the `id > $N` / `id < $N` cursor filter compared `id` against the wrong value (silently returning the wrong subset). Scalar `QuerySet.Count` / `Exists` were not affected; the bug was specific to `GroupBy`. Cursor-pagination parity tests now pin all three builders.
 
 ## 0.12.0 — 2026-05-15
 

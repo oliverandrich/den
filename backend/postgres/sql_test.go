@@ -535,3 +535,74 @@ func TestBuildGroupBySQL_EmptyAggs(t *testing.T) {
 	assert.NotContains(t, sql, "COUNT")
 	assert.NotContains(t, sql, "SUM")
 }
+
+// --- groupAggExprPG (ORDER BY by aggregate) tests ---
+
+func TestGroupAggExprPG_Count(t *testing.T) {
+	got, err := groupAggExprPG(den.GroupBySortEntry{Op: den.OpCount})
+	require.NoError(t, err)
+	assert.Equal(t, "COUNT(*)", got)
+}
+
+func TestGroupAggExprPG_Numeric(t *testing.T) {
+	for _, op := range []den.AggregateOp{den.OpSum, den.OpAvg, den.OpMin, den.OpMax} {
+		got, err := groupAggExprPG(den.GroupBySortEntry{Op: op, Field: "price"})
+		require.NoError(t, err, op)
+		assert.Equal(t,
+			string(op)+"((jsonb_extract_path_text(data, 'price'))::float)",
+			got, op)
+	}
+}
+
+func TestGroupAggExprPG_UnsupportedOp(t *testing.T) {
+	_, err := groupAggExprPG(den.GroupBySortEntry{Op: den.AggregateOp("INVALID"), Field: "price"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op in order-by")
+}
+
+func TestBuildGroupBySQL_OrderByAggregate(t *testing.T) {
+	q := &den.Query{
+		Collection:  "products",
+		GroupBySort: []den.GroupBySortEntry{{Op: den.OpSum, Field: "price", Dir: den.Desc}},
+	}
+	sql, _, err := buildGroupBySQL("products", []string{"category"},
+		[]den.GroupByAgg{{Op: den.OpSum, Field: "price"}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "ORDER BY SUM((jsonb_extract_path_text(data, 'price'))::float) DESC")
+}
+
+func TestBuildGroupBySQL_OrderByAggregate_Unsupported(t *testing.T) {
+	q := &den.Query{
+		Collection:  "products",
+		GroupBySort: []den.GroupBySortEntry{{Op: den.AggregateOp("BOGUS"), Field: "price"}},
+	}
+	_, _, err := buildGroupBySQL("products", []string{"category"},
+		[]den.GroupByAgg{{Op: den.OpCount}}, q)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op in order-by")
+}
+
+// --- fieldConditionToSQL default branch ---
+
+func TestFieldConditionToSQL_UnknownOp(t *testing.T) {
+	sql, args, nextN := fieldConditionToSQL("price", where.Operator(-1), 42, nil, 1)
+	assert.Empty(t, sql)
+	assert.Nil(t, args)
+	assert.Equal(t, 1, nextN)
+}
+
+// --- fieldRefToSQL default branch ---
+
+func TestFieldRefToSQL_UnknownOp(t *testing.T) {
+	got := fieldRefToSQL("a", "b", where.OpIn)
+	assert.Empty(t, got)
+}
+
+// --- logicalToSQL empty-conditions branch ---
+
+func TestLogicalToSQL_EmptyConditions(t *testing.T) {
+	sql, args, nextN := logicalToSQL(where.LogicAnd, nil, 1)
+	assert.Empty(t, sql)
+	assert.Nil(t, args)
+	assert.Equal(t, 1, nextN)
+}

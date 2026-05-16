@@ -437,6 +437,75 @@ func TestBuildGroupBySQL_UnsupportedOp(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported aggregate op in group-by")
 }
 
+// --- groupAggExprSQLite (ORDER BY by aggregate) tests ---
+
+func TestGroupAggExprSQLite_Count(t *testing.T) {
+	got, err := groupAggExprSQLite(den.GroupBySortEntry{Op: den.OpCount})
+	require.NoError(t, err)
+	assert.Equal(t, "COUNT(*)", got)
+}
+
+func TestGroupAggExprSQLite_Numeric(t *testing.T) {
+	for _, op := range []den.AggregateOp{den.OpSum, den.OpAvg, den.OpMin, den.OpMax} {
+		got, err := groupAggExprSQLite(den.GroupBySortEntry{Op: op, Field: "price"})
+		require.NoError(t, err, op)
+		assert.Equal(t,
+			string(op)+"(CAST(json_extract(data, '$.price') AS REAL))",
+			got, op)
+	}
+}
+
+func TestGroupAggExprSQLite_UnsupportedOp(t *testing.T) {
+	_, err := groupAggExprSQLite(den.GroupBySortEntry{Op: den.AggregateOp("INVALID"), Field: "price"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op in order-by")
+}
+
+func TestBuildGroupBySQL_OrderByAggregate(t *testing.T) {
+	q := &den.Query{
+		Collection:  "products",
+		GroupBySort: []den.GroupBySortEntry{{Op: den.OpSum, Field: "price", Dir: den.Desc}},
+	}
+	sql, _, err := buildGroupBySQL("products", []string{"category"},
+		[]den.GroupByAgg{{Op: den.OpSum, Field: "price"}}, q)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "ORDER BY SUM(CAST(json_extract(data, '$.price') AS REAL)) DESC")
+}
+
+func TestBuildGroupBySQL_OrderByAggregate_Unsupported(t *testing.T) {
+	q := &den.Query{
+		Collection:  "products",
+		GroupBySort: []den.GroupBySortEntry{{Op: den.AggregateOp("BOGUS"), Field: "price"}},
+	}
+	_, _, err := buildGroupBySQL("products", []string{"category"},
+		[]den.GroupByAgg{{Op: den.OpCount}}, q)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported aggregate op in order-by")
+}
+
+// --- fieldConditionToSQL default branch ---
+
+func TestFieldConditionToSQL_UnknownOp(t *testing.T) {
+	sql, args := fieldConditionToSQL("price", where.Operator(-1), 42, nil)
+	assert.Empty(t, sql)
+	assert.Nil(t, args)
+}
+
+// --- fieldRefToSQL default branch ---
+
+func TestFieldRefToSQL_UnknownOp(t *testing.T) {
+	got := fieldRefToSQL("a", "b", where.OpIn)
+	assert.Empty(t, got)
+}
+
+// --- logicalToSQL empty-conditions branch ---
+
+func TestLogicalToSQL_EmptyConditions(t *testing.T) {
+	sql, args := logicalToSQL(where.LogicAnd, nil)
+	assert.Empty(t, sql)
+	assert.Nil(t, args)
+}
+
 func TestBuildGroupBySQL_EmptyAggs(t *testing.T) {
 	// Empty aggs slice is valid: produces distinct group keys only.
 	q := &den.Query{Collection: "products"}

@@ -437,6 +437,69 @@ func TestBuildGroupBySQL_UnsupportedOp(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported aggregate op in group-by")
 }
 
+// --- cursor pagination on Count / Exists / GroupBy ---
+
+func TestCountAndExistsSQL_Cursor(t *testing.T) {
+	builders := []struct {
+		name string
+		fn   func(string, *den.Query) (string, []any)
+	}{
+		{"count", buildCountSQL},
+		{"exists", buildExistsSQL},
+	}
+	for _, b := range builders {
+		t.Run(b.name, func(t *testing.T) {
+			t.Run("after", func(t *testing.T) {
+				q := &den.Query{Collection: "products", AfterID: "p5"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id > ?")
+				assert.Equal(t, []any{"p5"}, args)
+			})
+			t.Run("before", func(t *testing.T) {
+				q := &den.Query{Collection: "products", BeforeID: "p3"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id < ?")
+				assert.Equal(t, []any{"p3"}, args)
+			})
+			t.Run("both", func(t *testing.T) {
+				q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p9"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id > ?")
+				assert.Contains(t, sql, "id < ?")
+				assert.Equal(t, []any{"p1", "p9"}, args)
+			})
+		})
+	}
+}
+
+func TestBuildGroupBySQL_Cursor(t *testing.T) {
+	t.Run("after", func(t *testing.T) {
+		q := &den.Query{Collection: "products", AfterID: "p5"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id > ?")
+		assert.Equal(t, []any{"p5"}, args)
+	})
+	t.Run("before", func(t *testing.T) {
+		q := &den.Query{Collection: "products", BeforeID: "p3"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id < ?")
+		assert.Equal(t, []any{"p3"}, args)
+	})
+	t.Run("both", func(t *testing.T) {
+		q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p9"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id > ?")
+		assert.Contains(t, sql, "id < ?")
+		assert.Equal(t, []any{"p1", "p9"}, args)
+	})
+}
+
 // --- groupAggExprSQLite (ORDER BY by aggregate) tests ---
 
 func TestGroupAggExprSQLite_Count(t *testing.T) {

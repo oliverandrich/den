@@ -536,6 +536,85 @@ func TestBuildGroupBySQL_EmptyAggs(t *testing.T) {
 	assert.NotContains(t, sql, "SUM")
 }
 
+// --- cursor pagination on Count / Exists / GroupBy ---
+
+func TestCountAndExistsSQL_Cursor(t *testing.T) {
+	builders := []struct {
+		name string
+		fn   func(string, *den.Query) (string, []any)
+	}{
+		{"count", buildCountSQL},
+		{"exists", buildExistsSQL},
+	}
+	for _, b := range builders {
+		t.Run(b.name, func(t *testing.T) {
+			t.Run("after", func(t *testing.T) {
+				q := &den.Query{Collection: "products", AfterID: "p5"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id > $1")
+				assert.Equal(t, []any{"p5"}, args)
+			})
+			t.Run("before", func(t *testing.T) {
+				q := &den.Query{Collection: "products", BeforeID: "p3"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id < $1")
+				assert.Equal(t, []any{"p3"}, args)
+			})
+			t.Run("both", func(t *testing.T) {
+				q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p9"}
+				sql, args := b.fn("products", q)
+				assert.Contains(t, sql, "id > $1")
+				assert.Contains(t, sql, "id < $2")
+				assert.Equal(t, []any{"p1", "p9"}, args)
+			})
+		})
+	}
+}
+
+func TestBuildGroupBySQL_Cursor(t *testing.T) {
+	t.Run("after", func(t *testing.T) {
+		q := &den.Query{Collection: "products", AfterID: "p5"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id > $1")
+		assert.Equal(t, []any{"p5"}, args)
+	})
+	t.Run("before", func(t *testing.T) {
+		q := &den.Query{Collection: "products", BeforeID: "p3"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id < $1")
+		assert.Equal(t, []any{"p3"}, args)
+	})
+	t.Run("both", func(t *testing.T) {
+		q := &den.Query{Collection: "products", AfterID: "p1", BeforeID: "p9"}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "id > $1")
+		assert.Contains(t, sql, "id < $2")
+		assert.Equal(t, []any{"p1", "p9"}, args)
+	})
+	// Pins the parameter-number sequencing when WHERE conditions consume
+	// placeholders before the cursor clauses. Cursor placeholders must
+	// continue from where WHERE left off, not restart at $1.
+	t.Run("with_where_condition", func(t *testing.T) {
+		q := &den.Query{
+			Collection: "products",
+			Conditions: []where.Condition{where.Field("active").Eq(true)},
+			AfterID:    "p5",
+		}
+		sql, args, err := buildGroupBySQL("products", []string{"category"},
+			[]den.GroupByAgg{{Op: den.OpCount}}, q)
+		require.NoError(t, err)
+		assert.Contains(t, sql, "data @> $1::jsonb", "WHERE condition still on $1")
+		assert.Contains(t, sql, "id > $2", "cursor clause must use $2, not collide with $1")
+		assert.Equal(t, []any{[]byte(`{"active":true}`), "p5"}, args)
+	})
+}
+
 // --- groupAggExprPG (ORDER BY by aggregate) tests ---
 
 func TestGroupAggExprPG_Count(t *testing.T) {

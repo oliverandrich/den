@@ -142,8 +142,8 @@ func buildGroupBySQL(collection string, groupFields []string, aggs []den.GroupBy
 		}
 	}
 
-	clauses, args, _ := buildWhereClauses(q.Conditions)
-	clauses, args = appendCursorClauses(clauses, args, 1, q)
+	clauses, args, paramN := buildWhereClauses(q.Conditions)
+	clauses, args = appendCursorClauses(clauses, args, paramN, q)
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "SELECT %s FROM %s", strings.Join(selectParts, ", "), quoteIdent(collection))

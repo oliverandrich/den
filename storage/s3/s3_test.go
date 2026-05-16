@@ -3,10 +3,10 @@
 package s3
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,64 +15,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johannesboyne/gofakes3"
+	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tc "github.com/testcontainers/testcontainers-go"
-	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/storage"
 )
 
-// minioImage pins the MinIO server image used by the testcontainers
-// harness. Bumping it is a one-line change.
-const minioImage = "minio/minio:RELEASE.2024-01-16T16-07-38Z"
-
-var (
-	sharedMinioOnce sync.Once
-	sharedSetupErr  error
-	sharedContainer *tcminio.MinioContainer
-	sharedEndpoint  string
-	sharedUser      string
-	sharedPass      string
+// Fake credentials. gofakes3 does not verify signatures, but minio-go
+// still requires *some* credentials to sign requests with.
+const (
+	fakeAccessKey = "den-test-access-key"
+	fakeSecretKey = "den-test-secret-key"
 )
 
-// startShared boots a single MinIO container reused across all tests
-// in the package. Per-test buckets isolate data; the container is
+var (
+	sharedSetupOnce sync.Once
+	sharedServer    *httptest.Server
+	sharedEndpoint  string
+)
+
+// startShared boots one in-process gofakes3 server reused across all
+// tests in the package. Per-test buckets isolate data; the server is
 // torn down once in TestMain.
-func startShared(ctx context.Context) error {
-	sharedMinioOnce.Do(func() {
-		ctr, err := tcminio.Run(ctx, minioImage)
-		if err != nil {
-			sharedSetupErr = fmt.Errorf("starting MinIO container: %w", err)
-			return
-		}
-		ep, err := ctr.ConnectionString(ctx)
-		if err != nil {
-			_ = tc.TerminateContainer(ctr)
-			sharedSetupErr = fmt.Errorf("getting MinIO endpoint: %w", err)
-			return
-		}
-		sharedContainer = ctr
-		sharedEndpoint = ep
-		sharedUser = ctr.Username
-		sharedPass = ctr.Password
+func startShared() {
+	sharedSetupOnce.Do(func() {
+		backend := s3mem.New()
+		faker := gofakes3.New(backend)
+		srv := httptest.NewServer(faker.Server())
+		sharedServer = srv
+		sharedEndpoint = srv.Listener.Addr().String()
 	})
-	return sharedSetupErr
 }
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if sharedContainer != nil {
-		_ = tc.TerminateContainer(sharedContainer)
+	if sharedServer != nil {
+		sharedServer.Close()
 	}
 	os.Exit(code)
 }
 
-// bucketCounter generates collision-free bucket names so each test
-// gets its own namespace on the shared container.
 var bucketCounter atomic.Uint64
 
 // newRawClient is the unwrapped minio-go client used by tests to
@@ -81,7 +68,7 @@ var bucketCounter atomic.Uint64
 func newRawClient(t *testing.T) *miniogo.Client {
 	t.Helper()
 	c, err := miniogo.New(sharedEndpoint, &miniogo.Options{
-		Creds:  credentials.NewStaticV4(sharedUser, sharedPass, ""),
+		Creds:  credentials.NewStaticV4(fakeAccessKey, fakeSecretKey, ""),
 		Secure: false,
 		Region: "us-east-1",
 	})
@@ -89,32 +76,23 @@ func newRawClient(t *testing.T) *miniogo.Client {
 	return c
 }
 
-// newTestStorage spins up a fresh bucket on the shared MinIO and
-// returns a *Storage targeting it. Skips the test if Docker isn't
-// reachable on a developer machine; in CI (CI=true is set by GHA and
-// most CI providers) a missing Docker fails the test instead, so we
-// don't lose s3-backend coverage to a silent skip.
-// Extra options are appended after the connection options so callers
-// can add WithPathPrefix etc. without losing the test wiring.
+// newTestStorage spins up a fresh bucket on the in-process gofakes3
+// server and returns a *Storage targeting it. Extra options are
+// appended after the connection options so callers can add
+// WithPathPrefix etc. without losing the test wiring.
 func newTestStorage(t *testing.T, extra ...Option) *Storage {
 	t.Helper()
-	ctx := t.Context()
-	if err := startShared(ctx); err != nil {
-		if os.Getenv("CI") == "true" {
-			t.Fatalf("MinIO testcontainer required in CI but failed to start: %v", err)
-		}
-		t.Skipf("MinIO testcontainer unavailable (set Docker up to run S3 tests): %v", err)
-	}
+	startShared()
 
 	bucket := fmt.Sprintf("den-test-%d", bucketCounter.Add(1))
-	require.NoError(t, newRawClient(t).MakeBucket(ctx, bucket, miniogo.MakeBucketOptions{}))
+	require.NoError(t, newRawClient(t).MakeBucket(t.Context(), bucket, miniogo.MakeBucketOptions{}))
 
 	opts := make([]Option, 0, 4+len(extra))
 	opts = append(opts,
 		WithEndpoint(sharedEndpoint),
 		WithSecure(false),
 		WithRegion("us-east-1"),
-		WithCredentials(sharedUser, sharedPass),
+		WithCredentials(fakeAccessKey, fakeSecretKey),
 	)
 	opts = append(opts, extra...)
 	s, err := New(bucket, opts...)

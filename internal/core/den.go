@@ -7,6 +7,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal/util"
 )
 
@@ -28,7 +29,7 @@ type DB struct {
 	typeToCollection map[string]string // Go type derived name → registered collection name
 	typeCache        sync.Map          // reflect.Type → *collectionInfo (lock-free fast path)
 	storage          Storage
-	pendingTypes     []any // queued by WithTypes, registered at the end of Open
+	pendingTypes     []document.Document // queued by WithTypes, registered at the end of Open
 	mu               sync.RWMutex
 }
 
@@ -74,7 +75,7 @@ func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
 //
 // Registration runs after every other Option has been applied. Any
 // registration error aborts Open and is surfaced as its error.
-func WithTypes(types ...any) Option {
+func WithTypes(types ...document.Document) Option {
 	return func(db *DB) {
 		db.pendingTypes = append(db.pendingTypes, types...)
 	}

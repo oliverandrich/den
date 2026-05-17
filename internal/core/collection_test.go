@@ -196,7 +196,7 @@ type DocWithDoubleQuoteTag struct {
 func TestRegister_RejectsInjectionInFieldName_SQLite(t *testing.T) {
 	cases := []struct {
 		name string
-		doc  any
+		doc  document.Document
 	}{
 		{"semicolon injection", &DocWithSQLInjectionTag{}},
 		{"single quote", &DocWithSingleQuoteTag{}},
@@ -215,7 +215,7 @@ func TestRegister_RejectsInjectionInFieldName_SQLite(t *testing.T) {
 func TestRegister_RejectsInjectionInFieldName_Postgres(t *testing.T) {
 	cases := []struct {
 		name string
-		doc  any
+		doc  document.Document
 	}{
 		{"semicolon injection", &DocWithSQLInjectionTag{}},
 		{"single quote", &DocWithSingleQuoteTag{}},

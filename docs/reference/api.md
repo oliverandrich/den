@@ -12,8 +12,8 @@ Module: `github.com/oliverandrich/den`
 |---|---|---|
 | `Open` | `Open(ctx context.Context, b Backend, opts ...Option) (*DB, error)` | Open a database around an existing `Backend`. The context governs any setup work triggered by options (for example `WithTypes`) |
 | `OpenURL` | `OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error)` | Open a database using a URL-style DSN (requires backend import). The context governs connection dialing and any setup work triggered by options |
-| `Register` | `Register(ctx context.Context, db *DB, docs ...any) error` | Register document types; creates collections and indexes |
-| `WithTypes` | `WithTypes(docs ...any) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
+| `Register` | `Register(ctx context.Context, db *DB, docs ...document.Document) error` | Register document types; creates collections and indexes. The `document.Document` parameter is a sealed marker — only types embedding `document.Base` satisfy it, so passing a non-document value is a compile error |
+| `WithTypes` | `WithTypes(docs ...document.Document) Option` | `Open`/`OpenURL` option: register document types at open time. Equivalent to calling `Register(ctx, db, docs...)` immediately after Open, but composes as a single expression. Registration errors abort Open and are returned as its error |
 | `db.Close` | `(db *DB) Close() error` | Close the database connection |
 | `db.Ping` | `(db *DB) Ping(ctx context.Context) error` | Healthcheck; delegates to backend |
 | `NewID` | `NewID() string` | Generate a fresh 26-character ULID. Save calls this automatically for empty-ID docs; use it directly for pre-assigned document IDs, worker IDs, correlation IDs, or deterministic test fixtures |
@@ -318,8 +318,8 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 
 | Function | Signature | Description |
 |---|---|---|
-| `MustOpen` | `MustOpen(t testing.TB, docs ...any) *den.DB` | Open a file-backed SQLite database in a temp directory; auto-registers docs and cleans up after test |
-| `MustOpenPostgres` | `MustOpenPostgres(t testing.TB, connStr string, docs ...any) *den.DB` | Open a PostgreSQL database for testing; auto-registers docs |
+| `MustOpen` | `MustOpen(t testing.TB, docs ...document.Document) *den.DB` | Open a file-backed SQLite database in a temp directory; auto-registers docs and cleans up after test |
+| `MustOpenPostgres` | `MustOpenPostgres(t testing.TB, connStr string, docs ...document.Document) *den.DB` | Open a PostgreSQL database for testing; auto-registers docs |
 
 ---
 

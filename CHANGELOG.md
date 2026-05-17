@@ -4,6 +4,14 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.13.1 — 2026-05-17
+
+(v0.13.0 was withdrawn before publication; this is the same change set under a fresh tag.)
+
+### Changed
+
+- **`Register` / `WithTypes` / `dentest.MustOpen*` accept `...document.Document` instead of `...any`.** Non-documents are now a compile error rather than a runtime `analyze: ...` failure. Migration: callers passing `&T{}` for `T` embedding `document.Base` are unchanged; replace `[]any{…}` with `[]document.Document{…}` where the slice forms are used. `core.Register` and `core.DB.pendingTypes` tightened in lockstep.
+
 ## 0.12.1 — 2026-05-16
 
 ### Changed

@@ -39,7 +39,7 @@ func TestHardDelete_CallsStorageDeleteOnAttachmentEmbed(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 
-	db := dentest.MustOpenWith(t, []any{&mediaDoc{}}, []core.Option{core.WithStorage(fs)})
+	db := dentest.MustOpenWith(t, []document.Document{&mediaDoc{}}, []core.Option{core.WithStorage(fs)})
 
 	att, err := fs.Store(ctx, bytes.NewReader([]byte("payload")), ".bin", "application/octet-stream")
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestHardDelete_CollectsBothNamedAttachments(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fs.Close() })
 
-	db := dentest.MustOpenWith(t, []any{&productDoc{}}, []core.Option{core.WithStorage(fs)})
+	db := dentest.MustOpenWith(t, []document.Document{&productDoc{}}, []core.Option{core.WithStorage(fs)})
 
 	hero, err := fs.Store(ctx, bytes.NewReader([]byte("hero-bytes")), ".jpg", "image/jpeg")
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestHardDelete_Cascade_CleansUpChildAttachment(t *testing.T) {
 	t.Cleanup(func() { _ = fs.Close() })
 
 	db := dentest.MustOpenWith(t,
-		[]any{&mediaDoc{}, &gallery{}},
+		[]document.Document{&mediaDoc{}, &gallery{}},
 		[]core.Option{core.WithStorage(fs)},
 	)
 

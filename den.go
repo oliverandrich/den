@@ -14,6 +14,7 @@ package den
 import (
 	"context"
 
+	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal/core"
 )
 
@@ -43,7 +44,9 @@ func OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error) {
 
 // WithTypes queues document types to be registered at the end of Open.
 // Equivalent to calling Register(ctx, db, types...) after Open returns.
-func WithTypes(types ...any) Option {
+// Types must embed [document.Base] to satisfy [document.Document] — the
+// sealed marker enforces this at compile time.
+func WithTypes(types ...document.Document) Option {
 	return core.WithTypes(types...)
 }
 
@@ -54,8 +57,10 @@ func WithStorage(s Storage) Option {
 }
 
 // Register registers one or more document types with the database. It
-// must be called before any CRUD or query operation on the types.
-func Register(ctx context.Context, db *DB, types ...any) error {
+// must be called before any CRUD or query operation on the types. Types
+// must embed [document.Base] to satisfy [document.Document] — the sealed
+// marker enforces this at compile time.
+func Register(ctx context.Context, db *DB, types ...document.Document) error {
 	return core.Register(ctx, db, types...)
 }
 

@@ -14,7 +14,7 @@ import (
 
 // Register analyzes the given document types and registers their
 // collections with the database. Must be called before any CRUD operations.
-func Register(ctx context.Context, db *DB, types ...any) error {
+func Register(ctx context.Context, db *DB, types ...document.Document) error {
 	for _, docType := range types {
 		t := reflect.TypeOf(docType)
 		if t.Kind() == reflect.Pointer {

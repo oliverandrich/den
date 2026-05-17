@@ -9,7 +9,9 @@
 ## Getting Started
 
 - [Installation](https://den-odm.readthedocs.io/getting-started/installation/): Install Den and import a backend (SQLite or PostgreSQL) via side-effect imports
+- [Mental Model](https://den-odm.readthedocs.io/getting-started/mental-model/): Five-section orientation — documents and collections, Save as one verb, registration, querying, ULIDs
 - [Quick Start](https://den-odm.readthedocs.io/getting-started/quickstart/): Complete working example — define a document, store it, query it back
+- [10-Minute Tour](https://den-odm.readthedocs.io/getting-started/tour/): Linear end-to-end walkthrough exercising types, registration, CRUD, queries, soft-delete, relations, hooks, and indexes
 - [Backends](https://den-odm.readthedocs.io/getting-started/backends/): Backend comparison, DSN formats, and when to use SQLite vs PostgreSQL
 
 ## Guide — Core
@@ -23,7 +25,10 @@
 
 - [Aggregations](https://den-odm.readthedocs.io/guide/aggregations/): Scalar aggregations (Avg, Sum, Min, Max), GroupBy with typed result structs, projections for field subsetting
 - [Full-Text Search](https://den-odm.readthedocs.io/guide/full-text-search/): FTS via den:"fts" tag, unified Search() API, FTS5 on SQLite, tsvector on PostgreSQL
-- [Attachments & Storage](https://den-odm.readthedocs.io/guide/attachments/): document.Attachment embed, den.Storage interface, FilesystemStorage, hard-delete cascade
+- [Attachments & Storage](https://den-odm.readthedocs.io/guide/attachments/): document.Attachment embed, den.Storage interface, upload/read/delete workflow, hard-delete cascade
+- [File Storage Backend](https://den-odm.readthedocs.io/guide/storage/file/): Reference Storage backend writing content-addressed bytes to a local filesystem root with HTTP URL prefix
+- [S3 Storage Backend](https://den-odm.readthedocs.io/guide/storage/s3/): Optional S3 / S3-compatible (MinIO, localstack) backend via minio-go — side-effect import keeps deps out of binaries that don't use it
+- [Custom Storage Backend](https://den-odm.readthedocs.io/guide/storage/custom/): Implementing the den.Storage interface for any byte store — methods, DSN registration, url_prefix convention
 - [Transactions](https://den-odm.readthedocs.io/guide/transactions/): RunInTransaction with Tx-prefixed CRUD variants, commit/rollback via return value, backend concurrency differences
 - [Lifecycle Hooks](https://den-odm.readthedocs.io/guide/hooks/): BeforeInsert, AfterUpdate, Validate, and more via interfaces; execution order; hooks within transactions
 
@@ -38,6 +43,7 @@
 
 - [Migrations](https://den-odm.readthedocs.io/guide/migrations/): Registry-based migrations for field renames, type changes, data transformations; atomic execution; Up/Down/UpOne/DownOne
 - [Testing](https://den-odm.readthedocs.io/guide/testing/): dentest.MustOpen for SQLite, dentest.MustOpenPostgres for PostgreSQL; auto-registration and cleanup
+- [Recipes](https://den-odm.readthedocs.io/guide/recipes/): Copy-paste cookbook — atomic single-field update, find-or-create with defaults, and other common patterns
 
 ## Reference
 

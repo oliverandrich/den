@@ -48,7 +48,7 @@ Embedded `Address` values live inside the order's JSONB. The `Author` link store
 type Link[T any] struct {
     ID     string // persisted to storage
     Value  *T     // resolved document (nil until fetched)
-    Loaded bool   // internal
+    Loaded bool   // set true once Value has been hydrated
 }
 
 // NewLink creates a Link from an existing document, extracting its ID.
@@ -154,7 +154,7 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 
 `.All(ctx)` drains the result first, then runs **one batched `WHERE _id IN (…)` query per target type per nesting level**. IDs are deduplicated, so a hot target referenced by many parents is fetched once and the decoded pointer is shared across all matching slots — `houses[0].Door.Value == houses[1].Door.Value` when they point at the same ID. `AllWithCount` and `Search` use the same batched path.
 
-`.WithFetchLinks().Iter(ctx)` resolves per row instead, because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract. Use `.Iter` when the result set is too large to materialize; otherwise prefer `.All` so you get the batched resolver.
+`.WithFetchLinks().Iter(ctx)` routes through the same resolver but with a one-row batch per yielded document, so streaming stays incremental. Recursion depth is identical to `.All`'s — only the batching shape differs. Prefer `.All` when the result set fits in memory so the per-target-type batches deduplicate across rows; use `.Iter` only when materializing the slice would be too expensive.
 
 === "SQLite"
 
@@ -209,7 +209,7 @@ h, _ = den.FindByID[House](ctx, db, houseID, den.WithoutFetchLinks())
 ```
 
 !!! warning "`Iter` is N+1 for eager fields"
-    `.Iter(ctx)` honors the tag too, but resolves per row (streaming can't batch). An eager field on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted. `FindByID` and the other single-doc read APIs share this single-level contract: they hydrate the direct eager fields but do not recurse into the loaded targets' own eager links. Use `NewQuery[T](db, where.Field(den.FieldID).Eq(id)).All(ctx)` when you need transitive hydration of a single doc.
+    `.Iter(ctx)` honors the tag too, but resolves per yielded row (streaming can't share batches across rows). An eager chain on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted. `FindByID`, `FindByIDs`, and `Refresh` route through the same batched resolver as the QuerySet terminals; recursion descends up to `defaultNestingDepth = 3` (no QuerySet means no `WithNestingDepth` knob — use a one-row `NewQuery[T]` if you need a different depth on a single doc).
 
 `FetchLink` / `FetchAllLinks` always hydrate everything passed to them — they're explicit user calls, the `eager` tag does not constrain them.
 
@@ -358,8 +358,8 @@ houses, err := den.NewQuery[House](db).
 
 With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query per target type for `Mid`, then one query per target type for `Leaf` on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
 
-!!! warning "Recursion requires `.All` (or `.AllWithCount` / `.Search`)"
-    Nested resolution only descends in the batched paths. Streaming `.Iter(ctx)` resolves the direct level of every yielded document but does not recurse into loaded targets — it would otherwise have to buffer results to run a coherent batch.
+!!! note "Recursion is uniform across read terminals"
+    `.All`, `.AllWithCount`, `.Search`, and `.Iter` all descend through `nestDepth`. The batched terminals share `WHERE _id IN (…)` queries by target type per level; `.Iter` runs the same resolver one row at a time so streaming stays incremental. The trade-off is allocations and round-trips, not depth. `FindByID`, `FindByIDs`, and `Refresh` route through the same path with a fixed `defaultNestingDepth = 3`.
 
 ## Complete Example
 

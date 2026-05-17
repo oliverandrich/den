@@ -303,7 +303,8 @@ Located in the `migrate` sub-package (`github.com/oliverandrich/den/migrate`).
 
 | Function | Signature | Description |
 |---|---|---|
-| `NewRegistry` | `NewRegistry() *Registry` | Create a new migration registry |
+| `NewRegistry` | `NewRegistry(opts ...Option) *Registry` | Create a new migration registry. Pass `migrate.WithLogger(l)` to receive structured progress events |
+| `WithLogger` | `WithLogger(l *slog.Logger) Option` | Registry option that emits per-migration `slog` events (start, success, failure) |
 | `Register` | `(r *Registry) Register(version string, m Migration)` | Register a migration with a version string |
 | `Up` | `(r *Registry) Up(ctx context.Context, db *den.DB) error` | Run all pending forward migrations |
 | `UpOne` | `(r *Registry) UpOne(ctx context.Context, db *den.DB) error` | Run one forward migration |

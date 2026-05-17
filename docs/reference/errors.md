@@ -19,12 +19,24 @@ Import: `github.com/oliverandrich/den`
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
-| `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
+| `ErrLocked` | Row is locked by another transaction | `LockByID(NoWait())` or `QuerySet.ForUpdate(NoWait())` terminals when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
+| `ErrUnsupportedScheme` | DSN scheme has no registered backend | `OpenURL` when the scheme prefix (e.g. `mongodb://`) does not match any backend imported with `_ "github.com/oliverandrich/den/backend/…"` |
 | `ErrDeadlock` | PostgreSQL reported a deadlock between transactions | Any operation on PostgreSQL when the server cancels the query with SQLSTATE `40P01`. Callers can `errors.Is(err, den.ErrDeadlock)` and retry the transaction. SQLite never returns this |
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized | PostgreSQL SQLSTATE `40001`. Becomes relevant once callers opt into stricter isolation levels; standard Den operations using the default isolation level rarely see this |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend does not provide an `FTSProvider` implementation |
 | `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
 | `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
+
+### Typed error values
+
+`*DanglingLinkError` — struct (not sentinel) returned by batched link resolution when a `Link[T]` ID does not resolve to any row. Wraps `ErrNotFound` (so `errors.Is(err, den.ErrNotFound)` matches) and exposes the `Collection` and `ID` fields for diagnostics:
+
+```go
+var dle *den.DanglingLinkError
+if errors.As(err, &dle) {
+    log.Printf("dangling link in %s: %s", dle.Collection, dle.ID)
+}
+```
 
 ---
 
@@ -66,7 +78,8 @@ if errors.Is(err, den.ErrValidation) {
     var ve *validate.Errors
     if errors.As(err, &ve) {
         for _, fieldErr := range ve.Fields {
-            log.Printf("field %s: %s", fieldErr.Field, fieldErr.Message)
+            log.Printf("field %s failed %q (value=%v, param=%q)",
+                fieldErr.Field, fieldErr.Tag, fieldErr.Value, fieldErr.Param)
         }
     }
 }

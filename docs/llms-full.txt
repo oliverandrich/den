@@ -873,11 +873,9 @@ type DenSettable interface {
 }
 
 type Settings struct {
-    CollectionName       string            // override auto-derived name
-    OmitEmpty            bool              // omit zero-value fields by default
-    UseRevision          bool              // enable optimistic concurrency control
-    NestingDepthPerField map[string]int    // per-field nesting depth overrides
-    Indexes              []IndexDefinition // compound indexes
+    CollectionName string            // override auto-derived name
+    UseRevision    bool              // enable optimistic concurrency control
+    Indexes        []IndexDefinition // compound indexes
 }
 ```
 
@@ -888,7 +886,6 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         CollectionName: "products",
         UseRevision:    true,
-        OmitEmpty:      true,
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
         },
@@ -1592,7 +1589,7 @@ houses, err := den.NewQuery[House](db).
     WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
 
-Recursion runs on `.All` / `.AllWithCount` / `.Search`; streaming `.Iter` only resolves the direct level.
+Recursion is uniform across read terminals: `.All`, `.AllWithCount`, `.Search`, and `.Iter` all descend through `nestDepth`. `.All` / `.AllWithCount` / `.Search` batch by target type per level; `.Iter` resolves per yielded row (single-element batch) so streaming stays incremental. `FindByID`, `FindByIDs`, and `Refresh` route through the same resolver with a fixed `defaultNestingDepth=3` — they have no QuerySet to thread `WithNestingDepth` through.
 
 ### IncludeDeleted
 
@@ -1715,7 +1712,7 @@ Embedded `Address` values live inside the order's JSONB. The `Author` link store
 type Link[T any] struct {
     ID     string // persisted to storage
     Value  *T     // resolved document (nil until fetched)
-    Loaded bool   // internal
+    Loaded bool   // set true once Value has been hydrated
 }
 
 // NewLink creates a Link from an existing document, extracting its ID.
@@ -1821,7 +1818,7 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 
 `.All(ctx)` drains the result first, then runs **one batched `WHERE _id IN (…)` query per target type per nesting level**. IDs are deduplicated, so a hot target referenced by many parents is fetched once and the decoded pointer is shared across all matching slots — `houses[0].Door.Value == houses[1].Door.Value` when they point at the same ID. `AllWithCount` and `Search` use the same batched path.
 
-`.WithFetchLinks().Iter(ctx)` resolves per row instead, because batching would require buffering the whole result set, which defeats `Iter`'s streaming contract. Use `.Iter` when the result set is too large to materialize; otherwise prefer `.All` so you get the batched resolver.
+`.WithFetchLinks().Iter(ctx)` routes through the same resolver but with a one-row batch per yielded document, so streaming stays incremental. Recursion depth is identical to `.All`'s — only the batching shape differs. Prefer `.All` when the result set fits in memory so the per-target-type batches deduplicate across rows; use `.Iter` only when materializing the slice would be too expensive.
 
 === "SQLite"
 
@@ -1876,7 +1873,7 @@ h, _ = den.FindByID[House](ctx, db, houseID, den.WithoutFetchLinks())
 ```
 
 !!! warning "`Iter` is N+1 for eager fields"
-    `.Iter(ctx)` honors the tag too, but resolves per row (streaming can't batch). An eager field on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted. `FindByID` and the other single-doc read APIs share this single-level contract: they hydrate the direct eager fields but do not recurse into the loaded targets' own eager links. Use `NewQuery[T](db, where.Field(den.FieldID).Eq(id)).All(ctx)` when you need transitive hydration of a single doc.
+    `.Iter(ctx)` honors the tag too, but resolves per yielded row (streaming can't share batches across rows). An eager chain on an `Iter` consumer is N+1 by construction — prefer `.All` when you actually want the eager hit, or call `WithoutFetchLinks()` on the `Iter` chain for genuine bulk scans where even eager would be wasted. `FindByID`, `FindByIDs`, and `Refresh` route through the same batched resolver as the QuerySet terminals; recursion descends up to `defaultNestingDepth = 3` (no QuerySet means no `WithNestingDepth` knob — use a one-row `NewQuery[T]` if you need a different depth on a single doc).
 
 `FetchLink` / `FetchAllLinks` always hydrate everything passed to them — they're explicit user calls, the `eager` tag does not constrain them.
 
@@ -2025,8 +2022,8 @@ houses, err := den.NewQuery[House](db).
 
 With `WithNestingDepth(2)` against `Root → Mid → Leaf`, the batched resolver runs one query per target type for `Mid`, then one query per target type for `Leaf` on the loaded `Mid` set — two round-trips total, regardless of how many parents. When the depth counter reaches zero, remaining `Link[T]` fields are left unresolved (`Value` stays `nil`, `IsLoaded()` returns `false`).
 
-!!! warning "Recursion requires `.All` (or `.AllWithCount` / `.Search`)"
-    Nested resolution only descends in the batched paths. Streaming `.Iter(ctx)` resolves the direct level of every yielded document but does not recurse into loaded targets — it would otherwise have to buffer results to run a coherent batch.
+!!! note "Recursion is uniform across read terminals"
+    `.All`, `.AllWithCount`, `.Search`, and `.Iter` all descend through `nestDepth`. The batched terminals share `WHERE _id IN (…)` queries by target type per level; `.Iter` runs the same resolver one row at a time so streaming stays incremental. The trade-off is allocations and round-trips, not depth. `FindByID`, `FindByIDs`, and `Refresh` route through the same path with a fixed `defaultNestingDepth = 3`.
 
 ## Complete Example
 
@@ -4151,7 +4148,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 For high-throughput counters that don't need exact consistency, consider sharded counters (one row per shard, sum on read).
 
-→ [`ForUpdate`](queries.md#row-locking) · [`RunInTransaction`](transactions.md)
+→ [`ForUpdate`](transactions.md#row-level-locking) · [`RunInTransaction`](transactions.md)
 
 ---
 
@@ -4181,7 +4178,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 `SkipLocked()` skips rows another worker already locked instead of blocking. PostgreSQL maps this to `FOR UPDATE SKIP LOCKED`; SQLite serializes writers via IMMEDIATE tx so the option is a no-op there (one worker at a time anyway).
 
-→ [`ForUpdate`](queries.md#row-locking)
+→ [`ForUpdate`](transactions.md#row-level-locking)
 
 ---
 
@@ -4243,7 +4240,7 @@ next, err := den.NewQuery[Post](db).After(last).Sort("_id", den.Asc).Limit(pageS
 
 `After(id)` and `Before(id)` translate to `_id > ?` / `_id < ?`. Sorting by `_id` is required to make the cursor meaningful. Mixing cursor with offset (`Skip`) returns `ErrIncompatiblePagination` — the two pagination styles have no defined interaction.
 
-→ [Queries](queries.md#cursor-pagination)
+→ [Queries](queries.md#cursor-based-pagination)
 
 ---
 
@@ -4573,7 +4570,8 @@ Located in the `migrate` sub-package (`github.com/oliverandrich/den/migrate`).
 
 | Function | Signature | Description |
 |---|---|---|
-| `NewRegistry` | `NewRegistry() *Registry` | Create a new migration registry |
+| `NewRegistry` | `NewRegistry(opts ...Option) *Registry` | Create a new migration registry. Pass `migrate.WithLogger(l)` to receive structured progress events |
+| `WithLogger` | `WithLogger(l *slog.Logger) Option` | Registry option that emits per-migration `slog` events (start, success, failure) |
 | `Register` | `(r *Registry) Register(version string, m Migration)` | Register a migration with a version string |
 | `Up` | `(r *Registry) Up(ctx context.Context, db *den.DB) error` | Run all pending forward migrations |
 | `UpOne` | `(r *Registry) UpOne(ctx context.Context, db *den.DB) error` | Run one forward migration |
@@ -4801,12 +4799,24 @@ Import: `github.com/oliverandrich/den`
 | `ErrTransactionFailed` | Transaction could not be committed | `RunInTransaction` when the commit fails |
 | `ErrNoSnapshot` | No stored snapshot to revert to | `Revert` when the document was never loaded from the database or does not embed `Tracked` |
 | `ErrMigrationFailed` | A migration function returned an error | `Registry.Up`, `Registry.UpOne` when a migration fails; wraps the original error with the migration version |
-| `ErrLocked` | Row is locked by another transaction | `LockByID` with `NoWait()` when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
+| `ErrLocked` | Row is locked by another transaction | `LockByID(NoWait())` or `QuerySet.ForUpdate(NoWait())` terminals when another transaction holds the row lock (PostgreSQL only; SQLite never returns this) |
+| `ErrUnsupportedScheme` | DSN scheme has no registered backend | `OpenURL` when the scheme prefix (e.g. `mongodb://`) does not match any backend imported with `_ "github.com/oliverandrich/den/backend/…"` |
 | `ErrDeadlock` | PostgreSQL reported a deadlock between transactions | Any operation on PostgreSQL when the server cancels the query with SQLSTATE `40P01`. Callers can `errors.Is(err, den.ErrDeadlock)` and retry the transaction. SQLite never returns this |
 | `ErrSerialization` | Serializable or repeatable-read transaction could not be serialized | PostgreSQL SQLSTATE `40001`. Becomes relevant once callers opt into stricter isolation levels; standard Den operations using the default isolation level rarely see this |
 | `ErrFTSNotSupported` | Backend does not implement full-text search | `QuerySet.Search` when the active backend does not provide an `FTSProvider` implementation |
 | `ErrLockRequiresTransaction` | `QuerySet.ForUpdate` used on a `*DB` scope | Terminal methods (`All`, `First`, `Count`, …) on a QuerySet where `ForUpdate` was set but the scope is not a `*Tx`. Row locking is meaningless outside a transaction |
 | `ErrIncompatiblePagination` | Cursor and offset pagination combined | Any terminal method on a QuerySet where `After`/`Before` is set together with `Skip`. Pick one pagination style per chain |
+
+### Typed error values
+
+`*DanglingLinkError` — struct (not sentinel) returned by batched link resolution when a `Link[T]` ID does not resolve to any row. Wraps `ErrNotFound` (so `errors.Is(err, den.ErrNotFound)` matches) and exposes the `Collection` and `ID` fields for diagnostics:
+
+```go
+var dle *den.DanglingLinkError
+if errors.As(err, &dle) {
+    log.Printf("dangling link in %s: %s", dle.Collection, dle.ID)
+}
+```
 
 ---
 
@@ -4848,7 +4858,8 @@ if errors.Is(err, den.ErrValidation) {
     var ve *validate.Errors
     if errors.As(err, &ve) {
         for _, fieldErr := range ve.Fields {
-            log.Printf("field %s: %s", fieldErr.Field, fieldErr.Message)
+            log.Printf("field %s failed %q (value=%v, param=%q)",
+                fieldErr.Field, fieldErr.Tag, fieldErr.Value, fieldErr.Param)
         }
     }
 }
@@ -5267,10 +5278,10 @@ type DenSettable interface {
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `CollectionName` | `string` | lowercase struct name | Override the auto-derived collection name |
-| `OmitEmpty` | `bool` | `false` | When true, zero-value fields are omitted from storage by default |
 | `UseRevision` | `bool` | `false` | Enable optimistic concurrency control via `_rev` field |
-| `NestingDepthPerField` | `map[string]int` | `nil` | Per-field override for link nesting depth |
 | `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes not expressible via struct tags) |
+
+Each `IndexDefinition` has `Name string`, `Fields []string`, and `Unique bool` — set `Unique: true` for compound unique indexes that struct tags can't express.
 
 ### Example
 
@@ -5286,9 +5297,6 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         CollectionName: "products",       // override: default would be "product"
         UseRevision:    true,             // enable optimistic concurrency
-        NestingDepthPerField: map[string]int{
-            "category": 1,                // shallow fetch for category links
-        },
         Indexes: []den.IndexDefinition{
             {
                 Name:   "idx_category_price",

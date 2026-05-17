@@ -59,7 +59,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 For high-throughput counters that don't need exact consistency, consider sharded counters (one row per shard, sum on read).
 
-→ [`ForUpdate`](queries.md#row-locking) · [`RunInTransaction`](transactions.md)
+→ [`ForUpdate`](transactions.md#row-level-locking) · [`RunInTransaction`](transactions.md)
 
 ---
 
@@ -89,7 +89,7 @@ err := den.RunInTransaction(ctx, db, func(tx *den.Tx) error {
 
 `SkipLocked()` skips rows another worker already locked instead of blocking. PostgreSQL maps this to `FOR UPDATE SKIP LOCKED`; SQLite serializes writers via IMMEDIATE tx so the option is a no-op there (one worker at a time anyway).
 
-→ [`ForUpdate`](queries.md#row-locking)
+→ [`ForUpdate`](transactions.md#row-level-locking)
 
 ---
 
@@ -151,7 +151,7 @@ next, err := den.NewQuery[Post](db).After(last).Sort("_id", den.Asc).Limit(pageS
 
 `After(id)` and `Before(id)` translate to `_id > ?` / `_id < ?`. Sorting by `_id` is required to make the cursor meaningful. Mixing cursor with offset (`Skip`) returns `ErrIncompatiblePagination` — the two pagination styles have no defined interaction.
 
-→ [Queries](queries.md#cursor-pagination)
+→ [Queries](queries.md#cursor-based-pagination)
 
 ---
 

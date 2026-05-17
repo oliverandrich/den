@@ -184,11 +184,9 @@ type DenSettable interface {
 }
 
 type Settings struct {
-    CollectionName       string            // override auto-derived name
-    OmitEmpty            bool              // omit zero-value fields by default
-    UseRevision          bool              // enable optimistic concurrency control
-    NestingDepthPerField map[string]int    // per-field nesting depth overrides
-    Indexes              []IndexDefinition // compound indexes
+    CollectionName string            // override auto-derived name
+    UseRevision    bool              // enable optimistic concurrency control
+    Indexes        []IndexDefinition // compound indexes
 }
 ```
 
@@ -199,7 +197,6 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         CollectionName: "products",
         UseRevision:    true,
-        OmitEmpty:      true,
         Indexes: []den.IndexDefinition{
             {Name: "idx_category_price", Fields: []string{"category", "price"}},
         },

@@ -105,10 +105,10 @@ type DenSettable interface {
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `CollectionName` | `string` | lowercase struct name | Override the auto-derived collection name |
-| `OmitEmpty` | `bool` | `false` | When true, zero-value fields are omitted from storage by default |
 | `UseRevision` | `bool` | `false` | Enable optimistic concurrency control via `_rev` field |
-| `NestingDepthPerField` | `map[string]int` | `nil` | Per-field override for link nesting depth |
 | `Indexes` | `[]IndexDefinition` | `nil` | Additional indexes (for compound indexes not expressible via struct tags) |
+
+Each `IndexDefinition` has `Name string`, `Fields []string`, and `Unique bool` — set `Unique: true` for compound unique indexes that struct tags can't express.
 
 ### Example
 
@@ -124,9 +124,6 @@ func (p Product) DenSettings() den.Settings {
     return den.Settings{
         CollectionName: "products",       // override: default would be "product"
         UseRevision:    true,             // enable optimistic concurrency
-        NestingDepthPerField: map[string]int{
-            "category": 1,                // shallow fetch for category links
-        },
         Indexes: []den.IndexDefinition{
             {
                 Name:   "idx_category_price",

@@ -4,6 +4,14 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.13.0 — 2026-05-17
+
+### Changed
+
+- **`den.Register(ctx, db, types ...any)` → `den.Register(ctx, db, types ...document.Document)`.** Same shape, tighter parameter type. The sealed `document.Document` marker rejects non-document values at compile time — passing a struct that doesn't embed `document.Base` is now a compile error instead of a runtime "analyze: ..." failure. Migration: no source change for callers that already pass pointers to `document.Base`-embedding types; callers that pass random values get a useful compile error. `internal/core.Register` was tightened in lockstep so no widening glue stands between the public surface and the implementation.
+- **`den.WithTypes(types ...any)` → `den.WithTypes(types ...document.Document)`.** Same rationale and migration as `Register` — the `Option` returned by `WithTypes` is consumed inside `Open` via the same `core.Register` path. `core.DB.pendingTypes` is now `[]document.Document`.
+- **`dentest.MustOpen` / `MustOpenPostgres` / `MustOpenPostgresDefault` / `MustOpenWith` / `MustOpenPostgresWith` accept `document.Document` instead of `any`.** Keeps the test-helper surface aligned with the production `Register` / `WithTypes` it delegates to. Migration: in tests, replace `[]any{...}` with `[]document.Document{...}` where you call the slice forms.
+
 ## 0.12.1 — 2026-05-16
 
 ### Changed

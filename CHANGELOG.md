@@ -4,6 +4,18 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.13.2 — 2026-05-17
+
+Documentation-only release. Source behaviour is identical to v0.13.1 — this tag exists so the published docs site picks up audit-driven corrections.
+
+### Fixed
+
+- **`Settings` struct** doc dropped phantom `OmitEmpty` / `NestingDepthPerField` fields that never existed in source.
+- **Hydration uniformity** in `queries.md` and `relations.md`: replaced incorrect "single-level" / "Iter doesn't recurse" claims with the actual behaviour — every read terminal recurses to the same depth, pinned by `TestEagerLink_*`.
+- **Errors reference** filled in missing `ErrUnsupportedScheme` and `*DanglingLinkError`; corrected `validate.FieldError` field names; broadened `ErrLocked` triggers.
+- **`migrate.NewRegistry`** signature corrected to show `(opts ...Option)`; added `WithLogger` row.
+- **Three broken recipe anchors** repointed to their actual headings.
+
 ## 0.13.1 — 2026-05-17
 
 (v0.13.0 was withdrawn before publication; this is the same change set under a fresh tag.)

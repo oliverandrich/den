@@ -23,14 +23,12 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           persist-credentials: false
 
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        with:
+          cache: true
+
       - name: Extract changelog for this version
-        run: |
-          NUMBER="${VERSION#v}"
-          awk -v v="$NUMBER" '
-            $0 ~ "^## " v { found=1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
+        run: mise run release-notes "$VERSION" > release-notes.md
 
       - name: Create GitHub Release
         env:

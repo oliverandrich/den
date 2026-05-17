@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run tests without tparse (CI-friendly output); accepts extra go test flags"
+set -euo pipefail
+
+go test "$@" ./...

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run all tests (SQLite + PostgreSQL) with tparse output; accepts extra go test flags"
+set -euo pipefail
+
+go test -race -json "$@" ./... | tparse

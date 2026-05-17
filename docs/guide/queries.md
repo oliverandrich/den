@@ -278,7 +278,7 @@ houses, err := den.NewQuery[House](db).
     WithFetchLinks().WithNestingDepth(2).All(ctx)
 ```
 
-Recursion is uniform across read terminals: `.All`, `.AllWithCount`, `.Search`, and `.Iter` all descend through `nestDepth`. `.All` / `.AllWithCount` / `.Search` batch by target type per level; `.Iter` resolves per yielded row (single-element batch) so streaming stays incremental. `FindByID`, `FindByIDs`, and `Refresh` route through the same resolver with a fixed `defaultNestingDepth=3` — they have no QuerySet to thread `WithNestingDepth` through.
+Recursion is uniform across read terminals: `.All`, `.AllWithCount`, `.Search`, and `.Iter` all descend to the same depth set by `WithNestingDepth(n)`. The first three batch by target type per level; `.Iter` resolves per yielded row so streaming stays incremental. `FindByID`, `FindByIDs`, and `Refresh` route through the same resolver with a fixed depth of 3 — they have no QuerySet to thread `WithNestingDepth` through.
 
 ### IncludeDeleted
 

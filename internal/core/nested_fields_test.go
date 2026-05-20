@@ -2,10 +2,8 @@ package core_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	den "github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal/core"
@@ -199,23 +197,44 @@ func TestNestedFieldParity_UniqueRejectsDuplicate(t *testing.T) {
 	}
 }
 
-func TestNestedField_FTSRejectedAtRegister(t *testing.T) {
-	type fts struct {
-		Bio string `json:"bio" den:"fts"`
-	}
-	type ftsDoc struct {
-		document.Base
-		Inner fts `json:"inner"`
-	}
+// Nested FTS test types — round-trip a Profile.Bio FTS field on both
+// backends to pin the den-ciug behaviour.
 
-	ctx := context.Background()
-	dsn := "sqlite:///" + filepath.Join(t.TempDir(), "test.db")
-	db, err := den.OpenURL(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
+type nestedFTSProfile struct {
+	Slug string `json:"slug"`
+	Bio  string `json:"bio" den:"fts"`
+}
 
-	err = den.Register(ctx, db, &ftsDoc{})
-	require.Error(t, err, "den:\"fts\" on a nested field must be rejected at Register")
-	assert.Contains(t, err.Error(), "fts")
-	assert.Contains(t, err.Error(), "den-ciug")
+type nestedFTSUser struct {
+	document.Base
+	Email   string           `json:"email"`
+	Profile nestedFTSProfile `json:"profile"`
+}
+
+func TestNestedFieldParity_FTSOnNestedField(t *testing.T) {
+	for name, openDB := range map[string]func(*testing.T) *core.DB{
+		"sqlite":   func(t *testing.T) *core.DB { return dentest.MustOpen(t, &nestedFTSUser{}) },
+		"postgres": func(t *testing.T) *core.DB { return dentest.MustOpenPostgresDefault(t, &nestedFTSUser{}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := openDB(t)
+			ctx := context.Background()
+
+			require.NoError(t, core.SaveAll(ctx, db, []*nestedFTSUser{
+				{Email: "a@example.com", Profile: nestedFTSProfile{Slug: "ada", Bio: "lovelace numerical engine"}},
+				{Email: "b@example.com", Profile: nestedFTSProfile{Slug: "alan", Bio: "turing computing machinery"}},
+				{Email: "c@example.com", Profile: nestedFTSProfile{Slug: "grace", Bio: "hopper compilers and cobol"}},
+			}))
+
+			results, err := core.NewQuery[nestedFTSUser](db).Search(ctx, "lovelace")
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "ada", results[0].Profile.Slug)
+
+			results, err = core.NewQuery[nestedFTSUser](db).Search(ctx, "compilers")
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "grace", results[0].Profile.Slug)
+		})
+	}
 }

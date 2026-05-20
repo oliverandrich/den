@@ -297,16 +297,6 @@ func collectFields(t reflect.Type, indexPrefix []int, jsonNamePrefix string, see
 			name = jsonNamePrefix + "." + rawName
 		}
 
-		// `den:"fts"` on a nested field is rejected here — FTS support
-		// for nested paths is tracked separately as den-ciug. Top-level
-		// FTS fields continue to work as before.
-		if opts.FTS && jsonNamePrefix != "" {
-			return fmt.Errorf(
-				`field %s: den:"fts" on nested field %q: not supported yet — tracked as den-ciug`,
-				field.Name, name,
-			)
-		}
-
 		isPointer := field.Type.Kind() == reflect.Pointer
 
 		fi := FieldInfo{

@@ -6,23 +6,28 @@ import (
 	"strings"
 
 	"github.com/oliverandrich/den"
+	"github.com/oliverandrich/den/internal/util"
 )
 
 // EnsureFTS creates an FTS5 virtual table and sync triggers for the collection.
 func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []string) error {
 	ftsTable := collection + "_fts"
 
-	// Defense in depth: sanitize every field name before it lands in the bare
-	// FTS column list. Registration-time validation should already have rejected
-	// anything unsafe, but sanitize again here so no raw %s of a field name
-	// survives SQL construction.
-	sanitized := make([]string, len(fields))
+	// Two derived forms per field. The JSON path keeps dots so
+	// `json_extract(data, '$.profile.bio')` resolves nested fields.
+	// The FTS5 column name has dots stripped because
+	// `CREATE VIRTUAL TABLE … fts5(profile.bio, …)` would parse the
+	// dot as a table.column qualifier. sanitizeFieldName here is
+	// defence-in-depth — registration-time validation already filtered
+	// unsafe runes.
+	jsonPaths := make([]string, len(fields))
+	columnNames := make([]string, len(fields))
 	for i, f := range fields {
-		sanitized[i] = sanitizeFieldName(f)
+		jsonPaths[i] = sanitizeFieldName(f)
+		columnNames[i] = util.IdentifierSegment(jsonPaths[i])
 	}
-	fieldList := strings.Join(sanitized, ", ")
+	fieldList := strings.Join(columnNames, ", ")
 
-	// Create FTS5 virtual table
 	createFTS := fmt.Sprintf(
 		"CREATE VIRTUAL TABLE IF NOT EXISTS %q USING fts5(%s, content=%q, content_rowid=rowid)",
 		ftsTable, fieldList, collection,
@@ -34,8 +39,8 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 	// Triggers to keep FTS in sync
 	// INSERT trigger
 	insertExprs := make([]string, len(fields))
-	for i, f := range fields {
-		insertExprs[i] = fmt.Sprintf("json_extract(NEW.data, '$.%s')", sanitizeFieldName(f))
+	for i, p := range jsonPaths {
+		insertExprs[i] = fmt.Sprintf("json_extract(NEW.data, '$.%s')", p)
 	}
 	insertTrigger := fmt.Sprintf( //nolint:gosec // table/column names from internal registration
 		`CREATE TRIGGER IF NOT EXISTS %q AFTER INSERT ON %q BEGIN
@@ -49,8 +54,8 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 
 	// DELETE trigger
 	deleteExprs := make([]string, len(fields))
-	for i, f := range fields {
-		deleteExprs[i] = fmt.Sprintf("json_extract(OLD.data, '$.%s')", sanitizeFieldName(f))
+	for i, p := range jsonPaths {
+		deleteExprs[i] = fmt.Sprintf("json_extract(OLD.data, '$.%s')", p)
 	}
 	deleteTrigger := fmt.Sprintf( //nolint:gosec // table/column names from internal registration
 		`CREATE TRIGGER IF NOT EXISTS %q BEFORE DELETE ON %q BEGIN

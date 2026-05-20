@@ -693,13 +693,13 @@ func TestAnalyzeStruct_CycleProtection(t *testing.T) {
 		"cycle protection blocks recursion when the type is already on the stack")
 }
 
-func TestAnalyzeStruct_RejectsFTSOnNestedField(t *testing.T) {
-	_, err := AnalyzeStruct(reflect.TypeFor[nestedFTSDoc]())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "fts",
-		"error must name the unsupported option")
-	assert.Contains(t, err.Error(), "den-ciug",
-		"error must point users at the tracking bean")
+func TestAnalyzeStruct_AcceptsFTSOnNestedField(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedFTSDoc]())
+	require.NoError(t, err, "den:\"fts\" on a nested field must be honoured after den-ciug")
+
+	bio := info.FieldByName("profile.bio")
+	require.NotNil(t, bio)
+	assert.True(t, bio.Options.FTS, "nested FTS tag must flow through to the field metadata")
 }
 
 func TestAnalyzeStruct_NestedSegmentValidation(t *testing.T) {

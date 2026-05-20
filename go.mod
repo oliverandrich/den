@@ -8,7 +8,6 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
 	github.com/minio/minio-go/v7 v7.1.0
-	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pashagolub/pgxmock/v5 v5.1.0
 	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.48.0

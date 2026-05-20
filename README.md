@@ -303,7 +303,6 @@ Requires Go 1.25+ (managed by mise). Run `mise run setup` to verify your dev env
 
 | Dependency | Purpose |
 |---|---|
-| `github.com/oklog/ulid/v2` | ULID-based document IDs |
 | `modernc.org/sqlite` | SQLite backend (pure Go, no CGO) |
 | `github.com/jackc/pgx/v5` | PostgreSQL backend |
 | `github.com/go-playground/validator/v10` | Struct tag validation (optional, via `den/validate`) |

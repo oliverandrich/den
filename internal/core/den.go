@@ -2,20 +2,18 @@ package core
 
 import (
 	"context"
-	"crypto/rand"
 	"sync"
 
-	"github.com/oklog/ulid/v2"
-
 	"github.com/oliverandrich/den/document"
+	"github.com/oliverandrich/den/internal/idgen"
 	"github.com/oliverandrich/den/internal/util"
 )
 
-// NewID generates a new ULID string. ULIDs are lexicographically sortable
-// and timestamp-ordered. Use this for document IDs, worker IDs, or any
-// unique identifier.
+// NewID generates a new ULID-format document ID — 26-character Crockford
+// base32, lexicographically sortable, strictly monotonic within the same
+// millisecond.
 func NewID() string {
-	return ulid.MustNew(ulid.Now(), rand.Reader).String()
+	return idgen.New()
 }
 
 // Option configures a DB during Open.

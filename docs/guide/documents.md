@@ -138,7 +138,7 @@ func (p Product) DenSettings() den.Settings {
 
 ## ID Generation
 
-Den uses [ULID](https://github.com/oklog/ulid) for document IDs -- lexicographically sortable, timestamp-ordered, 26 characters.
+Den uses [ULID](https://github.com/ulid/spec) for document IDs -- lexicographically sortable, timestamp-ordered, 26 characters. The generator is in-tree and strictly monotonic within the same millisecond, so two inserts in the same ms keep their insertion order under `Sort("_id", den.Asc)` and cursor pagination.
 
 ```go
 p := &Product{Name: "Widget", Price: 9.99}
@@ -155,6 +155,10 @@ p := &Product{Name: "Widget"}
 p.ID = "my-custom-id"
 den.Save(ctx, db, p) // uses "my-custom-id"
 ```
+
+!!! note "ID security"
+
+    The first 10 characters encode the creation timestamp, visible to anyone who sees the ID. The remaining 16 characters are unpredictable — fresh `crypto/rand` on every millisecond boundary, plus a fresh 32-bit random step within a millisecond — so consecutive IDs do not let an attacker derive the next. This is the same security profile as any ULID or UUIDv7 implementation: safe as primary keys, foreign references, URLs, and audit logs; not a substitute for capability tokens (password resets, share links). For those, mint a separate secret from `crypto/rand` and store it alongside the ID.
 
 For generating a ULID outside a save — pre-assigned document IDs, worker IDs, correlation IDs, deterministic test fixtures — call `den.NewID()` directly:
 

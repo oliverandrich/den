@@ -126,5 +126,12 @@ func Revert[T any](db *DB, doc *T) error {
 		return ErrNoSnapshot
 	}
 
-	return db.decode(t.Snapshot(), doc)
+	// Zero the doc before decoding so fields that were absent in the
+	// snapshot JSON (e.g. nil pointers with `omitempty`, zero-valued
+	// nested structs) are reset rather than left at their current
+	// non-zero in-memory value. JSON Unmarshal alone would merge into
+	// the existing doc, missing this case.
+	snap := t.Snapshot()
+	*doc = *new(T)
+	return decodeWithSnapshot(db, snap, doc)
 }

@@ -57,9 +57,9 @@ func loadLinkFieldsBundle(t reflect.Type) linkFieldsBundle {
 		var linkType reflect.Type
 		slice := false
 		switch {
-		case ft.Kind() == reflect.Struct && detectLinkType(ft):
+		case util.IsLinkShape(ft):
 			linkType = ft
-		case ft.Kind() == reflect.Slice && ft.Elem().Kind() == reflect.Struct && detectLinkType(ft.Elem()):
+		case ft.Kind() == reflect.Slice && util.IsLinkShape(ft.Elem()):
 			linkType = ft.Elem()
 			slice = true
 		}
@@ -115,9 +115,8 @@ func validateEagerTags(info *util.StructInfo) error {
 			continue
 		}
 		ft := f.Type
-		isLink := ft.Kind() == reflect.Struct && detectLinkType(ft)
-		isSliceOfLink := ft.Kind() == reflect.Slice &&
-			ft.Elem().Kind() == reflect.Struct && detectLinkType(ft.Elem())
+		isLink := util.IsLinkShape(ft)
+		isSliceOfLink := ft.Kind() == reflect.Slice && util.IsLinkShape(ft.Elem())
 		if !isLink && !isSliceOfLink {
 			return fmt.Errorf(
 				`den: tag den:"eager" on field %q (%s): only valid on Link[T] or []Link[T]`,
@@ -126,16 +125,6 @@ func validateEagerTags(info *util.StructInfo) error {
 		}
 	}
 	return nil
-}
-
-func detectLinkType(t reflect.Type) bool {
-	if t.NumField() < 3 {
-		return false
-	}
-	idField, hasID := t.FieldByName("ID")
-	_, hasValue := t.FieldByName("Value")
-	_, hasLoaded := t.FieldByName("Loaded")
-	return hasID && hasValue && hasLoaded && idField.Type.Kind() == reflect.String
 }
 
 // forEachLinkField iterates over Link and []Link fields of a struct,

@@ -150,7 +150,7 @@ func AnalyzeStruct(t reflect.Type) (*StructInfo, error) {
 		fieldIndex:     make(map[string]int),
 	}
 
-	if err := collectFields(t, nil, info); err != nil {
+	if err := collectFields(t, nil, "", make(map[reflect.Type]bool), info); err != nil {
 		return nil, err
 	}
 
@@ -226,25 +226,63 @@ func scanValidateTags(t reflect.Type, seen map[reflect.Type]bool) bool {
 	return false
 }
 
-func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
+// IsLinkShape reports whether t structurally matches the internal/core
+// Link[T] type — an ID/Value/Loaded triple with a string-typed ID.
+//
+// Lives in internal/util so the schema walker (which cannot import core
+// without a cycle) can skip Link fields, and so internal/core has a
+// single source of truth for the shape check.
+func IsLinkShape(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct || t.NumField() < 3 {
+		return false
+	}
+	idField, hasID := t.FieldByName("ID")
+	_, hasValue := t.FieldByName("Value")
+	_, hasLoaded := t.FieldByName("Loaded")
+	return hasID && hasValue && hasLoaded && idField.Type.Kind() == reflect.String
+}
+
+// isScalarValueType reports whether t should be treated as a leaf scalar
+// by the schema walker even though its kind is reflect.Struct. time.Time
+// is the only stdlib value-typed struct documents commonly hold inline;
+// recursing into it would surface stdlib internals as schema fields.
+func isScalarValueType(t reflect.Type) bool {
+	return t == timeType
+}
+
+// collectFields walks the fields of t and appends them to info.Fields.
+//
+// jsonNamePrefix is the dotted JSON path of the parent struct field
+// (empty at the top level). seen is a per-descent set used for cycle
+// protection — types are added on entry and removed on exit so sibling
+// fields of the same type are both walked, but a self-referential
+// pointer chain terminates.
+func collectFields(t reflect.Type, indexPrefix []int, jsonNamePrefix string, seen map[reflect.Type]bool, info *StructInfo) error {
+	if seen[t] {
+		return nil
+	}
+	seen[t] = true
+	defer delete(seen, t)
+
 	for i := range t.NumField() {
 		field := t.Field(i)
 		index := append(append([]int(nil), indexPrefix...), i)
 
 		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			if err := collectFields(field.Type, index, info); err != nil {
+			if err := collectFields(field.Type, index, jsonNamePrefix, seen, info); err != nil {
 				return err
 			}
 			continue
 		}
 
-		// Field name from json tag, metadata from den tag
+		// Validate per-segment: ValidateFieldName rejects dots (they're
+		// reserved for the synthesised dotted path below).
 		jsonTag := field.Tag.Get("json")
-		name := ParseJSONTagName(jsonTag)
-		if name == "" {
-			name = strings.ToLower(field.Name)
+		rawName := ParseJSONTagName(jsonTag)
+		if rawName == "" {
+			rawName = strings.ToLower(field.Name)
 		}
-		if err := ValidateFieldName(name); err != nil {
+		if err := ValidateFieldName(rawName); err != nil {
 			return fmt.Errorf("field %s: %w", field.Name, err)
 		}
 
@@ -252,6 +290,21 @@ func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
 		opts, err := ParseDenTag(denTag)
 		if err != nil {
 			return fmt.Errorf("field %s: %w", field.Name, err)
+		}
+
+		name := rawName
+		if jsonNamePrefix != "" {
+			name = jsonNamePrefix + "." + rawName
+		}
+
+		// `den:"fts"` on a nested field is rejected here — FTS support
+		// for nested paths is tracked separately as den-ciug. Top-level
+		// FTS fields continue to work as before.
+		if opts.FTS && jsonNamePrefix != "" {
+			return fmt.Errorf(
+				`field %s: den:"fts" on nested field %q: not supported yet — tracked as den-ciug`,
+				field.Name, name,
+			)
 		}
 
 		isPointer := field.Type.Kind() == reflect.Pointer
@@ -269,6 +322,20 @@ func collectFields(t reflect.Type, indexPrefix []int, info *StructInfo) error {
 
 		if name == "_deleted_at" && (field.Type == timePtrType) {
 			info.HasDeletedAt = true
+		}
+
+		// time.Time and Link[T] are conceptual scalars / relations —
+		// don't surface their internals as schema fields.
+		recurseType := field.Type
+		if recurseType.Kind() == reflect.Pointer {
+			recurseType = recurseType.Elem()
+		}
+		if recurseType.Kind() == reflect.Struct &&
+			!isScalarValueType(recurseType) &&
+			!IsLinkShape(recurseType) {
+			if err := collectFields(recurseType, index, name, seen, info); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

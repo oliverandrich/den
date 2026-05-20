@@ -7,10 +7,21 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal/util"
 )
+
+// indexNameSegment converts a (possibly dotted) JSON field name into a
+// fragment that's safe to interpolate into a SQL identifier. The dotted
+// form is correct for json_extract / arrow-operator paths but invalid
+// for `CREATE INDEX idx_<name>` — so dots become underscores in the
+// synthesised index name while IndexDefinition.Fields keeps the dotted
+// path for backends to translate into JSON access.
+func indexNameSegment(jsonName string) string {
+	return strings.ReplaceAll(jsonName, ".", "_")
+}
 
 // Register analyzes the given document types and registers their
 // collections with the database. Must be called before any CRUD operations.
@@ -159,18 +170,11 @@ func buildCollectionMeta(info *util.StructInfo) CollectionMeta {
 		}
 		meta.Fields = append(meta.Fields, fm)
 
-		if f.Options.Index && !f.Options.Unique {
+		if f.Options.Index || f.Options.Unique {
 			meta.Indexes = append(meta.Indexes, IndexDefinition{
-				Name:   "idx_" + info.CollectionName + "_" + f.JSONName,
+				Name:   "idx_" + info.CollectionName + "_" + indexNameSegment(f.JSONName),
 				Fields: []string{f.JSONName},
-				Unique: false,
-			})
-		}
-		if f.Options.Unique {
-			meta.Indexes = append(meta.Indexes, IndexDefinition{
-				Name:   "idx_" + info.CollectionName + "_" + f.JSONName,
-				Fields: []string{f.JSONName},
-				Unique: true,
+				Unique: f.Options.Unique,
 			})
 		}
 	}

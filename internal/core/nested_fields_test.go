@@ -12,6 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// runOnBothBackends runs body against a SQLite and a Postgres database
+// for the given document type. Used by every parity-shaped test in this
+// file; collapses the per-test sqlite/postgres open-loop boilerplate.
+func runOnBothBackends(t *testing.T, doc document.Document, body func(*testing.T, *core.DB)) {
+	t.Helper()
+	for name, openDB := range map[string]func(*testing.T) *core.DB{
+		"sqlite":   func(t *testing.T) *core.DB { return dentest.MustOpen(t, doc) },
+		"postgres": func(t *testing.T) *core.DB { return dentest.MustOpenPostgresDefault(t, doc) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			body(t, openDB(t))
+		})
+	}
+}
+
 // Test types for den-1351 (nested struct fields with den: tags). The walker
 // must recurse into named struct fields and pointer-to-struct fields, and
 // the synthesised indexes must use SQL-safe names while keeping the
@@ -178,23 +193,73 @@ func TestNestedField_SetFieldsThroughNilPointerErrors(t *testing.T) {
 // once den-8f8t taught the Postgres schema DDL to translate dotted
 // paths into jsonb_extract_path_text.
 func TestNestedFieldParity_UniqueRejectsDuplicate(t *testing.T) {
-	for name, openDB := range map[string]func(*testing.T) *core.DB{
-		"sqlite":   func(t *testing.T) *core.DB { return dentest.MustOpen(t, &nestedUser{}) },
-		"postgres": func(t *testing.T) *core.DB { return dentest.MustOpenPostgresDefault(t, &nestedUser{}) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			db := openDB(t)
-			ctx := context.Background()
+	runOnBothBackends(t, &nestedUser{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
 
-			first := &nestedUser{Email: "a@example.com", Profile: nestedUserProfile{Slug: "ada"}}
-			require.NoError(t, core.Save(ctx, db, first))
+		first := &nestedUser{Email: "a@example.com", Profile: nestedUserProfile{Slug: "ada"}}
+		require.NoError(t, core.Save(ctx, db, first))
 
-			dup := &nestedUser{Email: "b@example.com", Profile: nestedUserProfile{Slug: "ada"}}
-			err := core.Save(ctx, db, dup)
-			require.Error(t, err)
-			assert.ErrorIs(t, err, core.ErrDuplicate)
-		})
+		dup := &nestedUser{Email: "b@example.com", Profile: nestedUserProfile{Slug: "ada"}}
+		err := core.Save(ctx, db, dup)
+		require.ErrorIs(t, err, core.ErrDuplicate)
+	})
+}
+
+// Composite unique_together / index_together that spans a flat field
+// and a nested field — pinned end-to-end on both backends. The walker
+// puts both fields in the same group; backends materialise the index
+// with mixed flat and dotted JSON-path expressions.
+
+type compositeNestedInner struct {
+	Slug string `json:"slug" den:"unique_together:tenant_slug,index_together:tenant_dept"`
+	Dept string `json:"dept" den:"index_together:tenant_dept"`
+}
+
+type compositeNestedDoc struct {
+	document.Base
+	TenantID string               `json:"tenant_id" den:"unique_together:tenant_slug,index_together:tenant_dept"`
+	Profile  compositeNestedInner `json:"profile"`
+}
+
+func TestNestedField_CompositeUniqueTogetherMetaSpansLevels(t *testing.T) {
+	db := dentest.MustOpen(t, &compositeNestedDoc{})
+
+	meta, err := core.Meta[compositeNestedDoc](db)
+	require.NoError(t, err)
+
+	byName := make(map[string]core.IndexDefinition, len(meta.Indexes))
+	for _, idx := range meta.Indexes {
+		byName[idx.Name] = idx
 	}
+
+	uniq, ok := byName["idx_compositenesteddoc_tenant_slug"]
+	require.True(t, ok, "unique_together group must materialise as a composite index")
+	assert.True(t, uniq.Unique)
+	assert.ElementsMatch(t, []string{"tenant_id", "profile.slug"}, uniq.Fields,
+		"composite unique must contain both the flat and nested field with the dotted path")
+
+	multi, ok := byName["idx_compositenesteddoc_tenant_dept"]
+	require.True(t, ok, "index_together group must materialise as a composite index")
+	assert.False(t, multi.Unique)
+	assert.ElementsMatch(t, []string{"tenant_id", "profile.slug", "profile.dept"}, multi.Fields)
+}
+
+func TestNestedFieldParity_CompositeUniqueTogetherRejectsCollision(t *testing.T) {
+	runOnBothBackends(t, &compositeNestedDoc{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
+
+		first := &compositeNestedDoc{TenantID: "t1", Profile: compositeNestedInner{Slug: "ada", Dept: "eng"}}
+		require.NoError(t, core.Save(ctx, db, first))
+
+		// Same tenant + same nested slug → composite unique violation.
+		dup := &compositeNestedDoc{TenantID: "t1", Profile: compositeNestedInner{Slug: "ada", Dept: "sales"}}
+		err := core.Save(ctx, db, dup)
+		require.ErrorIs(t, err, core.ErrDuplicate)
+
+		// Different tenant, same slug → allowed.
+		other := &compositeNestedDoc{TenantID: "t2", Profile: compositeNestedInner{Slug: "ada", Dept: "eng"}}
+		require.NoError(t, core.Save(ctx, db, other))
+	})
 }
 
 // Nested FTS test types — round-trip a Profile.Bio FTS field on both
@@ -212,29 +277,23 @@ type nestedFTSUser struct {
 }
 
 func TestNestedFieldParity_FTSOnNestedField(t *testing.T) {
-	for name, openDB := range map[string]func(*testing.T) *core.DB{
-		"sqlite":   func(t *testing.T) *core.DB { return dentest.MustOpen(t, &nestedFTSUser{}) },
-		"postgres": func(t *testing.T) *core.DB { return dentest.MustOpenPostgresDefault(t, &nestedFTSUser{}) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			db := openDB(t)
-			ctx := context.Background()
+	runOnBothBackends(t, &nestedFTSUser{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
 
-			require.NoError(t, core.SaveAll(ctx, db, []*nestedFTSUser{
-				{Email: "a@example.com", Profile: nestedFTSProfile{Slug: "ada", Bio: "lovelace numerical engine"}},
-				{Email: "b@example.com", Profile: nestedFTSProfile{Slug: "alan", Bio: "turing computing machinery"}},
-				{Email: "c@example.com", Profile: nestedFTSProfile{Slug: "grace", Bio: "hopper compilers and cobol"}},
-			}))
+		require.NoError(t, core.SaveAll(ctx, db, []*nestedFTSUser{
+			{Email: "a@example.com", Profile: nestedFTSProfile{Slug: "ada", Bio: "lovelace numerical engine"}},
+			{Email: "b@example.com", Profile: nestedFTSProfile{Slug: "alan", Bio: "turing computing machinery"}},
+			{Email: "c@example.com", Profile: nestedFTSProfile{Slug: "grace", Bio: "hopper compilers and cobol"}},
+		}))
 
-			results, err := core.NewQuery[nestedFTSUser](db).Search(ctx, "lovelace")
-			require.NoError(t, err)
-			require.Len(t, results, 1)
-			assert.Equal(t, "ada", results[0].Profile.Slug)
+		results, err := core.NewQuery[nestedFTSUser](db).Search(ctx, "lovelace")
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "ada", results[0].Profile.Slug)
 
-			results, err = core.NewQuery[nestedFTSUser](db).Search(ctx, "compilers")
-			require.NoError(t, err)
-			require.Len(t, results, 1)
-			assert.Equal(t, "grace", results[0].Profile.Slug)
-		})
-	}
+		results, err = core.NewQuery[nestedFTSUser](db).Search(ctx, "compilers")
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, "grace", results[0].Profile.Slug)
+	})
 }

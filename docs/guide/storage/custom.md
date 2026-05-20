@@ -49,9 +49,8 @@ type URLPrefixer interface {
 
 Implement this **only** when `URL` returns a path relative to the current HTTP server (i.e. the application is expected to serve the bytes itself, like the file backend does). HTTP-layer packages such as `burrow/uploader` type-assert on the local interface to decide whether to mount a serving handler and at what route. Backends that return absolute URLs (S3, GCS, a CDN) should omit the method — the absent `URLPrefix()` is the signal that the Storage serves itself.
 
-## Reference implementations
+## Reference implementation
 
-The two shipped backends are good starting points:
+The shipped backend is a good starting point:
 
-- [`storage/file`](file.md) — local-disk implementation, ~120 lines. Use as a template for any filesystem-shaped backend (NFS mount, S3FS).
-- [`storage/s3`](s3.md) — minio-go-backed remote implementation, optional package — Den core does not import it. Use as a template for any HTTP-shaped backend.
+- [`storage/file`](file.md) — local-disk implementation, ~120 lines. Use as a template for any filesystem-shaped backend (NFS mount, S3FS, or as a model for HTTP-shaped backends like S3 / GCS / R2 — same `Storage` interface, swap the bytes path for HTTP).

@@ -23,7 +23,6 @@ PAGES=(
   docs/guide/full-text-search.md
   docs/guide/attachments.md
   docs/guide/storage/file.md
-  docs/guide/storage/s3.md
   docs/guide/storage/custom.md
   docs/guide/transactions.md
   docs/guide/hooks.md

@@ -75,7 +75,6 @@ nav:
           - Attachments & Storage:
               - Overview: guide/attachments.md
               - File Backend: guide/storage/file.md
-              - S3 Backend: guide/storage/s3.md
               - Custom Backend: guide/storage/custom.md
           - Transactions: guide/transactions.md
           - Lifecycle Hooks: guide/hooks.md

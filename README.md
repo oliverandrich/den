@@ -131,7 +131,6 @@ den/
 ├── internal/util/                  Shared helpers (reflect, sql safety, field validation)
 ├── storage/                        Storage backend registry + OpenURL
 ├── storage/file/                   Local filesystem backend (file:// scheme)
-├── storage/s3/                     S3-compatible backend (s3:// scheme)
 ├── document/                       Base + composable SoftDelete, Tracked, Attachment embeds
 ├── where/                          Query condition builders
 ├── backend/

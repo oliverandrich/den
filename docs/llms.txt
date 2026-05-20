@@ -27,7 +27,6 @@
 - [Full-Text Search](https://den-odm.readthedocs.io/guide/full-text-search/): FTS via den:"fts" tag, unified Search() API, FTS5 on SQLite, tsvector on PostgreSQL
 - [Attachments & Storage](https://den-odm.readthedocs.io/guide/attachments/): document.Attachment embed, den.Storage interface, upload/read/delete workflow, hard-delete cascade
 - [File Storage Backend](https://den-odm.readthedocs.io/guide/storage/file/): Reference Storage backend writing content-addressed bytes to a local filesystem root with HTTP URL prefix
-- [S3 Storage Backend](https://den-odm.readthedocs.io/guide/storage/s3/): Optional S3 / S3-compatible (MinIO, localstack) backend via minio-go — side-effect import keeps deps out of binaries that don't use it
 - [Custom Storage Backend](https://den-odm.readthedocs.io/guide/storage/custom/): Implementing the den.Storage interface for any byte store — methods, DSN registration, url_prefix convention
 - [Transactions](https://den-odm.readthedocs.io/guide/transactions/): RunInTransaction with Tx-prefixed CRUD variants, commit/rollback via return value, backend concurrency differences
 - [Lifecycle Hooks](https://den-odm.readthedocs.io/guide/hooks/): BeforeInsert, AfterUpdate, Validate, and more via interfaces; execution order; hooks within transactions

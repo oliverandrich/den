@@ -2,11 +2,10 @@
 
 Den includes a built-in abstraction for attaching files to documents. The metadata (path, mime, size, hash) lives on an embeddable struct in the document; the actual bytes live behind a `den.Storage` interface that the application configures once at `Open` time.
 
-This page covers the concept, the document-side embed, and the upload / read / delete workflow. The two shipped storage implementations and the contract for writing your own each have their own page:
+This page covers the concept, the document-side embed, and the upload / read / delete workflow. The shipped storage implementation and the contract for writing your own each have their own page:
 
 - [File backend](storage/file.md) — local disk, content-addressed, included in Den core.
-- [S3 backend](storage/s3.md) — S3 / S3-compatible (MinIO, localstack), optional package — Den core does not import it, so the minio-go bytes stay out of binaries that don't `_`-import it.
-- [Writing a custom backend](storage/custom.md) — the `Storage` interface, required behaviour, optional `URLPrefix`.
+- [Writing a custom backend](storage/custom.md) — the `Storage` interface, required behaviour, optional `URLPrefix`. For S3 or other remote storage, implement the interface against your client of choice.
 
 !!! note "One Storage per DB"
     A single `den.Storage` is bound to the DB at Open. Every document type that uses attachments routes its bytes through that one backend. There is no per-collection storage routing built in — if you need that (public CDN for post covers, private bucket for invoices), wrap your Storage with a dispatcher in application code and pick a backend per call site.
@@ -119,7 +118,7 @@ if err != nil {
 db, err := den.OpenURL(ctx, dsn, den.WithStorage(fs))
 ```
 
-For the per-backend DSN syntax, see the [file backend](storage/file.md#dsn-syntax) and [S3 backend](storage/s3.md#dsn-form) pages.
+For the DSN syntax, see the [file backend](storage/file.md#dsn-syntax) page.
 
 Without a Storage, `Store` / `Open` / `Delete` on attachments still work because application code holds a reference to the Storage instance directly. What breaks is the automatic hard-delete cascade, which only runs if a Storage is installed on the DB — `den.Delete(..., HardDelete())` on an attachment-bearing document returns `ErrValidation` instead of orphaning bytes.
 
@@ -186,7 +185,7 @@ fs, _ := file.New("./uploads", "/media")
 fs.URL(att) // -> "/media/2026/04/abc123def4567890.jpg"
 ```
 
-Remote storage backends may return absolute URLs (`https://cdn.example.com/...`) or pre-signed URLs (S3 returns SigV4-presigned GETs). Applications should treat the return value as opaque.
+Remote storage backends may return absolute URLs (`https://cdn.example.com/...`) or pre-signed URLs. Applications should treat the return value as opaque.
 
 Serving the files is up to the application. The [burrow/uploader](https://github.com/oliverandrich/burrow/tree/main/uploader) package provides a ready-made HTTP serving handler and multipart ingress helpers built on the `Storage` interface.
 

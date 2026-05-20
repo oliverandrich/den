@@ -128,9 +128,9 @@ func OpenURL(dsn string) (den.Storage, error) {
 // this on the location they receive in their [OpenerFunc], use the
 // prefix as needed, and parse the stripped location for any other
 // query parameters they understand. Backends that return absolute URLs
-// (e.g. S3) can call this to silently discard a stray `url_prefix`
-// before their own parser runs, matching the framework's
-// "url_prefix is meaningless for absolute-URL backends" contract.
+// can call this to silently discard a stray `url_prefix` before their
+// own parser runs, matching the framework's "url_prefix is meaningless
+// for absolute-URL backends" contract.
 func URLPrefixFromLocation(location string) (stripped, prefix string) {
 	base, rawQuery, hasQuery := strings.Cut(location, "?")
 	if !hasQuery {

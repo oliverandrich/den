@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/oliverandrich/den/document"
@@ -117,8 +119,46 @@ type upsertResult[T any] struct {
 // encode and decode are the single JSON seam every storage write/read flows
 // through. Kept as DB methods so every call site reads uniformly and any
 // future encoder swap stays single-site.
-func (db *DB) encode(v any) ([]byte, error)    { return json.Marshal(v) }
+//
+// encode uses a pooled buffer with HTML escaping disabled. JSONB
+// storage has no browser to defend, and docs with `&` / `<` / `>` (URLs,
+// markup) would otherwise pay 6 bytes per occurrence to a \uXXXX
+// sequence. bytes.Clone on the returned slice is load-bearing: the
+// caller's slice must outlive the pool buffer that gets recycled.
+// decode is a thin json.Unmarshal — stdlib accepts both the escaped
+// and unescaped forms, so rows written before this change keep
+// decoding correctly.
+func (db *DB) encode(v any) ([]byte, error) {
+	buf, ok := encodeBufPool.Get().(*bytes.Buffer)
+	if !ok {
+		// Unreachable: encodeBufPool.New produces *bytes.Buffer.
+		panic("den: encodeBufPool produced wrong type")
+	}
+	buf.Reset()
+	defer func() {
+		// Don't pin oversize buffers. bytes.Buffer.Reset() resets the
+		// write position but never shrinks capacity, so a single
+		// large doc would keep a multi-MB buffer alive in the pool
+		// for the rest of the process lifetime.
+		if buf.Cap() <= encodeBufPoolMaxCap {
+			encodeBufPool.Put(buf)
+		}
+	}()
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	out := buf.Bytes()
+	// Encoder.Encode appends a trailing newline; strip it.
+	return bytes.Clone(out[:len(out)-1]), nil
+}
+
 func (db *DB) decode(data []byte, v any) error { return json.Unmarshal(data, v) }
+
+const encodeBufPoolMaxCap = 64 << 10 // 64 KiB; oversize buffers are dropped on Put.
+
+var encodeBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 func setBaseFields(v reflect.Value, info *util.StructInfo, now time.Time, isInsert bool) {
 	if idField := info.BaseID; idField != nil {

@@ -12,6 +12,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **In-tree monotonic ULID generator.** Dropped `oklog/ulid/v2`; Den now produces IDs from `internal/idgen` with strict intra-millisecond monotonicity. Wire format is unchanged (still 26-char Crockford base32 ULID). Fixes a latent ordering bug — the previous call used the non-monotonic constructor, so two inserts in the same ms could sort unpredictably under `Sort("_id")` and cursor pagination.
 - **JSON encoding back to `encoding/json`.** Dropped `goccy/go-json`; stdlib has closed the practical gap and DB I/O dominates the cost. One less third-party dep in the critical path.
+- **Storage encode seam uses a pooled `Encoder` with `SetEscapeHTML(false)`.** JSONB columns have no browser to defend, so `&` / `<` / `>` in stored fields (URLs, markup) keep their literal bytes instead of being expanded to `&` / `<` / `>`. Wire-compatible with existing rows — stdlib `json.Unmarshal` decodes both forms identically.
 
 ## 0.14.0 — 2026-05-20
 

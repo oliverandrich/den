@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.14.0 — 2026-05-20
+
 ### Added
 
 - **`den:` tags on nested struct fields.** `den:"index"` / `unique` / `unique_together` / `index_together` / `fts` now flow through to fields of named-struct and pointer-to-struct fields at arbitrary depth on both backends — see [Nested Field Indexes](guide/documents.md#nested-field-indexes).

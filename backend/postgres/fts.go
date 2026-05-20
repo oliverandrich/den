@@ -13,7 +13,7 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 	// Build tsvector expression from FTS fields
 	parts := make([]string, len(fields))
 	for i, f := range fields {
-		parts[i] = fmt.Sprintf("coalesce(data->>'%s', '')", sanitizeFieldName(f))
+		parts[i] = fmt.Sprintf("coalesce(%s, '')", jsonbPathText(f))
 	}
 	tsvectorExpr := fmt.Sprintf("to_tsvector('english', %s)", strings.Join(parts, " || ' ' || "))
 
@@ -83,7 +83,7 @@ func buildFTSSearchSQL(collection, query string, q *den.Query) (string, []any) {
 			if s.Dir == den.Desc {
 				dir = "DESC"
 			}
-			fmt.Fprintf(&sb, "data->>'%s' %s", sanitizeFieldName(s.Field), dir)
+			fmt.Fprintf(&sb, "%s %s", jsonbPathText(s.Field), dir)
 		}
 	} else {
 		sb.WriteString(" ORDER BY ts_rank(_fts_vector, plainto_tsquery('english', $1)) DESC")

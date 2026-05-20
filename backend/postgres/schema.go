@@ -99,7 +99,7 @@ func createExpressionIndex(ctx context.Context, pool pgPool, collection string, 
 
 	exprs := make([]string, len(idx.Fields))
 	for i, f := range idx.Fields {
-		exprs[i] = fmt.Sprintf("(data->>'%s')", sanitizeFieldName(f))
+		exprs[i] = "(" + jsonbPathText(f) + ")"
 	}
 	exprList := strings.Join(exprs, ", ")
 
@@ -109,7 +109,7 @@ func createExpressionIndex(ctx context.Context, pool pgPool, collection string, 
 		uniqueStr = "UNIQUE "
 		parts := make([]string, len(idx.Fields))
 		for i, f := range idx.Fields {
-			parts[i] = fmt.Sprintf("data->>'%s' IS NOT NULL", sanitizeFieldName(f))
+			parts[i] = jsonbPathText(f) + " IS NOT NULL"
 		}
 		whereClause = " WHERE " + strings.Join(parts, " AND ")
 	}

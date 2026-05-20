@@ -175,22 +175,16 @@ func TestNestedField_SetFieldsThroughNilPointerErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "profile.bio")
 }
 
-// TestNestedFieldParity_UniqueRejectsDuplicate is the SQLite test from
-// above, replayed against both backends. PostgreSQL is currently skipped
-// because the index DDL in backend/postgres/schema.go interpolates the
-// dotted JSONName into (data->>'profile.slug') verbatim, which looks
-// up a literal top-level key — silently producing NULL for every row
-// and defeating the unique constraint. Tracked as den-8f8t (Postgres
-// dotted-path translation in schema/FTS).
+// TestNestedFieldParity_UniqueRejectsDuplicate exercises the nested-
+// unique behaviour on both backends. Lifted from a SQLite-only test
+// once den-8f8t taught the Postgres schema DDL to translate dotted
+// paths into jsonb_extract_path_text.
 func TestNestedFieldParity_UniqueRejectsDuplicate(t *testing.T) {
 	for name, openDB := range map[string]func(*testing.T) *core.DB{
 		"sqlite":   func(t *testing.T) *core.DB { return dentest.MustOpen(t, &nestedUser{}) },
 		"postgres": func(t *testing.T) *core.DB { return dentest.MustOpenPostgresDefault(t, &nestedUser{}) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			if name == "postgres" {
-				t.Skip("postgres index DDL needs dotted-path translation — tracked as den-8f8t")
-			}
 			db := openDB(t)
 			ctx := context.Background()
 

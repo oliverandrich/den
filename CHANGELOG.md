@@ -4,6 +4,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Changed
+
+- **JSON encoding back to `encoding/json`.** Dropped `goccy/go-json`; stdlib has closed the practical gap and DB I/O dominates the cost. One less third-party dep in the critical path.
+
 ## 0.14.0 — 2026-05-20
 
 ### Added

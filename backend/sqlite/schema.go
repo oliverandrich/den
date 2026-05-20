@@ -3,11 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/goccy/go-json"
 
 	"github.com/oliverandrich/den"
 )

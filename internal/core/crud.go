@@ -2,11 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"time"
-
-	json "github.com/goccy/go-json"
 
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/internal/util"
@@ -116,8 +115,8 @@ type upsertResult[T any] struct {
 }
 
 // encode and decode are the single JSON seam every storage write/read flows
-// through. Kept as DB methods so every call site reads uniformly and so a
-// future swap (e.g. encoding/json/v2 once it stabilises) lives in one place.
+// through. Kept as DB methods so every call site reads uniformly and any
+// future encoder swap stays single-site.
 func (db *DB) encode(v any) ([]byte, error)    { return json.Marshal(v) }
 func (db *DB) decode(data []byte, v any) error { return json.Unmarshal(data, v) }
 

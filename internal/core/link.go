@@ -1,10 +1,9 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
-
-	json "github.com/goccy/go-json"
 
 	"github.com/oliverandrich/den/document"
 )
@@ -24,7 +23,7 @@ type Link[T any] struct {
 // MarshalJSON serializes the link as a JSON string (the ID).
 //
 // Symmetric fast path to UnmarshalJSON: ULID-shaped IDs need no
-// escaping, so re-entering the goccy encoder is wasted work. The byte-
+// escaping, so re-entering the JSON encoder is wasted work. The byte-
 // for-byte contract with json.Marshal(l.ID) is preserved — anything
 // that would force an escape falls through.
 func (l Link[T]) MarshalJSON() ([]byte, error) {
@@ -56,7 +55,7 @@ func idIsJSONClean(s string) bool {
 //
 // Link bodies in persisted JSON are almost always escape-free IDs
 // (ULIDs are pure ASCII). The fast path takes the quoted bytes directly
-// instead of re-entering the goccy decoder for what is structurally one
+// instead of re-entering the JSON decoder for what is structurally one
 // string field — the round-trip dominated alloc profiles on read paths
 // with many Link fields per row. Anything with escapes or unusual shape
 // falls through to json.Unmarshal so the error and unescaping contract

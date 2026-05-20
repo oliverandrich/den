@@ -1,11 +1,11 @@
 package postgres
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 
-	json "github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oliverandrich/den"

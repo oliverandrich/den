@@ -276,6 +276,82 @@ type nestedFTSUser struct {
 	Profile nestedFTSProfile `json:"profile"`
 }
 
+// Composite FTS doc — one flat FTS field + one nested FTS field. Pins
+// that ensureFTSForCollection collects both into the same backend FTS
+// surface (SQLite: two columns in one virtual table; PG: one tsvector
+// generated column concatenating both expressions).
+
+type nestedFTSMixedDoc struct {
+	document.Base
+	Title   string           `json:"title" den:"fts"`
+	Profile nestedFTSProfile `json:"profile"`
+}
+
+func TestNestedFieldParity_FTSCompositeFlatAndNested(t *testing.T) {
+	runOnBothBackends(t, &nestedFTSMixedDoc{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
+
+		require.NoError(t, core.SaveAll(ctx, db, []*nestedFTSMixedDoc{
+			{Title: "engine internals", Profile: nestedFTSProfile{Slug: "ada", Bio: "designed mechanical computation"}},
+			{Title: "lambda calculus", Profile: nestedFTSProfile{Slug: "alonzo", Bio: "founded recursion theory"}},
+		}))
+
+		// Match in the flat field.
+		hits, err := core.NewQuery[nestedFTSMixedDoc](db).Search(ctx, "engine")
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		assert.Equal(t, "ada", hits[0].Profile.Slug)
+
+		// Match in the nested field.
+		hits, err = core.NewQuery[nestedFTSMixedDoc](db).Search(ctx, "recursion")
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		assert.Equal(t, "alonzo", hits[0].Profile.Slug)
+
+		// Negative control: Slug carries no `den:"fts"`, so searching
+		// for a unique slug value must NOT surface anything — proves
+		// untagged sibling fields stay out of the FTS index.
+		hits, err = core.NewQuery[nestedFTSMixedDoc](db).Search(ctx, "alonzo")
+		require.NoError(t, err)
+		assert.Empty(t, hits, "untagged nested field must not leak into the FTS surface")
+	})
+}
+
+// Nil pointer-to-struct holding an FTS field — Save must not panic in
+// the trigger / tsvector expression, and Search for a term that would
+// only match the nil row must return nothing.
+
+type nestedFTSPtrDoc struct {
+	document.Base
+	Email   string            `json:"email"`
+	Profile *nestedFTSProfile `json:"profile,omitempty"`
+}
+
+func TestNestedFieldParity_FTSOnNilPointerSurvives(t *testing.T) {
+	runOnBothBackends(t, &nestedFTSPtrDoc{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
+
+		// nil Profile — the FTS path resolves to NULL (json_extract) or
+		// empty (coalesce in tsvector). Trigger / generated column must
+		// accept it without error.
+		require.NoError(t, core.Save(ctx, db, &nestedFTSPtrDoc{Email: "a@example.com"}))
+
+		// A non-nil sibling so the FTS infrastructure has at least one
+		// indexed row to scan.
+		require.NoError(t, core.Save(ctx, db, &nestedFTSPtrDoc{
+			Email:   "b@example.com",
+			Profile: &nestedFTSProfile{Slug: "ada", Bio: "lovelace"},
+		}))
+
+		// Search hits only the populated row; the nil-profile row must
+		// not surface and must not have crashed the trigger.
+		hits, err := core.NewQuery[nestedFTSPtrDoc](db).Search(ctx, "lovelace")
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		assert.Equal(t, "b@example.com", hits[0].Email)
+	})
+}
+
 func TestNestedFieldParity_FTSOnNestedField(t *testing.T) {
 	runOnBothBackends(t, &nestedFTSUser{}, func(t *testing.T, db *core.DB) {
 		ctx := context.Background()

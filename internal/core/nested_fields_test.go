@@ -297,3 +297,68 @@ func TestNestedFieldParity_FTSOnNestedField(t *testing.T) {
 		assert.Equal(t, "grace", results[0].Profile.Slug)
 	})
 }
+
+// Project + GroupBy on dotted JSON paths (den-tgy7). Project resolves
+// the path through nested maps; GroupBy threads the dotted name into
+// json_extract / jsonb_extract_path_text.
+
+// projectNestedSummary deliberately mixes json:"…" (flat) and den:"from:…"
+// (dotted) to also pin the den-first / json-fallback resolution chain
+// in getProjMappings.
+type projectNestedSummary struct {
+	ID    string `json:"_id"`
+	Email string `json:"email"`
+	Slug  string `den:"from:profile.slug"`
+	Bio   string `den:"from:profile.bio"`
+}
+
+type groupByNestedRow struct {
+	Department string `den:"group_key"`
+	Count      int    `den:"count"`
+}
+
+func TestNestedFieldParity_ProjectNestedPath(t *testing.T) {
+	runOnBothBackends(t, &nestedUser{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
+
+		require.NoError(t, core.SaveAll(ctx, db, []*nestedUser{
+			{Email: "a@example.com", Profile: nestedUserProfile{Slug: "ada", Department: "eng", Bio: "lovelace"}},
+			{Email: "b@example.com", Profile: nestedUserProfile{Slug: "alan", Department: "sales", Bio: "turing"}},
+		}))
+
+		var out []projectNestedSummary
+		require.NoError(t, core.NewQuery[nestedUser](db).Sort("email", core.Asc).Project(ctx, &out))
+		require.Len(t, out, 2)
+		assert.Equal(t, "ada", out[0].Slug, "Project resolves dotted JSON path via den:\"from:profile.slug\"")
+		assert.Equal(t, "lovelace", out[0].Bio)
+		assert.Equal(t, "alan", out[1].Slug)
+		assert.Equal(t, "a@example.com", out[0].Email, "flat fields keep working in the same projection")
+	})
+}
+
+func TestNestedFieldParity_GroupByNestedPath(t *testing.T) {
+	runOnBothBackends(t, &nestedUser{}, func(t *testing.T, db *core.DB) {
+		ctx := context.Background()
+
+		require.NoError(t, core.SaveAll(ctx, db, []*nestedUser{
+			{Email: "a@example.com", Profile: nestedUserProfile{Slug: "ada", Department: "eng"}},
+			{Email: "b@example.com", Profile: nestedUserProfile{Slug: "alan", Department: "eng"}},
+			{Email: "c@example.com", Profile: nestedUserProfile{Slug: "grace", Department: "sales"}},
+		}))
+
+		var rows []groupByNestedRow
+		require.NoError(t,
+			core.NewQuery[nestedUser](db).
+				GroupBy("profile.department").
+				Into(ctx, &rows),
+		)
+		require.Len(t, rows, 2)
+
+		byDept := make(map[string]int, len(rows))
+		for _, r := range rows {
+			byDept[r.Department] = r.Count
+		}
+		assert.Equal(t, 2, byDept["eng"], "GroupBy on dotted path aggregates by the nested value")
+		assert.Equal(t, 1, byDept["sales"])
+	})
+}

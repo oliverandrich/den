@@ -8,6 +8,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **`den:` tags on nested struct fields.** `den:"index"` / `unique` / `unique_together` / `index_together` / `fts` now flow through to fields of named-struct and pointer-to-struct fields at arbitrary depth on both backends — see [Nested Field Indexes](guide/documents.md#nested-field-indexes).
 
+### Fixed
+
+- **`den.Revert`** now zeroes the doc before decoding the snapshot. Previously fields absent from the snapshot JSON (nil pointers with `omitempty`, zero-valued nested structs) silently retained their current in-memory value — a behaviour change for callers that relied on the undocumented merge semantics.
+
 ## 0.13.2 — 2026-05-17
 
 Documentation-only release. Source behaviour is identical to v0.13.1 — this tag exists so the published docs site picks up audit-driven corrections.

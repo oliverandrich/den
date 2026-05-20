@@ -81,6 +81,8 @@ Options can be combined with commas:
 Tags []string `json:"tags" den:"index,omitempty"`
 ```
 
+`index` / `unique` / `unique_together` / `index_together` / `fts` also work on fields of named-struct and pointer-to-struct fields at any nesting depth — see [Nested Field Indexes](../guide/documents.md#nested-field-indexes).
+
 !!! note "`unique` already implies a lookup index"
     A unique index is itself a usable lookup index, so `den:"unique"` alone is enough for equality queries — you do not need to combine it with `index`. `den:"index,unique"` is accepted but redundant: Den creates only the unique index and silently drops the plain one.
 

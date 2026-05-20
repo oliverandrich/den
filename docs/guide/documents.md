@@ -232,11 +232,12 @@ type Product struct {
 === "PostgreSQL"
 
     ```sql
-    CREATE INDEX IF NOT EXISTS idx_product_name
-        ON product(((data->>'name')));
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_product_name
+        ON product((jsonb_extract_path_text(data, 'name')));
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_sku
-        ON product(((data->>'sku')));
+    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_product_sku
+        ON product((jsonb_extract_path_text(data, 'sku')))
+        WHERE jsonb_extract_path_text(data, 'sku') IS NOT NULL;
     ```
 
 ### Via Struct Tags (Compound Indexes)
@@ -276,11 +277,57 @@ type Event struct {
 === "PostgreSQL"
 
     ```sql
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_feed_guid
-        ON entry((data->>'feed'), (data->>'guid'))
-        WHERE data->>'feed' IS NOT NULL
-          AND data->>'guid' IS NOT NULL;
+    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_entry_feed_guid
+        ON entry((jsonb_extract_path_text(data, 'feed')), (jsonb_extract_path_text(data, 'guid')))
+        WHERE jsonb_extract_path_text(data, 'feed') IS NOT NULL
+          AND jsonb_extract_path_text(data, 'guid') IS NOT NULL;
     ```
+
+### Nested Field Indexes
+
+`den:` tags also work on fields of named-struct and pointer-to-struct fields at any nesting depth. The schema walker descends through `Profile MyProfile` / `*Profile` and emits dotted JSON paths into the generated SQL.
+
+```go
+type Profile struct {
+    Slug       string `json:"slug"       den:"unique"`
+    Department string `json:"department" den:"index"`
+    Bio        string `json:"bio"        den:"fts"`
+}
+
+type Account struct {
+    document.Base
+    Email   string  `json:"email"`
+    Profile Profile `json:"profile"`
+}
+```
+
+=== "SQLite"
+
+    ```sql
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_account_profile_slug
+        ON account(json_extract(data, '$.profile.slug'))
+        WHERE json_extract(data, '$.profile.slug') IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_account_profile_department
+        ON account(json_extract(data, '$.profile.department'));
+    ```
+
+=== "PostgreSQL"
+
+    ```sql
+    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_account_profile_slug
+        ON account((jsonb_extract_path_text(data, 'profile', 'slug')))
+        WHERE jsonb_extract_path_text(data, 'profile', 'slug') IS NOT NULL;
+
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_account_profile_department
+        ON account((jsonb_extract_path_text(data, 'profile', 'department')));
+    ```
+
+Index names replace dots with underscores to stay valid SQL identifiers; the dotted form is preserved in the expression so the runtime lookup resolves the nested JSON value. `unique_together` / `index_together` groups can mix flat and nested fields in the same group.
+
+`Link[T]` / `[]Link[T]` fields and `time.Time` are treated as leaf scalars — the walker doesn't descend into them. Self-referential pointer types (`Node { Child *Node }`) are walked once at the top level and then short-circuit, so the schema stays bounded.
+
+Pointer-to-struct fields behave the same as the value form. A nil parent pointer at insert time stores no value at the nested path; the unique index treats this as NULL (multiple nil parents don't collide).
 
 ### Via Settings (Compound Indexes)
 

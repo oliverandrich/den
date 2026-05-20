@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.15.0 — 2026-05-20
+
 ### Removed
 
 - **`storage/s3` backend.** Dropped `minio/minio-go/v7`, `gofakes3`, and their transitives — 18 module-graph entries gone in total. The package wasn't used by any current consumer. **Breaking** for anyone who imported `github.com/oliverandrich/den/storage/s3`: implement the `Storage` interface against your S3 client of choice. The `file://` backend, the `Storage` interface, and `document.Attachment` are unaffected.

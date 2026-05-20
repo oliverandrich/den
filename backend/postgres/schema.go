@@ -2,12 +2,12 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/goccy/go-json"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oliverandrich/den"

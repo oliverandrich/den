@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,8 +10,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	json "github.com/goccy/go-json"
 
 	"github.com/oliverandrich/den"
 )

@@ -4,11 +4,11 @@ import (
 	"github.com/oliverandrich/den/internal/core"
 
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 
-	json "github.com/goccy/go-json"
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
 	"github.com/oliverandrich/den/where"

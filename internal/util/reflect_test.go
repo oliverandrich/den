@@ -438,6 +438,291 @@ func TestAnalyzeStruct_HasValidateTags(t *testing.T) {
 	})
 }
 
+// Types for nested-field walker tests (den-1351). The walker must descend
+// into named struct fields and pointer-to-struct fields, producing dotted
+// JSONName paths so `den:` tags inside them become real schema constraints.
+
+type nestedInner struct {
+	Slug       string `json:"slug"       den:"unique"`
+	Department string `json:"department" den:"index"`
+	Bio        string `json:"bio"`
+}
+
+type nestedValueDoc struct {
+	testBase
+	Profile nestedInner `json:"profile"`
+}
+
+type nestedPointerDoc struct {
+	testBase
+	Profile *nestedInner `json:"profile,omitempty"`
+}
+
+type nestedDepth3Inner struct {
+	Zip string `json:"zip" den:"index"`
+}
+
+type nestedDepth2Inner struct {
+	City nestedDepth3Inner `json:"city"`
+}
+
+type nestedDepth3Doc struct {
+	testBase
+	Addr nestedDepth2Inner `json:"addr"`
+}
+
+type nestedCycleDoc struct {
+	testBase
+	Name  string          `json:"name" den:"index"`
+	Child *nestedCycleDoc `json:"child,omitempty"`
+}
+
+type nestedFTSInner struct {
+	Bio string `json:"bio" den:"fts"`
+}
+
+type nestedFTSDoc struct {
+	testBase
+	Profile nestedFTSInner `json:"profile"`
+}
+
+type nestedBadSegmentInner struct {
+	Bad string `json:"bad name"` //nolint:staticcheck // intentionally invalid
+}
+
+type nestedBadSegmentDoc struct {
+	testBase
+	Profile nestedBadSegmentInner `json:"profile"`
+}
+
+type nestedTimeFieldDoc struct {
+	testBase
+	CreatedAt  time.Time  `json:"created_at"  den:"index"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty" den:"index"`
+	HiddenName string     `json:"hidden_name"`
+}
+
+// linkShape is structurally a Link[T] from internal/core (ID/Value/Loaded
+// with string ID). The walker must NOT recurse into it.
+type linkShape struct {
+	ID     string
+	Value  *int
+	Loaded bool
+}
+
+type docWithLinkLikeField struct {
+	testBase
+	Ref linkShape `json:"ref"`
+}
+
+type docWithLinkLikeSlice struct {
+	testBase
+	Refs []linkShape `json:"refs"`
+}
+
+type nestedUTInner struct {
+	Slug string `json:"slug" den:"unique_together:user_slug"`
+}
+
+type nestedUTSpanDoc struct {
+	testBase
+	UserID  string        `json:"user_id" den:"unique_together:user_slug"`
+	Profile nestedUTInner `json:"profile"`
+}
+
+func TestIsLinkShape(t *testing.T) {
+	type matchesShape struct {
+		ID     string
+		Value  *int
+		Loaded bool
+	}
+	type missingValue struct {
+		ID     string
+		Loaded bool
+	}
+	type missingLoaded struct {
+		ID    string
+		Value *int
+	}
+	type idIsNotString struct {
+		ID     int
+		Value  *int
+		Loaded bool
+	}
+	type plain struct {
+		Foo string
+	}
+
+	tests := []struct {
+		name string
+		typ  reflect.Type
+		want bool
+	}{
+		{"link shape", reflect.TypeFor[matchesShape](), true},
+		{"missing Value", reflect.TypeFor[missingValue](), false},
+		{"missing Loaded", reflect.TypeFor[missingLoaded](), false},
+		{"ID not string", reflect.TypeFor[idIsNotString](), false},
+		{"plain struct", reflect.TypeFor[plain](), false},
+		{"non-struct", reflect.TypeFor[string](), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsLinkShape(tt.typ))
+		})
+	}
+}
+
+func TestAnalyzeStruct_RecursesNamedStructField(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedValueDoc]())
+	require.NoError(t, err)
+
+	slug := info.FieldByName("profile.slug")
+	require.NotNil(t, slug, "nested unique field must show up as profile.slug")
+	assert.True(t, slug.Options.Unique)
+
+	dept := info.FieldByName("profile.department")
+	require.NotNil(t, dept)
+	assert.True(t, dept.Options.Index)
+
+	// Untagged inner field must also be captured so SetFields lookups work.
+	bio := info.FieldByName("profile.bio")
+	require.NotNil(t, bio)
+	assert.False(t, bio.Options.Index)
+}
+
+func TestAnalyzeStruct_RecursesPointerToStructField(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedPointerDoc]())
+	require.NoError(t, err)
+
+	slug := info.FieldByName("profile.slug")
+	require.NotNil(t, slug, "nested unique field on pointer-to-struct must be reachable")
+	assert.True(t, slug.Options.Unique)
+}
+
+func TestAnalyzeStruct_NestedDepthThree(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedDepth3Doc]())
+	require.NoError(t, err)
+
+	zip := info.FieldByName("addr.city.zip")
+	require.NotNil(t, zip, "depth-3 nested field must be reachable via dotted path")
+	assert.True(t, zip.Options.Index)
+}
+
+func TestAnalyzeStruct_TimeIsLeafScalar(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedTimeFieldDoc]())
+	require.NoError(t, err)
+
+	createdAt := info.FieldByName("created_at")
+	require.NotNil(t, createdAt)
+	assert.True(t, createdAt.Options.Index)
+
+	updatedAt := info.FieldByName("updated_at")
+	require.NotNil(t, updatedAt)
+	assert.True(t, updatedAt.Options.Index)
+
+	for _, f := range info.Fields {
+		assert.NotContains(t, f.JSONName, "created_at.",
+			"walker must not recurse into time.Time — would produce stdlib internals")
+		assert.NotContains(t, f.JSONName, "updated_at.",
+			"walker must not recurse into *time.Time")
+	}
+}
+
+func TestAnalyzeStruct_SkipsLinkShapedFields(t *testing.T) {
+	t.Run("named link field", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[docWithLinkLikeField]())
+		require.NoError(t, err)
+
+		// The Ref field itself is captured as a leaf — but the walker
+		// must NOT descend into ID/Value/Loaded.
+		ref := info.FieldByName("ref")
+		require.NotNil(t, ref)
+		for _, f := range info.Fields {
+			assert.NotContains(t, f.JSONName, "ref.",
+				"walker must not recurse into Link-shaped structs")
+		}
+	})
+
+	t.Run("slice of link field", func(t *testing.T) {
+		info, err := AnalyzeStruct(reflect.TypeFor[docWithLinkLikeSlice]())
+		require.NoError(t, err)
+
+		refs := info.FieldByName("refs")
+		require.NotNil(t, refs)
+		for _, f := range info.Fields {
+			assert.NotContains(t, f.JSONName, "refs.")
+		}
+	})
+}
+
+func TestAnalyzeStruct_SiblingsOfSameType(t *testing.T) {
+	// Pins the stack-style cycle protection: seen[t] is set on entry
+	// and deleted on exit, so two sibling fields of the same struct
+	// type are both walked. A "permanent mark" implementation would
+	// silently drop the second one and still satisfy the existing
+	// cycle test — this case catches that refactor.
+	type sibInner struct {
+		X string `json:"x" den:"index"`
+	}
+	type sibDoc struct {
+		testBase
+		A sibInner `json:"a"`
+		B sibInner `json:"b"`
+	}
+
+	info, err := AnalyzeStruct(reflect.TypeFor[sibDoc]())
+	require.NoError(t, err)
+
+	require.NotNil(t, info.FieldByName("a.x"), "first sibling must be walked")
+	require.NotNil(t, info.FieldByName("b.x"), "second sibling of same type must also be walked")
+}
+
+func TestAnalyzeStruct_CycleProtection(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedCycleDoc]())
+	require.NoError(t, err, "self-referential pointer must not cause infinite recursion")
+
+	// Top-level fields are present.
+	require.NotNil(t, info.FieldByName("name"))
+	require.NotNil(t, info.FieldByName("child"),
+		"self-referential pointer is captured as a leaf field")
+	// The walker refuses to enter the same type a second time, so no
+	// nested fields beneath child are recorded — schema would otherwise
+	// be unbounded.
+	assert.Nil(t, info.FieldByName("child.name"),
+		"cycle protection blocks recursion when the type is already on the stack")
+}
+
+func TestAnalyzeStruct_AcceptsFTSOnNestedField(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedFTSDoc]())
+	require.NoError(t, err, "den:\"fts\" on a nested field must be honoured after den-ciug")
+
+	bio := info.FieldByName("profile.bio")
+	require.NotNil(t, bio)
+	assert.True(t, bio.Options.FTS, "nested FTS tag must flow through to the field metadata")
+}
+
+func TestAnalyzeStruct_NestedSegmentValidation(t *testing.T) {
+	_, err := AnalyzeStruct(reflect.TypeFor[nestedBadSegmentDoc]())
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidFieldName,
+		"invalid json tag on a nested field must surface as ErrInvalidFieldName")
+}
+
+func TestAnalyzeStruct_UniqueTogetherSpansLevels(t *testing.T) {
+	info, err := AnalyzeStruct(reflect.TypeFor[nestedUTSpanDoc]())
+	require.NoError(t, err)
+
+	userID := info.FieldByName("user_id")
+	require.NotNil(t, userID)
+	assert.Equal(t, "user_slug", userID.Options.UniqueTogether)
+
+	slug := info.FieldByName("profile.slug")
+	require.NotNil(t, slug)
+	assert.Equal(t, "user_slug", slug.Options.UniqueTogether,
+		"unique_together group must be honoured on nested fields")
+}
+
 func TestCollectionName(t *testing.T) {
 	tests := []struct {
 		name     string

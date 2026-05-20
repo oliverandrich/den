@@ -242,3 +242,135 @@ func TestIsChanged_UntrackedType(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, changed)
 }
+
+// Change tracking on nested struct fields (den-1351 walker support).
+// The diff is computed at the top-level JSON-key granularity, so a
+// change inside a nested struct surfaces under the outer field's name
+// (`profile` → `FieldChange{Before: {…}, After: {…}}`), not as a
+// dotted path. This is intentional — atomic sub-document updates stay
+// visible as a single logical change. Tests pin both directions
+// (IsChanged + Revert) and the granularity contract for GetChanges.
+
+type trackedProfile struct {
+	Slug string `json:"slug"`
+	Bio  string `json:"bio"`
+}
+
+type TrackedNestedDoc struct {
+	document.Base
+	document.Tracked
+	Email   string         `json:"email"`
+	Profile trackedProfile `json:"profile"`
+}
+
+type TrackedNestedPtrDoc struct {
+	document.Base
+	document.Tracked
+	Email   string          `json:"email"`
+	Profile *trackedProfile `json:"profile,omitempty"`
+}
+
+func TestIsChanged_NestedValueField(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedNestedDoc{})
+	ctx := context.Background()
+
+	doc := &TrackedNestedDoc{Email: "a@example.com", Profile: trackedProfile{Slug: "ada", Bio: "old"}}
+	require.NoError(t, core.Save(ctx, db, doc))
+
+	found, err := core.FindByID[TrackedNestedDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+
+	changed, err := core.IsChanged(db, found)
+	require.NoError(t, err)
+	assert.False(t, changed, "freshly loaded doc reports no changes")
+
+	found.Profile.Bio = "new"
+	changed, err = core.IsChanged(db, found)
+	require.NoError(t, err)
+	assert.True(t, changed, "modifying a nested-value field must surface as changed")
+}
+
+func TestGetChanges_NestedValueFieldGranularity(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedNestedDoc{})
+	ctx := context.Background()
+
+	doc := &TrackedNestedDoc{Email: "a@example.com", Profile: trackedProfile{Slug: "ada", Bio: "old"}}
+	require.NoError(t, core.Save(ctx, db, doc))
+
+	found, err := core.FindByID[TrackedNestedDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+
+	found.Profile.Bio = "new"
+	changes, err := core.GetChanges(db, found)
+	require.NoError(t, err)
+
+	// Contract: GetChanges reports nested mutations at the outer struct
+	// field's JSON key, with the entire sub-object as before/after.
+	// Callers needing field-level diff can compare the maps themselves.
+	require.Contains(t, changes, "profile")
+	assert.NotContains(t, changes, "profile.bio",
+		"GetChanges intentionally does not flatten nested paths — change surfaces at the outer key")
+
+	before, ok := changes["profile"].Before.(map[string]any)
+	require.True(t, ok, "Before should be a map for a nested struct")
+	assert.Equal(t, "old", before["bio"])
+
+	after, ok := changes["profile"].After.(map[string]any)
+	require.True(t, ok, "After should be a map for a nested struct")
+	assert.Equal(t, "new", after["bio"])
+	assert.Equal(t, "ada", after["slug"], "untouched nested fields are preserved in the After snapshot")
+}
+
+func TestRevert_NestedValueField(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedNestedDoc{})
+	ctx := context.Background()
+
+	doc := &TrackedNestedDoc{Email: "a@example.com", Profile: trackedProfile{Slug: "ada", Bio: "old"}}
+	require.NoError(t, core.Save(ctx, db, doc))
+
+	found, err := core.FindByID[TrackedNestedDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+
+	found.Profile.Bio = "new"
+	found.Email = "b@example.com"
+	require.NoError(t, core.Revert(db, found))
+
+	assert.Equal(t, "old", found.Profile.Bio, "Revert restores nested-value field")
+	assert.Equal(t, "a@example.com", found.Email, "Revert also restores sibling top-level fields")
+
+	changed, err := core.IsChanged(db, found)
+	require.NoError(t, err)
+	assert.False(t, changed, "after Revert the doc must report no changes")
+}
+
+func TestIsChanged_NestedPointerField(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedNestedPtrDoc{})
+	ctx := context.Background()
+
+	doc := &TrackedNestedPtrDoc{Email: "a@example.com", Profile: &trackedProfile{Slug: "ada", Bio: "old"}}
+	require.NoError(t, core.Save(ctx, db, doc))
+
+	found, err := core.FindByID[TrackedNestedPtrDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+
+	// Nil → non-nil and value mutation are both detected.
+	found.Profile.Bio = "new"
+	changed, err := core.IsChanged(db, found)
+	require.NoError(t, err)
+	assert.True(t, changed, "modifying a field through a non-nil pointer surfaces as changed")
+}
+
+func TestRevert_NestedPointerNilTransition(t *testing.T) {
+	db := dentest.MustOpen(t, &TrackedNestedPtrDoc{})
+	ctx := context.Background()
+
+	doc := &TrackedNestedPtrDoc{Email: "a@example.com"} // nil Profile at save
+	require.NoError(t, core.Save(ctx, db, doc))
+
+	found, err := core.FindByID[TrackedNestedPtrDoc](ctx, db, doc.ID)
+	require.NoError(t, err)
+
+	found.Profile = &trackedProfile{Slug: "ada"}
+	require.NoError(t, core.Revert(db, found))
+	assert.Nil(t, found.Profile, "Revert restores the nil-pointer state")
+}

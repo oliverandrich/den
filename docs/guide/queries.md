@@ -190,6 +190,8 @@ where.Field("category.name").Eq("Electronics")
 where.Field("tags.0").Eq("featured")   // array index access
 ```
 
+The same dotted path also works for `den:` tags at registration — see [Nested Field Indexes](documents.md#nested-field-indexes) for `den:"index"` / `den:"unique"` / `den:"fts"` on fields of named struct fields.
+
 ## Sort, Limit, Skip
 
 ```go

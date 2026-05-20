@@ -20,6 +20,8 @@ When `den.Register()` processes this struct, it automatically creates the FTS in
 !!! note
     If no fields carry `den:"fts"`, no FTS infrastructure is created. There is zero overhead for collections that do not use full-text search.
 
+`den:"fts"` also works on fields of named struct fields and pointer-to-struct fields — see [Nested Field Indexes](documents.md#nested-field-indexes). Both backends index the dotted JSON path under the hood; SQLite's FTS5 column name has dots stripped, the path keeps them.
+
 ## Search API
 
 ```go

@@ -159,18 +159,11 @@ func buildCollectionMeta(info *util.StructInfo) CollectionMeta {
 		}
 		meta.Fields = append(meta.Fields, fm)
 
-		if f.Options.Index && !f.Options.Unique {
+		if f.Options.Index || f.Options.Unique {
 			meta.Indexes = append(meta.Indexes, IndexDefinition{
-				Name:   "idx_" + info.CollectionName + "_" + f.JSONName,
+				Name:   "idx_" + info.CollectionName + "_" + util.IdentifierSegment(f.JSONName),
 				Fields: []string{f.JSONName},
-				Unique: false,
-			})
-		}
-		if f.Options.Unique {
-			meta.Indexes = append(meta.Indexes, IndexDefinition{
-				Name:   "idx_" + info.CollectionName + "_" + f.JSONName,
-				Fields: []string{f.JSONName},
-				Unique: true,
+				Unique: f.Options.Unique,
 			})
 		}
 	}

@@ -23,7 +23,14 @@ func applySetFields(rv reflect.Value, col *collectionInfo, fields SetFields) err
 		if fi == nil {
 			return fmt.Errorf("den: field %q not found in %s", fieldName, col.meta.Name)
 		}
-		fv := rv.FieldByIndex(fi.Index)
+		// FieldByIndexErr (not FieldByIndex) so a nested field whose
+		// parent pointer is nil returns a clear error instead of
+		// panicking. Top-level fields never traverse a pointer, so
+		// this is a no-op for the dominant case.
+		fv, err := rv.FieldByIndexErr(fi.Index)
+		if err != nil {
+			return fmt.Errorf("den: field %q: %w", fieldName, err)
+		}
 		if err := setFieldValue(fv, newVal, fieldName); err != nil {
 			return err
 		}

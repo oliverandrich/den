@@ -3,7 +3,24 @@ package engine
 import (
 	"context"
 	"fmt"
+
+	"github.com/oliverandrich/den/maintenance"
 )
+
+// Re-exports of the maintenance contract types so engine-internal code
+// can use the bare identifiers without an import qualifier. The
+// canonical declarations live in den/maintenance.
+
+type (
+	DropStaleOption = maintenance.Option
+	DropStaleResult = maintenance.DropStaleResult
+	StaleIndex      = maintenance.StaleIndex
+)
+
+// DryRun causes DropStaleIndexes to report the indexes that would be
+// dropped without actually dropping them. Thin wrapper over
+// [maintenance.DryRun].
+func DryRun() DropStaleOption { return maintenance.DryRun() }
 
 // DropStaleIndexes removes indexes previously created by Register() that no
 // longer correspond to a registered IndexDefinition. Managed indexes (for
@@ -14,10 +31,7 @@ import (
 // changed. Pass DryRun() to inspect what would be dropped without making
 // changes.
 func DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (DropStaleResult, error) {
-	cfg := dropStaleConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+	cfg := maintenance.Resolve(opts...)
 
 	db.mu.RLock()
 	infos := make([]*collectionInfo, 0, len(db.collections))
@@ -49,7 +63,7 @@ func DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (Dro
 				result.Kept = append(result.Kept, entry)
 				continue
 			}
-			if cfg.dryRun {
+			if cfg.DryRun {
 				result.Dropped = append(result.Dropped, entry)
 				continue
 			}
@@ -60,33 +74,4 @@ func DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (Dro
 		}
 	}
 	return result, nil
-}
-
-// DropStaleOption configures DropStaleIndexes.
-type DropStaleOption func(*dropStaleConfig)
-
-type dropStaleConfig struct {
-	dryRun bool
-}
-
-// DryRun causes DropStaleIndexes to report the indexes that would be dropped
-// without actually dropping them.
-func DryRun() DropStaleOption {
-	return func(c *dropStaleConfig) { c.dryRun = true }
-}
-
-// DropStaleResult summarizes a DropStaleIndexes call.
-// Dropped contains the indexes that were (or would be, under DryRun) removed.
-// Kept contains indexes that are still referenced by a current IndexDefinition.
-type DropStaleResult struct {
-	Dropped []StaleIndex
-	Kept    []StaleIndex
-}
-
-// StaleIndex identifies an index inspected by DropStaleIndexes.
-type StaleIndex struct {
-	Collection string
-	Name       string
-	Fields     []string
-	Unique     bool
 }

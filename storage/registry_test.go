@@ -10,15 +10,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/storage"
 )
 
 // stubOpener returns an OpenerFunc that refuses to construct a real Storage
 // and echoes the scheme in its error. Callers assert on that echo to prove
-// their scheme's opener was invoked — no den.Storage implementation needed.
+// their scheme's opener was invoked — no Storage implementation needed.
 func stubOpener(scheme string) storage.OpenerFunc {
-	return func(_ string) (den.Storage, error) {
+	return func(_ string) (storage.Storage, error) {
 		return nil, fmt.Errorf("stub opener for %s", scheme)
 	}
 }

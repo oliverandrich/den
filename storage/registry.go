@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-// Package storage defines the Storage-backend registry used by
-// [OpenURL] to construct a [den.Storage] from a URL-style DSN. Concrete
-// backend implementations live in sub-packages and register themselves
-// on import:
+// Package storage defines the [Storage] interface that backs
+// document.Attachment fields plus the registry [OpenURL] uses to
+// construct a Storage from a URL-style DSN. Concrete backend
+// implementations live in sub-packages and register themselves on
+// import:
 //
 //	import (
 //	    "github.com/oliverandrich/den/storage"
@@ -19,8 +20,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-
-	"github.com/oliverandrich/den"
 )
 
 // ErrEmptyContent is returned by Storage implementations when a Store
@@ -35,13 +34,13 @@ var ErrEmptyContent = errors.New("storage: refusing to store empty content")
 // errors.Is to detect this case without scraping error strings.
 var ErrUnsupportedScheme = errors.New("storage: no backend registered for scheme")
 
-// OpenerFunc constructs a [den.Storage] from the location portion of a
+// OpenerFunc constructs a [Storage] from the location portion of a
 // DSN — everything after the `<scheme>://`, including any query string.
 // Backends that want to honour the conventional `?url_prefix=…` query
 // parameter should call [URLPrefixFromLocation] to extract it before
 // parsing the rest of their location. Registered per scheme via
 // [Register].
-type OpenerFunc func(location string) (den.Storage, error)
+type OpenerFunc func(location string) (Storage, error)
 
 var (
 	registryMu sync.RWMutex
@@ -92,7 +91,7 @@ func Register(scheme string, opener OpenerFunc) {
 // Returns an error with a helpful message for empty DSNs, missing
 // schemes, or schemes without a registered opener — the last usually
 // means a backend sub-package needs to be side-effect imported.
-func OpenURL(dsn string) (den.Storage, error) {
+func OpenURL(dsn string) (Storage, error) {
 	if dsn == "" {
 		return nil, errors.New("storage: empty DSN")
 	}

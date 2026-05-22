@@ -1,6 +1,6 @@
 # Writing a Custom Storage Backend
 
-Implement `den.Storage` to plug in any byte store you like — a CDN, a network share, an in-memory test stub, GCS or Azure Blob (until they ship as official packages).
+Implement `storage.Storage` to plug in any byte store you like — a CDN, a network share, an in-memory test stub, GCS or Azure Blob (until they ship as official packages). `den.Storage` is an alias for the same interface, so existing code referencing the root name keeps working.
 
 ## The interface
 
@@ -19,7 +19,7 @@ If your backend serves files at a configurable URL prefix (returns relative URLs
 
 ```go
 func init() {
-    storage.Register("myscheme", func(location string) (den.Storage, error) {
+    storage.Register("myscheme", func(location string) (storage.Storage, error) {
         path, urlPrefix := storage.URLPrefixFromLocation(location)
         // ...parse path and any other query params from the now-cleaned location...
         return New(path, urlPrefix)

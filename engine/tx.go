@@ -7,24 +7,6 @@ import (
 	"github.com/oliverandrich/den/lock"
 )
 
-// LockOption is re-exported from den/lock so engine-internal call sites
-// (LockByID, QuerySet.ForUpdate) keep using the bare identifier.
-type LockOption = lock.Option
-
-// SkipLocked makes a lock acquisition return ErrNotFound immediately if
-// another transaction already holds the row lock, instead of blocking.
-// Maps to PostgreSQL's FOR UPDATE SKIP LOCKED; on SQLite this option
-// is a no-op. Passing both SkipLocked and NoWait is an error — they are
-// mutually exclusive in PostgreSQL. Thin wrapper over [lock.SkipLocked].
-func SkipLocked() LockOption { return lock.SkipLocked() }
-
-// NoWait makes a lock acquisition return ErrLocked immediately if
-// another transaction already holds the row lock, instead of blocking.
-// Maps to PostgreSQL's FOR UPDATE NOWAIT; on SQLite this option is a
-// no-op. Passing both SkipLocked and NoWait is an error — they are
-// mutually exclusive in PostgreSQL. Thin wrapper over [lock.NoWait].
-func NoWait() LockOption { return lock.NoWait() }
-
 // Tx wraps a backend Transaction for use in RunInTransaction.
 //
 // The zero value is not usable — construct a Tx only indirectly by passing

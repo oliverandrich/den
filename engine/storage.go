@@ -1,18 +1,5 @@
 package engine
 
-import (
-	"github.com/oliverandrich/den/storage"
-)
-
-// Re-exports of the attachment storage contract types so engine-internal
-// code can use the bare identifiers (Storage, SeekableStorage) without an
-// import qualifier. The canonical declarations live in den/storage.
-
-type (
-	Storage         = storage.Storage
-	SeekableStorage = storage.SeekableStorage
-)
-
 // WithStorage installs a Storage on the DB. Storage is DB-scoped — all
 // document types that embed or contain document.Attachment use the same
 // backend. Install at Open:

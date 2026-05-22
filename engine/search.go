@@ -2,17 +2,6 @@ package engine
 
 import (
 	"context"
-
-	"github.com/oliverandrich/den/search"
-)
-
-// Re-exports of the full-text-search contract types so engine-internal
-// code can use the bare identifiers (FTSSearcher, FTSProvider) without
-// an import qualifier. The canonical declarations live in den/search.
-
-type (
-	FTSSearcher = search.FTSSearcher
-	FTSProvider = search.FTSProvider
 )
 
 // Search performs a full-text search on the QuerySet, honoring the

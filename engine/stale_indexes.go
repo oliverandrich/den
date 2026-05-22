@@ -7,21 +7,6 @@ import (
 	"github.com/oliverandrich/den/maintenance"
 )
 
-// Re-exports of the maintenance contract types so engine-internal code
-// can use the bare identifiers without an import qualifier. The
-// canonical declarations live in den/maintenance.
-
-type (
-	DropStaleOption = maintenance.Option
-	DropStaleResult = maintenance.DropStaleResult
-	StaleIndex      = maintenance.StaleIndex
-)
-
-// DryRun causes DropStaleIndexes to report the indexes that would be
-// dropped without actually dropping them. Thin wrapper over
-// [maintenance.DryRun].
-func DryRun() DropStaleOption { return maintenance.DryRun() }
-
 // DropStaleIndexes removes indexes previously created by Register() that no
 // longer correspond to a registered IndexDefinition. Managed indexes (for
 // example the PostgreSQL GIN index, FTS triggers, or tables) are not tracked

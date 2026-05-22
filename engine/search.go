@@ -2,26 +2,18 @@ package engine
 
 import (
 	"context"
+
+	"github.com/oliverandrich/den/search"
 )
 
-// FTSSearcher is the read-side full-text search contract. Both backends and
-// transactions implement it so [QuerySet.Search] honors the caller's scope:
-// `NewQuery[T](db).Search(...)` reads committed state, while
-// `NewQuery[T](tx).Search(...)` sees the tx's uncommitted writes (the FTS
-// index is updated in-tx by triggers on SQLite and by tsvector + GIN under
-// MVCC on PostgreSQL).
-type FTSSearcher interface {
-	Search(ctx context.Context, collection string, query string, q *Query) (Iterator, error)
-}
+// Re-exports of the full-text-search contract types so engine-internal
+// code can use the bare identifiers (FTSSearcher, FTSProvider) without
+// an import qualifier. The canonical declarations live in den/search.
 
-// FTSProvider extends [FTSSearcher] with the registration-time setup hook.
-// Backends implement the full interface; transactions implement only
-// [FTSSearcher] because index/trigger creation is a one-time setup
-// operation that does not belong on a transactional path.
-type FTSProvider interface {
-	FTSSearcher
-	EnsureFTS(ctx context.Context, collection string, fields []string) error
-}
+type (
+	FTSSearcher = search.FTSSearcher
+	FTSProvider = search.FTSProvider
+)
 
 // Search performs a full-text search on the QuerySet, honoring the
 // QuerySet's scope: a tx-bound QuerySet sees the tx's uncommitted writes

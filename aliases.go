@@ -4,9 +4,11 @@ import (
 	"github.com/oliverandrich/den/engine"
 )
 
-// Type aliases for the public surface. The canonical declarations live in
-// den/engine; these aliases keep `den.X` as the user-facing identifier
-// while the implementation lives in the engine package.
+// Type aliases for the public surface. Canonical declarations live in
+// den/engine (engine internals: DB, Tx, QuerySet, Link, hooks, …) and
+// den/backend (the backend contract: Backend, Query, LockMode, …). These
+// aliases keep `den.X` as the user-facing identifier regardless of which
+// sub-package owns the underlying type.
 
 type (
 	DB     = engine.DB

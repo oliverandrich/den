@@ -1,9 +1,9 @@
 // public_api_test.go exercises the root API skin (wrappers in den.go,
 // crud.go, query.go, options.go) at integration level. The wrappers are
-// one-line delegates to internal/core; the engine logic is tested
-// against `core.X` in internal/core's test suite. The tests here pin
-// that the wrappers route through correctly — without them, the root
-// package shows zero coverage because no other test file imports it.
+// one-line delegates to den/engine; the engine logic is tested against
+// `engine.X` in engine's own test suite. The tests here pin that the
+// wrappers route through correctly — without them, the root package
+// shows zero coverage because no other test file imports it.
 
 package den_test
 
@@ -224,5 +224,5 @@ func TestPublicAPI_Open(t *testing.T) {
 	// DropStaleIndexes — dry-run so no schema change actually fires.
 	res, err := den.DropStaleIndexes(ctx, db, den.DryRun())
 	require.NoError(t, err)
-	_ = res // result shape covered by core tests.
+	_ = res // result shape covered by engine tests.
 }

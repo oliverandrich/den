@@ -11,7 +11,7 @@
 //     Put/Delete/Query/Count/Exists/Aggregate/GroupBy, ErrNoRows →
 //     den.ErrNotFound mapping, mid-stream iterator errors, DropIndex
 //     failures. No filesystem access required.
-//   - **internal/core/parity_test.go** for cross-backend behavior
+//   - **engine/parity_test.go** for cross-backend behavior
 //     parity (CRUD, query operators, soft-delete, links, transactions).
 //     Runs against both SQLite and a real PostgreSQL connection.
 //   - **File-backed integration tests** (sqlite_test.go, fts_test.go)

@@ -31,7 +31,7 @@ run = [
 
 [tasks.bench]
 description = "Run benchmarks (set count=N for statistical significance)"
-run = 'go test -bench=. -benchmem -count="${count:-1}" -run="^$" ./internal/core'
+run = 'go test -bench=. -benchmem -count="${count:-1}" -run="^$" ./engine'
 
 [tasks.tidy]
 description = "Tidy module dependencies"

@@ -9,7 +9,7 @@
 //     paths: SQLSTATE → den-sentinel mapping, SQL emission for
 //     advisory locks and FOR UPDATE variants, mid-stream iterator
 //     errors, pool acquire failures. No live PostgreSQL required.
-//   - **internal/core/parity_test.go** for cross-backend behavior
+//   - **engine/parity_test.go** for cross-backend behavior
 //     parity (CRUD, query operators, soft-delete, links, transactions).
 //     Runs against both SQLite and a real PostgreSQL connection.
 //   - **Real-PostgreSQL integration tests** for concurrency-driven

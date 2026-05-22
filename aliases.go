@@ -1,107 +1,107 @@
 package den
 
 import (
-	"github.com/oliverandrich/den/internal/core"
+	"github.com/oliverandrich/den/engine"
 )
 
 // Type aliases for the public surface. The canonical declarations live in
-// internal/core; these aliases keep `den.X` as the user-facing identifier
-// while the implementation lives in a single internal package.
+// den/engine; these aliases keep `den.X` as the user-facing identifier
+// while the implementation lives in the engine package.
 
 type (
-	DB     = core.DB
-	Tx     = core.Tx
-	Scope  = core.Scope
-	Option = core.Option
+	DB     = engine.DB
+	Tx     = engine.Tx
+	Scope  = engine.Scope
+	Option = engine.Option
 
-	Backend     = core.Backend
-	ReadWriter  = core.ReadWriter
-	Iterator    = core.Iterator
-	Transaction = core.Transaction
+	Backend     = engine.Backend
+	ReadWriter  = engine.ReadWriter
+	Iterator    = engine.Iterator
+	Transaction = engine.Transaction
 
-	Query           = core.Query
-	QuerySet[T any] = core.QuerySet[T]
-	SortEntry       = core.SortEntry
-	SortDirection   = core.SortDirection
+	Query           = engine.Query
+	QuerySet[T any] = engine.QuerySet[T]
+	SortEntry       = engine.SortEntry
+	SortDirection   = engine.SortDirection
 
-	AggregateOp           = core.AggregateOp
-	GroupByAgg            = core.GroupByAgg
-	GroupByRow            = core.GroupByRow
-	GroupBySortEntry      = core.GroupBySortEntry
-	GroupByBuilder[T any] = core.GroupByBuilder[T]
+	AggregateOp           = engine.AggregateOp
+	GroupByAgg            = engine.GroupByAgg
+	GroupByRow            = engine.GroupByRow
+	GroupBySortEntry      = engine.GroupBySortEntry
+	GroupByBuilder[T any] = engine.GroupByBuilder[T]
 
-	Link[T any] = core.Link[T]
-	LinkRule    = core.LinkRule
+	Link[T any] = engine.Link[T]
+	LinkRule    = engine.LinkRule
 
-	CRUDOption = core.CRUDOption
-	SetFields  = core.SetFields
+	CRUDOption = engine.CRUDOption
+	SetFields  = engine.SetFields
 
-	LockMode   = core.LockMode
-	LockOption = core.LockOption
+	LockMode   = engine.LockMode
+	LockOption = engine.LockOption
 
-	Settings    = core.Settings
-	DenSettable = core.DenSettable
+	Settings    = engine.Settings
+	DenSettable = engine.DenSettable
 
-	CollectionMeta  = core.CollectionMeta
-	FieldMeta       = core.FieldMeta
-	IndexDefinition = core.IndexDefinition
+	CollectionMeta  = engine.CollectionMeta
+	FieldMeta       = engine.FieldMeta
+	IndexDefinition = engine.IndexDefinition
 
-	BeforeInserter    = core.BeforeInserter
-	AfterInserter     = core.AfterInserter
-	BeforeUpdater     = core.BeforeUpdater
-	AfterUpdater      = core.AfterUpdater
-	BeforeDeleter     = core.BeforeDeleter
-	AfterDeleter      = core.AfterDeleter
-	BeforeSoftDeleter = core.BeforeSoftDeleter
-	AfterSoftDeleter  = core.AfterSoftDeleter
-	BeforeSaver       = core.BeforeSaver
-	AfterSaver        = core.AfterSaver
-	Validator         = core.Validator
+	BeforeInserter    = engine.BeforeInserter
+	AfterInserter     = engine.AfterInserter
+	BeforeUpdater     = engine.BeforeUpdater
+	AfterUpdater      = engine.AfterUpdater
+	BeforeDeleter     = engine.BeforeDeleter
+	AfterDeleter      = engine.AfterDeleter
+	BeforeSoftDeleter = engine.BeforeSoftDeleter
+	AfterSoftDeleter  = engine.AfterSoftDeleter
+	BeforeSaver       = engine.BeforeSaver
+	AfterSaver        = engine.AfterSaver
+	Validator         = engine.Validator
 
-	FieldChange       = core.FieldChange
-	DanglingLinkError = core.DanglingLinkError
+	FieldChange       = engine.FieldChange
+	DanglingLinkError = engine.DanglingLinkError
 
-	Storage         = core.Storage
-	SeekableStorage = core.SeekableStorage
-	FTSProvider     = core.FTSProvider
-	FTSSearcher     = core.FTSSearcher
+	Storage         = engine.Storage
+	SeekableStorage = engine.SeekableStorage
+	FTSProvider     = engine.FTSProvider
+	FTSSearcher     = engine.FTSSearcher
 
-	DropStaleOption = core.DropStaleOption
-	DropStaleResult = core.DropStaleResult
-	StaleIndex      = core.StaleIndex
-	RecordedIndex   = core.RecordedIndex
+	DropStaleOption = engine.DropStaleOption
+	DropStaleResult = engine.DropStaleResult
+	StaleIndex      = engine.StaleIndex
+	RecordedIndex   = engine.RecordedIndex
 )
 
-// Constants re-exported from internal/core.
+// Constants re-exported from den/engine.
 
 const (
 	// SortDirection
-	Asc  = core.Asc
-	Desc = core.Desc
+	Asc  = engine.Asc
+	Desc = engine.Desc
 
 	// AggregateOp
-	OpSum   = core.OpSum
-	OpAvg   = core.OpAvg
-	OpMin   = core.OpMin
-	OpMax   = core.OpMax
-	OpCount = core.OpCount
+	OpSum   = engine.OpSum
+	OpAvg   = engine.OpAvg
+	OpMin   = engine.OpMin
+	OpMax   = engine.OpMax
+	OpCount = engine.OpCount
 
 	// LinkRule
-	LinkIgnore = core.LinkIgnore
-	LinkWrite  = core.LinkWrite
-	LinkDelete = core.LinkDelete
+	LinkIgnore = engine.LinkIgnore
+	LinkWrite  = engine.LinkWrite
+	LinkDelete = engine.LinkDelete
 
 	// LockMode
-	LockDefault    = core.LockDefault
-	LockSkipLocked = core.LockSkipLocked
-	LockNoWait     = core.LockNoWait
+	LockDefault    = engine.LockDefault
+	LockSkipLocked = engine.LockSkipLocked
+	LockNoWait     = engine.LockNoWait
 
 	// Reserved field name constants
-	FieldID           = core.FieldID
-	FieldCreatedAt    = core.FieldCreatedAt
-	FieldUpdatedAt    = core.FieldUpdatedAt
-	FieldRev          = core.FieldRev
-	FieldDeletedAt    = core.FieldDeletedAt
-	FieldDeletedBy    = core.FieldDeletedBy
-	FieldDeleteReason = core.FieldDeleteReason
+	FieldID           = engine.FieldID
+	FieldCreatedAt    = engine.FieldCreatedAt
+	FieldUpdatedAt    = engine.FieldUpdatedAt
+	FieldRev          = engine.FieldRev
+	FieldDeletedAt    = engine.FieldDeletedAt
+	FieldDeletedBy    = engine.FieldDeletedBy
+	FieldDeleteReason = engine.FieldDeleteReason
 )

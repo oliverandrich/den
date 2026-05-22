@@ -3,7 +3,27 @@ package engine
 import (
 	"context"
 	"fmt"
+
+	"github.com/oliverandrich/den/lock"
 )
+
+// LockOption is re-exported from den/lock so engine-internal call sites
+// (LockByID, QuerySet.ForUpdate) keep using the bare identifier.
+type LockOption = lock.Option
+
+// SkipLocked makes a lock acquisition return ErrNotFound immediately if
+// another transaction already holds the row lock, instead of blocking.
+// Maps to PostgreSQL's FOR UPDATE SKIP LOCKED; on SQLite this option
+// is a no-op. Passing both SkipLocked and NoWait is an error — they are
+// mutually exclusive in PostgreSQL. Thin wrapper over [lock.SkipLocked].
+func SkipLocked() LockOption { return lock.SkipLocked() }
+
+// NoWait makes a lock acquisition return ErrLocked immediately if
+// another transaction already holds the row lock, instead of blocking.
+// Maps to PostgreSQL's FOR UPDATE NOWAIT; on SQLite this option is a
+// no-op. Passing both SkipLocked and NoWait is an error — they are
+// mutually exclusive in PostgreSQL. Thin wrapper over [lock.NoWait].
+func NoWait() LockOption { return lock.NoWait() }
 
 // Tx wraps a backend Transaction for use in RunInTransaction.
 //
@@ -114,60 +134,6 @@ func runInWriteTx(ctx context.Context, b Backend, fn func(tx Transaction) error)
 	return nil
 }
 
-// LockOption configures LockByID and TxQuerySet.ForUpdate.
-type LockOption func(*lockConfig)
-
-// lockConfig tracks each option independently (rather than collapsing to a
-// single mode) so resolve() can detect and reject the caller passing both
-// SkipLocked and NoWait, which are mutually exclusive in PostgreSQL.
-type lockConfig struct {
-	skipLocked bool
-	noWait     bool
-}
-
-// resolve collapses the option flags into a single LockMode, or returns an
-// error when the options contradict each other.
-func (c lockConfig) resolve() (LockMode, error) {
-	if c.skipLocked && c.noWait {
-		return LockDefault, fmt.Errorf("den: SkipLocked and NoWait are mutually exclusive")
-	}
-	switch {
-	case c.skipLocked:
-		return LockSkipLocked, nil
-	case c.noWait:
-		return LockNoWait, nil
-	default:
-		return LockDefault, nil
-	}
-}
-
-// SkipLocked makes LockByID return ErrNotFound immediately if another
-// transaction already holds the row lock, instead of blocking. Maps to
-// PostgreSQL's FOR UPDATE SKIP LOCKED. Useful for queue-consumer patterns
-// where each worker should claim a different row without contending.
-// On SQLite this option is a no-op.
-//
-// Because PostgreSQL returns zero rows for both "locked by another tx" and
-// "row does not exist", the caller cannot distinguish these cases via the
-// error alone.
-//
-// Passing both SkipLocked and NoWait returns an error — they are mutually
-// exclusive in PostgreSQL.
-func SkipLocked() LockOption {
-	return func(c *lockConfig) { c.skipLocked = true }
-}
-
-// NoWait makes LockByID return ErrLocked immediately if another transaction
-// already holds the row lock, instead of blocking. Maps to PostgreSQL's
-// FOR UPDATE NOWAIT. Useful when the caller wants to decide between retry,
-// abort, or an alternative code path. On SQLite this option is a no-op.
-//
-// Passing both SkipLocked and NoWait returns an error — they are mutually
-// exclusive in PostgreSQL.
-func NoWait() LockOption {
-	return func(c *lockConfig) { c.noWait = true }
-}
-
 // LockByID retrieves a document by ID and acquires a row-level lock that
 // persists for the lifetime of the transaction. Without options, concurrent
 // transactions attempting to lock the same row block until this transaction
@@ -186,11 +152,7 @@ func LockByID[T any](ctx context.Context, tx *Tx, id string, opts ...LockOption)
 		return nil, err
 	}
 
-	cfg := lockConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	mode, err := cfg.resolve()
+	mode, err := lock.Resolve(opts...)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/oliverandrich/den/lock"
 	"github.com/oliverandrich/den/where"
 )
 
@@ -219,11 +220,7 @@ func (qs QuerySet[T]) IncludeDeleted() QuerySet[T] {
 // one); ForUpdate captures the error on the query set and surfaces it when
 // a terminal method runs.
 func (qs QuerySet[T]) ForUpdate(opts ...LockOption) QuerySet[T] {
-	cfg := lockConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	mode, err := cfg.resolve()
+	mode, err := lock.Resolve(opts...)
 	if err != nil {
 		qs.err = err
 		return qs

@@ -127,7 +127,7 @@ den/
 ├── den.go, crud.go, query.go       Public API: Open, Save, FindByID, NewQuery, …
 ├── aliases.go, options.go          Type aliases + CRUDOption / LockOption constructors
 ├── errors.go                       Error sentinels (re-exports)
-├── internal/core/                  Engine — every implementation file, plus tests
+├── engine/                         Engine — every implementation file, plus tests
 ├── internal/util/                  Shared helpers (reflect, sql safety, field validation)
 ├── storage/                        Storage backend registry + OpenURL
 ├── storage/file/                   Local filesystem backend (file:// scheme)
@@ -141,7 +141,7 @@ den/
 └── dentest/                        Test helpers
 ```
 
-The root package is a thin API skin — six files of type aliases and one-line wrapper functions. Everything load-bearing lives in `internal/core/`, hidden from consumers by Go's `internal/` visibility rule. Aliases preserve identity (`den.QuerySet[T]` IS `core.QuerySet[T]`), so the indirection is free at runtime.
+The root package is a thin convenience surface — six files of type aliases and one-line wrapper functions. Everything load-bearing lives in `engine/`, a public package that applications can import directly when they need access to types the root doesn't surface. Aliases preserve identity (`den.QuerySet[T]` IS `engine.QuerySet[T]`), so the indirection is free at runtime.
 
 ### Backend Interface
 

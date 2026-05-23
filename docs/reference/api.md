@@ -238,9 +238,9 @@ backends live in sub-packages that self-register on import.
 
 | Function | Signature | Description |
 |---|---|---|
-| `OpenURL` | `OpenURL(dsn string) (den.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. The opener receives the full location verbatim, including any query string. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
+| `OpenURL` | `OpenURL(dsn string) (storage.Storage, error)` | Parses `<scheme>://<location>` and delegates to the opener registered for the scheme. The opener receives the full location verbatim, including any query string. Returns a clear error when the scheme is unknown (usually missing a side-effect import of the backend sub-package) |
 | `Register` | `Register(scheme string, opener OpenerFunc)` | Registers an opener for a scheme. Typically called from a backend sub-package's `init()`. Panics on duplicate registration |
-| `OpenerFunc` | `type OpenerFunc func(location string) (den.Storage, error)` | Factory signature for backend openers. Receives the full location (everything after `://`); backends parse their own query parameters |
+| `OpenerFunc` | `type OpenerFunc func(location string) (storage.Storage, error)` | Factory signature for backend openers. Receives the full location (everything after `://`); backends parse their own query parameters |
 | `URLPrefixFromLocation` | `URLPrefixFromLocation(location string) (stripped, prefix string)` | Helper for backends that honour the conventional `?url_prefix=` query param. Returns the location with that param stripped plus the extracted prefix. Backends that ignore url_prefix (S3) can skip the call; URL-prefix-aware backends (file) call it before parsing the rest of their location |
 | `ErrEmptyContent` | `var ErrEmptyContent error` | Returned by `Storage.Store` on a zero-byte reader |
 
@@ -253,7 +253,7 @@ package for its side effect registers the `file://` scheme with
 
 | Function | Signature | Description |
 |---|---|---|
-| `New` | `New(rootPath, urlPrefix string) (*Storage, error)` | Constructs a filesystem-backed `den.Storage`. Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
+| `New` | `New(rootPath, urlPrefix string) (*Storage, error)` | Constructs a filesystem-backed `storage.Storage` (also aliased as `den.Storage`). Content-addresses paths to `YYYY/MM/<sha256-prefix>.<ext>`; uses `os.Root` to refuse path traversal |
 | `fs.Close` | `(fs *Storage) Close() error` | Release the underlying file descriptor held for the storage root |
 | `fs.URLPrefix` | `(fs *Storage) URLPrefix() string` | Returns the HTTP path prefix the storage serves its files under. HTTP-layer packages type-assert on a local `interface{ URLPrefix() string }` to decide whether to register a serving handler; remote backends (S3/GCS) deliberately do not implement this |
 

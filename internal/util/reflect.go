@@ -226,11 +226,11 @@ func scanValidateTags(t reflect.Type, seen map[reflect.Type]bool) bool {
 	return false
 }
 
-// IsLinkShape reports whether t structurally matches the internal/core
-// Link[T] type — an ID/Value/Loaded triple with a string-typed ID.
+// IsLinkShape reports whether t structurally matches the engine.Link[T]
+// type — an ID/Value/Loaded triple with a string-typed ID.
 //
-// Lives in internal/util so the schema walker (which cannot import core
-// without a cycle) can skip Link fields, and so internal/core has a
+// Lives in internal/util so the schema walker (which cannot import engine
+// without a cycle) can skip Link fields, and so the engine package has a
 // single source of truth for the shape check.
 func IsLinkShape(t reflect.Type) bool {
 	if t.Kind() != reflect.Struct || t.NumField() < 3 {

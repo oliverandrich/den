@@ -502,7 +502,7 @@ type nestedTimeFieldDoc struct {
 	HiddenName string     `json:"hidden_name"`
 }
 
-// linkShape is structurally a Link[T] from internal/core (ID/Value/Loaded
+// linkShape is structurally a Link[T] from den/engine (ID/Value/Loaded
 // with string ID). The walker must NOT recurse into it.
 type linkShape struct {
 	ID     string

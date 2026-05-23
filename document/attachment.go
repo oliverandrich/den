@@ -3,7 +3,7 @@
 package document
 
 // Attachment is an embeddable document field that references a single file
-// stored via a den.Storage backend.
+// stored via a storage.Storage backend (also exposed as den.Storage).
 //
 // Typical use: embed directly when the containing document IS a file, or
 // add it as a named field when a document HAS one or more files.
@@ -22,7 +22,7 @@ package document
 //	    Thumbnail document.Attachment
 //	}
 //
-// The fields are populated by den.Storage.Store and are never edited by hand
+// The fields are populated by storage.Storage.Store and are never edited by hand
 // afterwards — StoragePath, SHA256, and Size are intrinsic to the stored
 // bytes. Mime may be overridden by application code if the detected type is
 // wrong, but changing it does not re-hash or move the file.

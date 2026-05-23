@@ -3,26 +3,27 @@
 // operations and a small set of doc-in-hand top-level functions for
 // persistence (Save, Delete, FindByID, Refresh).
 //
-// The implementation lives in github.com/oliverandrich/den/internal/core
-// — this root package is the public API skin: type aliases for every
+// This root package is the convenience surface: type aliases for every
 // exported type plus thin wrapper functions for every exported function.
-// Go's `internal/` mechanism enforces that consumers cannot import the
-// implementation directly, while the aliases preserve identity so
-// `den.QuerySet[T]` IS `core.QuerySet[T]` — same methods, same value.
+// The implementation lives in github.com/oliverandrich/den/engine, which
+// is a public package — applications that need types or functions the
+// root does not re-export (e.g. when building tooling) can import it
+// directly. The aliases preserve type identity, so `den.QuerySet[T]` IS
+// `engine.QuerySet[T]`.
 package den
 
 import (
 	"context"
 
 	"github.com/oliverandrich/den/document"
-	"github.com/oliverandrich/den/internal/core"
+	"github.com/oliverandrich/den/engine"
 )
 
 // NewID generates a new ULID string. ULIDs are lexicographically sortable
 // and timestamp-ordered. Use this for document IDs, worker IDs, or any
 // unique identifier.
 func NewID() string {
-	return core.NewID()
+	return engine.NewID()
 }
 
 // Open creates a new DB using the given backend directly. The context
@@ -32,14 +33,14 @@ func NewID() string {
 //
 // Use OpenURL for URL-based opening with automatic backend selection.
 func Open(ctx context.Context, backend Backend, opts ...Option) (*DB, error) {
-	return core.Open(ctx, backend, opts...)
+	return engine.Open(ctx, backend, opts...)
 }
 
 // OpenURL opens a database by DSN, dispatching to the registered backend
 // for the scheme (e.g. sqlite:///path.db, postgres://...). The backend
 // must be registered first via a side-effect import of its package.
 func OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error) {
-	return core.OpenURL(ctx, dsn, opts...)
+	return engine.OpenURL(ctx, dsn, opts...)
 }
 
 // WithTypes queues document types to be registered at the end of Open.
@@ -47,13 +48,13 @@ func OpenURL(ctx context.Context, dsn string, opts ...Option) (*DB, error) {
 // Types must embed [document.Base] to satisfy [document.Document] — the
 // sealed marker enforces this at compile time.
 func WithTypes(types ...document.Document) Option {
-	return core.WithTypes(types...)
+	return engine.WithTypes(types...)
 }
 
 // WithStorage attaches an attachment Storage to the DB. Required when
 // any registered type carries `document.Attachment` fields.
 func WithStorage(s Storage) Option {
-	return core.WithStorage(s)
+	return engine.WithStorage(s)
 }
 
 // Register registers one or more document types with the database. It
@@ -61,36 +62,36 @@ func WithStorage(s Storage) Option {
 // must embed [document.Base] to satisfy [document.Document] — the sealed
 // marker enforces this at compile time.
 func Register(ctx context.Context, db *DB, types ...document.Document) error {
-	return core.Register(ctx, db, types...)
+	return engine.Register(ctx, db, types...)
 }
 
 // Meta returns the registered metadata for type T. Returns
 // ErrNotRegistered if T has not been registered.
 func Meta[T any](db *DB) (CollectionMeta, error) {
-	return core.Meta[T](db)
+	return engine.Meta[T](db)
 }
 
 // Collections returns the names of every registered collection.
 func Collections(db *DB) []string {
-	return core.Collections(db)
+	return engine.Collections(db)
 }
 
 // RegisterBackend registers a backend opener under the given URL scheme.
 // Called from backend packages' init() functions; not typically called
 // by application code.
 func RegisterBackend(scheme string, opener func(ctx context.Context, dsn string) (Backend, error)) {
-	core.RegisterBackend(scheme, opener)
+	engine.RegisterBackend(scheme, opener)
 }
 
 // DropStaleIndexes removes indexes that exist on the backend but are no
 // longer declared by any registered type. Pass DryRun() to report what
 // would change without touching the schema.
 func DropStaleIndexes(ctx context.Context, db *DB, opts ...DropStaleOption) (DropStaleResult, error) {
-	return core.DropStaleIndexes(ctx, db, opts...)
+	return engine.DropStaleIndexes(ctx, db, opts...)
 }
 
 // DryRun makes DropStaleIndexes report what it would drop without
 // touching the schema.
 func DryRun() DropStaleOption {
-	return core.DryRun()
+	return engine.DryRun()
 }

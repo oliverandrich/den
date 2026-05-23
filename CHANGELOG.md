@@ -8,6 +8,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 - **Top-level `Or()` no longer swallows sibling AND-predicates.** `buildWhereClauses` and the FTS-path predicate emitter on both backends wrap each top-level clause in parens so SQL `AND > OR` precedence can't reparse `(a) OR (b) AND x` as `(a) OR ((b) AND x)`. Affected `NewQuery(..., Or(...), Eq(...))`, chained `.Where()` after `Or`, and `Search()` with `Or` siblings. Workarounds using an explicit `where.And` wrap are no longer required.
 - **SQLite: `time.Time` comparison operators now match the JSON storage encoding.** Bound `time.Time`/`*time.Time` values are pre-formatted as RFC3339Nano in the value's original location; previously the driver's default form mismatched stored JSON and returned zero rows. Postgres unaffected.
+- **SQLite: `[]byte` comparison operators now match the base64 JSON storage.** Bound `[]byte` values are pre-encoded as standard base64; previously the driver bound raw blob bytes that mismatched the stored base64 string. Postgres unaffected.
 
 ## 0.16.0 — 2026-05-23
 

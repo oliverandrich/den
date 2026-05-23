@@ -1015,6 +1015,62 @@ func TestParity_TimeComparisons(t *testing.T) {
 	}
 }
 
+type ParityBlob struct {
+	document.Base
+	Name string `json:"name"`
+	Hash []byte `json:"hash,omitempty"`
+}
+
+func parityBlobDBs(t *testing.T) map[string]*engine.DB {
+	t.Helper()
+	return map[string]*engine.DB{
+		"sqlite":   dentest.MustOpen(t, &ParityBlob{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParityBlob{}),
+	}
+}
+
+// Pins fix for den-4l2y: comparison operators on []byte fields must match
+// the base64-encoded JSON storage on both backends. The SQLite backend
+// previously bound []byte as raw BLOB, lexicographically mismatching the
+// stored base64 string and silently returning zero rows.
+//
+// Only Eq/Ne/In/NotIn are pinned: ordering comparisons (Gt/Gte/Lt/Lte) on
+// []byte degenerate to lexicographic base64 string compare — semantically
+// meaningless to users — but they still flow through the same formatBindArg
+// plumbing pinned by TestParity_TimeComparisons.
+func TestParity_BytesComparisons(t *testing.T) {
+	for name, db := range parityBlobDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			h1 := []byte{0x01, 0x02, 0x03}
+			h2 := []byte{0xde, 0xad, 0xbe, 0xef}
+			h3 := []byte{0xff}
+
+			require.NoError(t, engine.SaveAll(ctx, db, []*ParityBlob{
+				{Name: "a", Hash: h1},
+				{Name: "b", Hash: h2},
+				{Name: "c", Hash: h3},
+			}))
+
+			c, err := engine.NewQuery[ParityBlob](db, where.Field("hash").Eq(h1)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Eq([]byte)")
+
+			c, err = engine.NewQuery[ParityBlob](db, where.Field("hash").Ne(h1)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "Ne([]byte)")
+
+			c, err = engine.NewQuery[ParityBlob](db, where.Field("hash").In(h1, h2)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "In([]byte...)")
+
+			c, err = engine.NewQuery[ParityBlob](db, where.Field("hash").NotIn(h3)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "NotIn([]byte...)")
+		})
+	}
+}
+
 // Pins fix for den-w3g0: a value saved in a non-UTC location must be queryable
 // with a same-zoned time.Time. encoding/json preserves the original location
 // in the stored RFC3339Nano string; the bind path must too.

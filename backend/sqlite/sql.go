@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -11,16 +12,15 @@ import (
 	"github.com/oliverandrich/den/where"
 )
 
-// formatBindArg normalises Go values whose driver-bound form differs from
-// their JSON-stored form. modernc.org/sqlite binds time.Time as
-// "YYYY-MM-DD HH:MM:SS..." but encoding/json marshals it as RFC3339Nano
-// in the value's *original* location ("...T...+01:00" for Berlin,
-// "...T...Z" for UTC). The lexicographic mismatch silently breaks every
-// comparison against a JSON-extracted text column. Format here in the
-// value's own location so the bound arg matches what the storage seam
-// wrote — callers in the same zone get correct matches and ordering;
-// mixed-zone storage/query is a fundamental string-comparison limitation
-// no shim at this layer can fix. Non-time values pass through.
+// formatBindArg normalises Go values whose driver-bound form differs
+// from their JSON-stored form for equality/ordering operators.
+// modernc.org/sqlite binds time.Time as "YYYY-MM-DD HH:MM:SS..." and
+// []byte as raw BLOB, but encoding/json emits RFC3339Nano (in the
+// value's original location) and standard base64. Without this shim,
+// comparisons against JSON-extracted text columns silently return zero
+// rows. Mixed-zone storage/query for time values remains a string-
+// comparison limitation no shim at this layer can fix. Other values
+// pass through.
 func formatBindArg(v any) any {
 	switch t := v.(type) {
 	case time.Time:
@@ -30,6 +30,11 @@ func formatBindArg(v any) any {
 			return nil
 		}
 		return t.Format(time.RFC3339Nano)
+	case []byte:
+		if t == nil {
+			return nil
+		}
+		return base64.StdEncoding.EncodeToString(t)
 	default:
 		return v
 	}

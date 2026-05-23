@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.16.0 — 2026-05-23
+
 ### Changed
 
 - **`internal/core` split into themed public sub-packages.** The engine is now publicly importable as `den/engine`, with contract types spread across `den/backend`, `den/storage`, `den/search`, `den/lock`, and `den/maintenance`. The ULID generator moved alongside as `den/idgen`. The `den` root keeps every existing alias and wrapper, so `den.X` IS `<subpackage>.X` — custom backends and storage backends can now spell their return types without importing `den`. No behaviour change.

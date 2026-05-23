@@ -55,8 +55,11 @@ func buildFTSSearchSQL(collection, query string, q *den.Query) (string, []any) {
 		for _, cond := range q.Conditions {
 			clause, clauseArgs, nextN := conditionToSQL(cond, paramN)
 			if clause != "" {
-				sb.WriteString(" AND ")
+				// Wrap each clause: AND > OR precedence would otherwise let
+				// an Or(a,b) sibling absorb the @@ predicate.
+				sb.WriteString(" AND (")
 				sb.WriteString(clause)
+				sb.WriteString(")")
 				args = append(args, clauseArgs...)
 				paramN = nextN
 			}

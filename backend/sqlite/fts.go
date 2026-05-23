@@ -102,9 +102,12 @@ func buildFTSSearchSQL(collection, query string, q *den.Query) (string, []any) {
 		for _, cond := range q.Conditions {
 			clause, clauseArgs := conditionToSQL(cond)
 			if clause != "" {
-				// Prefix table references for the joined query
-				sb.WriteString(" AND ")
+				// Prefix table references for the joined query. Wrap each
+				// clause: AND > OR precedence would otherwise let an
+				// Or(a,b) sibling absorb the MATCH predicate.
+				sb.WriteString(" AND (")
 				sb.WriteString(strings.ReplaceAll(clause, "json_extract(data,", "json_extract(t.data,"))
+				sb.WriteString(")")
 				args = append(args, clauseArgs...)
 			}
 		}

@@ -199,7 +199,9 @@ func buildWhereClauses(conditions []where.Condition) ([]string, []any) {
 	for _, cond := range conditions {
 		clause, clauseArgs := conditionToSQL(cond)
 		if clause != "" {
-			clauses = append(clauses, clause)
+			// Wrap each top-level clause: AND > OR precedence would otherwise
+			// let an Or(a,b) sibling absorb the next AND-joined predicate.
+			clauses = append(clauses, "("+clause+")")
 			args = append(args, clauseArgs...)
 		}
 	}

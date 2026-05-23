@@ -140,6 +140,26 @@ func TestBuildSelectSQL_Or(t *testing.T) {
 	assert.Contains(t, sql, "OR")
 }
 
+// Pins fix for den-qrg2: multiple top-level conditions mixing Or() with
+// field predicates must AND-compose with the OR grouped, not flatten into
+// (a) OR (b) AND (x) — which SQL precedence would parse as (a) OR ((b) AND (x)).
+func TestBuildSelectSQL_OrAndTopLevelPrecedence(t *testing.T) {
+	q := &den.Query{
+		Collection: "products",
+		Conditions: []where.Condition{
+			where.Or(where.Field("status").Eq("a"), where.Field("status").Eq("b")),
+			where.Field("category").Eq("X"),
+		},
+	}
+	sql, _ := buildSelectSQL("products", q)
+	whereIdx := strings.Index(sql, " WHERE ")
+	require.GreaterOrEqual(t, whereIdx, 0)
+	whereClause := sql[whereIdx+len(" WHERE "):]
+	// The whole OR group must sit inside outer parens before the AND.
+	assert.Contains(t, whereClause, "((")
+	assert.Contains(t, whereClause, ")) AND (")
+}
+
 func TestBuildSelectSQL_Not(t *testing.T) {
 	q := &den.Query{
 		Collection: "products",
@@ -306,7 +326,7 @@ func TestBuildCountSQL(t *testing.T) {
 		Conditions: []where.Condition{where.Field("price").Gt(10)},
 	}
 	sql, args := buildCountSQL("products", q)
-	assert.Equal(t, `SELECT COUNT(*) FROM "products" WHERE json_extract(data, '$.price') > ?`, sql)
+	assert.Equal(t, `SELECT COUNT(*) FROM "products" WHERE (json_extract(data, '$.price') > ?)`, sql)
 	assert.Equal(t, []any{10}, args)
 }
 

@@ -4,6 +4,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Fixed
+
+- **Top-level `Or()` no longer swallows sibling AND-predicates.** `buildWhereClauses` and the FTS-path predicate emitter on both backends wrap each top-level clause in parens so SQL `AND > OR` precedence can't reparse `(a) OR (b) AND x` as `(a) OR ((b) AND x)`. Affected `NewQuery(..., Or(...), Eq(...))`, chained `.Where()` after `Or`, and `Search()` with `Or` siblings. Workarounds using an explicit `where.And` wrap are no longer required.
+
 ## 0.16.0 — 2026-05-23
 
 ### Changed

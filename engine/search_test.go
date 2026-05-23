@@ -37,6 +37,33 @@ func TestSearch_SQLite(t *testing.T) {
 	assert.Equal(t, "Go Programming", results[0].Title)
 }
 
+// Pins fix for den-qrg2 on the FTS path: Search appends WHERE conditions
+// after the MATCH/@@ predicate, and an Or() sibling must not absorb the
+// MATCH via SQL AND > OR precedence.
+func TestSearch_OrAndComposition(t *testing.T) {
+	dbs := map[string]*engine.DB{
+		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
+	}
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, engine.SaveAll(ctx, db, []*FTSArticle{
+				{Title: "alpha doc", Body: "hello world", Category: "tech"},
+				{Title: "beta doc", Body: "hello world", Category: "tech"},
+				{Title: "gamma doc", Body: "hello world", Category: "food"},
+			}))
+
+			hits, err := engine.NewQuery[FTSArticle](db, where.Or(
+				where.Field("title").Eq("alpha doc"),
+				where.Field("title").Eq("beta doc"),
+			), where.Field("category").Eq("tech")).Search(ctx, "hello")
+			require.NoError(t, err)
+			assert.Len(t, hits, 2, "Or + sibling Eq must AND-compose alongside MATCH")
+		})
+	}
+}
+
 // TestSearch_HonorsScopeInTx pins that Search routes through the caller's
 // scope just like every other operation: a doc inserted inside the caller's
 // tx is visible to a tx-bound Search before commit. SQLite FTS5 triggers

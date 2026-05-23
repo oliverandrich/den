@@ -122,6 +122,47 @@ func TestParity_Count(t *testing.T) {
 	}
 }
 
+// Pins fix for den-qrg2: mixing where.Or with a sibling field predicate at the
+// top level must AND-compose. Without proper parenthesisation, SQL precedence
+// (AND > OR) silently drops the sibling for the OR branch.
+func TestParity_OrAndComposition(t *testing.T) {
+	for name, db := range parityDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			// Data chosen so AND > OR precedence visibly breaks the query:
+			// Or(name=A, name=B) AND category=X correctly matches only the
+			// two X rows. Under broken precedence (A OR (B AND X)), the third
+			// row with name=A but category=Y also matches, yielding 3.
+			require.NoError(t, engine.SaveAll(ctx, db, []*ParityProduct{
+				{Name: "A", Price: 10, Category: "X"},
+				{Name: "B", Price: 20, Category: "X"},
+				{Name: "A", Price: 30, Category: "Y"},
+			}))
+
+			c1, err := engine.NewQuery[ParityProduct](db, where.Or(
+				where.Field("name").Eq("A"),
+				where.Field("name").Eq("B"),
+			)).Where(where.Field("category").Eq("X")).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c1, "Or + chained Where must AND-compose")
+
+			c2, err := engine.NewQuery[ParityProduct](db,
+				where.Or(where.Field("name").Eq("A"), where.Field("name").Eq("B")),
+				where.Field("category").Eq("X"),
+			).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c2, "variadic Or + Eq must AND-compose")
+
+			c3, err := engine.NewQuery[ParityProduct](db, where.And(
+				where.Or(where.Field("name").Eq("A"), where.Field("name").Eq("B")),
+				where.Field("category").Eq("X"),
+			)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c3, "explicit And-wrap baseline")
+		})
+	}
+}
+
 func TestParity_Delete(t *testing.T) {
 	for name, db := range parityDBs(t) {
 		t.Run(name, func(t *testing.T) {

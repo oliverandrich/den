@@ -4,6 +4,7 @@ import (
 	"github.com/oliverandrich/den/engine"
 
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -1116,6 +1117,97 @@ func TestParity_QuerySetDelete_LargeBatch(t *testing.T) {
 			remaining, err := engine.NewQuery[ParityProduct](db).Count(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, int64(50), remaining)
+		})
+	}
+}
+
+type AuditProbe struct {
+	document.Base
+
+	Str   string  `json:"str,omitempty"`
+	Int   int     `json:"int,omitempty"`
+	Int64 int64   `json:"int64,omitempty"`
+	Float float64 `json:"float,omitempty"`
+	Bool  bool    `json:"bool,omitempty"`
+	PStr  *string `json:"pstr,omitempty"`
+	PInt  *int    `json:"pint,omitempty"`
+
+	T  time.Time  `json:"t,omitzero"`
+	PT *time.Time `json:"pt,omitempty"`
+
+	Bytes  []byte          `json:"bytes,omitempty"`
+	RawMsg json.RawMessage `json:"raw,omitempty"`
+
+	Dur time.Duration `json:"dur,omitempty"`
+
+	Status auditStatus `json:"status,omitempty"`
+}
+
+type auditStatus string
+
+const auditStatusActive auditStatus = "active"
+
+func auditProbeDBs(t *testing.T) map[string]*engine.DB {
+	t.Helper()
+	return map[string]*engine.DB{
+		"sqlite":   dentest.MustOpen(t, &AuditProbe{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &AuditProbe{}),
+	}
+}
+
+// Audit (den-zejm) probing every realistic Go field type for the
+// bind-vs-JSON-shape mismatch pattern. Each subtest saves a doc with one
+// field set, then asserts that an Eq query on that field finds it.
+// Failures on SQLite indicate the same family of bug as den-w3g0 / den-4l2y.
+// Postgres is the reference: if it fails there, the bug is universal.
+func TestParity_AuditBindShapes(t *testing.T) {
+	type tc struct {
+		name  string
+		set   func(*AuditProbe)
+		query where.Condition
+	}
+	cases := []tc{
+		{"string", func(p *AuditProbe) { p.Str = "hello" }, where.Field("str").Eq("hello")},
+		{"int", func(p *AuditProbe) { p.Int = 42 }, where.Field("int").Eq(42)},
+		{"int64", func(p *AuditProbe) { p.Int64 = 9999999999 }, where.Field("int64").Eq(int64(9999999999))},
+		{"float64", func(p *AuditProbe) { p.Float = 3.14 }, where.Field("float").Eq(3.14)},
+		{"bool", func(p *AuditProbe) { p.Bool = true }, where.Field("bool").Eq(true)},
+		{"*string non-nil", func(p *AuditProbe) { s := "ptr"; p.PStr = &s }, where.Field("pstr").Eq("ptr")},
+		{"*int non-nil", func(p *AuditProbe) { i := 7; p.PInt = &i }, where.Field("pint").Eq(7)},
+
+		{"time.Time", func(p *AuditProbe) {
+			p.T = time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+		}, where.Field("t").Eq(time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC))},
+		{"*time.Time non-nil", func(p *AuditProbe) {
+			tt := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+			p.PT = &tt
+		}, where.Field("pt").Eq(time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC))},
+
+		{"[]byte", func(p *AuditProbe) { p.Bytes = []byte{0x01, 0x02} }, where.Field("bytes").Eq([]byte{0x01, 0x02})},
+		{"json.RawMessage", func(p *AuditProbe) { p.RawMsg = json.RawMessage(`{"k":"v"}`) }, where.Field("raw").Eq(json.RawMessage(`{"k":"v"}`))},
+
+		{"time.Duration", func(p *AuditProbe) { p.Dur = 5 * time.Second }, where.Field("dur").Eq(5 * time.Second)},
+
+		{"named typedef string", func(p *AuditProbe) { p.Status = auditStatusActive }, where.Field("status").Eq(auditStatusActive)},
+	}
+
+	for backendName, db := range auditProbeDBs(t) {
+		t.Run(backendName, func(t *testing.T) {
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					ctx := context.Background()
+					p := &AuditProbe{}
+					c.set(p)
+					require.NoError(t, engine.Save(ctx, db, p))
+
+					raw, _ := json.Marshal(p)
+					t.Logf("stored JSON: %s", raw)
+
+					got, err := engine.NewQuery[AuditProbe](db, c.query).Count(ctx)
+					require.NoError(t, err)
+					assert.Equal(t, int64(1), got, "Eq query on %q must find the saved doc", c.name)
+				})
+			}
 		})
 	}
 }

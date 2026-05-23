@@ -17,7 +17,7 @@ import (
 	"sync"
 
 	"github.com/oliverandrich/den/document"
-	"github.com/oliverandrich/den/internal/idgen"
+	"github.com/oliverandrich/den/idgen"
 	"github.com/oliverandrich/den/internal/util"
 )
 

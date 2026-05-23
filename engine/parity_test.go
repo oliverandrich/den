@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/oliverandrich/den/dentest"
 	"github.com/oliverandrich/den/document"
@@ -928,6 +929,107 @@ func TestParity_GroupBy_InTransaction(t *testing.T) {
 			assert.InDelta(t, 30.0, byCat["X"].Total, 0.001)
 			assert.Equal(t, int64(3), byCat["Y"].Count)
 			assert.InDelta(t, 120.0, byCat["Y"].Total, 0.001)
+		})
+	}
+}
+
+type ParityEvent struct {
+	document.Base
+	Name        string     `json:"name"`
+	StartsAt    time.Time  `json:"starts_at"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+}
+
+func parityEventDBs(t *testing.T) map[string]*engine.DB {
+	t.Helper()
+	return map[string]*engine.DB{
+		"sqlite":   dentest.MustOpen(t, &ParityEvent{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ParityEvent{}),
+	}
+}
+
+// Pins fix for den-w3g0: comparison operators bound with a Go time.Time
+// must match the RFC3339Nano JSON storage encoding on both backends. The
+// SQLite backend previously bound time.Time via modernc.org/sqlite's
+// "YYYY-MM-DD HH:MM:SS..." default, which lexicographically mismatched
+// the stored "...T...Z" form and silently returned zero rows.
+func TestParity_TimeComparisons(t *testing.T) {
+	for name, db := range parityEventDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			base := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+			past := base.Add(-time.Hour)
+			future := base.Add(time.Hour)
+
+			require.NoError(t, engine.SaveAll(ctx, db, []*ParityEvent{
+				{Name: "past", StartsAt: past, ScheduledAt: &past},
+				{Name: "base", StartsAt: base, ScheduledAt: &base},
+				{Name: "future", StartsAt: future, ScheduledAt: &future},
+			}))
+
+			c, err := engine.NewQuery[ParityEvent](db, where.Field("starts_at").Lte(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "Lte(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Lt(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Lt(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Gte(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "Gte(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Gt(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Gt(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Eq(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Eq(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Ne(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "Ne(time.Time)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").In(past, future)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "In(time.Time...)")
+
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").NotIn(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "NotIn(time.Time...)")
+
+			// Same contract for *time.Time fields with non-nil pointer values.
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("scheduled_at").Lte(base)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), c, "Lte(time.Time) against *time.Time field")
+
+			// Zero time must round-trip — storage emits "0001-01-01T00:00:00Z",
+			// the bind path must produce the same string.
+			z := &ParityEvent{Name: "zero", StartsAt: time.Time{}}
+			require.NoError(t, engine.Save(ctx, db, z))
+			c, err = engine.NewQuery[ParityEvent](db, where.Field("starts_at").Eq(time.Time{})).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Eq(zero time.Time)")
+		})
+	}
+}
+
+// Pins fix for den-w3g0: a value saved in a non-UTC location must be queryable
+// with a same-zoned time.Time. encoding/json preserves the original location
+// in the stored RFC3339Nano string; the bind path must too.
+func TestParity_TimeComparisons_NonUTCZone(t *testing.T) {
+	for name, db := range parityEventDBs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			berlin, err := time.LoadLocation("Europe/Berlin")
+			require.NoError(t, err)
+			ts := time.Date(2026, 1, 15, 13, 0, 0, 0, berlin)
+			require.NoError(t, engine.Save(ctx, db, &ParityEvent{Name: "berlin", StartsAt: ts}))
+
+			c, err := engine.NewQuery[ParityEvent](db, where.Field("starts_at").Eq(ts)).Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), c, "Eq(zoned time.Time) against same-zone storage")
 		})
 	}
 }

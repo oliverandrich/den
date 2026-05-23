@@ -4,11 +4,44 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/oliverandrich/den"
 	"github.com/oliverandrich/den/internal/util"
 	"github.com/oliverandrich/den/where"
 )
+
+// formatBindArg normalises Go values whose driver-bound form differs from
+// their JSON-stored form. modernc.org/sqlite binds time.Time as
+// "YYYY-MM-DD HH:MM:SS..." but encoding/json marshals it as RFC3339Nano
+// in the value's *original* location ("...T...+01:00" for Berlin,
+// "...T...Z" for UTC). The lexicographic mismatch silently breaks every
+// comparison against a JSON-extracted text column. Format here in the
+// value's own location so the bound arg matches what the storage seam
+// wrote — callers in the same zone get correct matches and ordering;
+// mixed-zone storage/query is a fundamental string-comparison limitation
+// no shim at this layer can fix. Non-time values pass through.
+func formatBindArg(v any) any {
+	switch t := v.(type) {
+	case time.Time:
+		return t.Format(time.RFC3339Nano)
+	case *time.Time:
+		if t == nil {
+			return nil
+		}
+		return t.Format(time.RFC3339Nano)
+	default:
+		return v
+	}
+}
+
+func formatBindArgs(vs []any) []any {
+	out := make([]any, len(vs))
+	for i, v := range vs {
+		out[i] = formatBindArg(v)
+	}
+	return out
+}
 
 var sanitizeFieldName = util.SanitizeFieldName
 
@@ -248,17 +281,17 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 
 	switch op {
 	case where.OpEq:
-		return fmt.Sprintf("%s = ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s = ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpNe:
-		return fmt.Sprintf("%s != ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s != ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpGt:
-		return fmt.Sprintf("%s > ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s > ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpGte:
-		return fmt.Sprintf("%s >= ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s >= ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpLt:
-		return fmt.Sprintf("%s < ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s < ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpLte:
-		return fmt.Sprintf("%s <= ?", jsonPath), []any{value}
+		return fmt.Sprintf("%s <= ?", jsonPath), []any{formatBindArg(value)}
 	case where.OpIsNil:
 		return fmt.Sprintf("%s IS NULL", jsonPath), nil
 	case where.OpIsNotNil:
@@ -268,27 +301,27 @@ func fieldConditionToSQL(rawField string, op where.Operator, value any, values [
 		for i := range values {
 			placeholders[i] = "?"
 		}
-		return fmt.Sprintf("%s IN (%s)", jsonPath, strings.Join(placeholders, ", ")), values
+		return fmt.Sprintf("%s IN (%s)", jsonPath, strings.Join(placeholders, ", ")), formatBindArgs(values)
 	case where.OpNotIn:
 		placeholders := make([]string, len(values))
 		for i := range values {
 			placeholders[i] = "?"
 		}
-		return fmt.Sprintf("%s NOT IN (%s)", jsonPath, strings.Join(placeholders, ", ")), values
+		return fmt.Sprintf("%s NOT IN (%s)", jsonPath, strings.Join(placeholders, ", ")), formatBindArgs(values)
 	case where.OpContains:
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(json_extract(data, '$.%s')) WHERE value = ?)", field), []any{value}
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(json_extract(data, '$.%s')) WHERE value = ?)", field), []any{formatBindArg(value)}
 	case where.OpContainsAny:
 		placeholders := make([]string, len(values))
 		for i := range values {
 			placeholders[i] = "?"
 		}
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(json_extract(data, '$.%s')) WHERE value IN (%s))", field, strings.Join(placeholders, ", ")), values
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(json_extract(data, '$.%s')) WHERE value IN (%s))", field, strings.Join(placeholders, ", ")), formatBindArgs(values)
 	case where.OpContainsAll:
 		clauses := make([]string, len(values))
 		var allArgs []any
 		for i, v := range values {
 			clauses[i] = fmt.Sprintf("EXISTS (SELECT 1 FROM json_each(json_extract(data, '$.%s')) WHERE value = ?)", field)
-			allArgs = append(allArgs, v)
+			allArgs = append(allArgs, formatBindArg(v))
 		}
 		return strings.Join(clauses, " AND "), allArgs
 	case where.OpHasKey:

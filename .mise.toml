@@ -45,3 +45,19 @@ run = "govulncheck ./..."
 description = "List active beans (excludes completed and scrapped)"
 run = "beans list --no-status completed --no-status scrapped"
 
+[tasks.clean]
+description = "Remove build artifacts and generated files"
+run = [
+    "rm -rf site",
+    "rm -f coverage.out cover.out coverage.html",
+    "find . -maxdepth 2 -type f -name '*.coverprofile' -delete 2>/dev/null || true",
+    "rm -f docs/changelog.md docs/third-party-licenses.md",
+]
+
+[tasks."clean-all"]
+description = "Like clean, plus local SQLite test DBs anywhere in the tree"
+depends = ["clean"]
+run = [
+    "find . -type f \\( -name '*.db' -o -name '*.db-shm' -o -name '*.db-wal' \\) -not -path './.git/*' -delete 2>/dev/null || true",
+]
+

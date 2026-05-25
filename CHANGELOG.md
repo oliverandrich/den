@@ -4,6 +4,10 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+### Added
+
+- **`mise run clean` and `mise run clean-all` tasks.** `clean` removes build artifacts and generated files (coverage outputs, `site/`, generated doc pages); `clean-all` additionally wipes local SQLite test DBs (`*.db`, `*.db-shm`, `*.db-wal`) anywhere in the tree. `clean-all` depends on `clean` to avoid copy-paste drift.
+
 ## 0.16.1 — 2026-05-23
 
 ### Fixed

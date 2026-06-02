@@ -72,7 +72,7 @@ func (qs QuerySet[T]) searchRaw(ctx context.Context, queryText string) ([]*T, er
 	}
 
 	if qs.shouldHydrate() {
-		if err := batchResolveLinks(ctx, db, qs.scope.readWriter(), results, qs.nestDepth, qs.fetchMode); err != nil {
+		if err := batchResolveLinks(ctx, db, qs.scope.readWriter(), results, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 			return nil, err
 		}
 	}

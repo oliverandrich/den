@@ -46,6 +46,7 @@ type (
 
 	CollectionMeta  = engine.CollectionMeta
 	FieldMeta       = engine.FieldMeta
+	LinkFieldMeta   = engine.LinkFieldMeta
 	IndexDefinition = engine.IndexDefinition
 
 	BeforeInserter    = engine.BeforeInserter

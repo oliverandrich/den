@@ -101,6 +101,32 @@ When a document is written to storage, `Link[T]` fields serialize to their ID on
 !!! note "Link equality compares the ID, not the Value"
     Because the on-disk representation is just the ID, two `Link[T]` values referring to the same target document compare equal by their `ID` field — regardless of whether one was freshly constructed via `NewLink(&doc)` (Loaded=true, Value populated) and the other was decoded from storage (Loaded=false, Value=nil). Code that needs to test "do these two links point at the same row" should compare `a.ID == b.ID`. Comparing `a == b` directly will return `false` for two valid links to the same target whenever their `Loaded`/`Value` differ.
 
+### Expanding links in output: `den.Marshal`
+
+`json.Marshal` always emits a `Link[T]` as its bare ID — the storage format, and the default every existing client depends on. To render a **hydrated** link as its nested object instead (e.g. an `?expand=` API), marshal with `den.Marshal`:
+
+```go
+book, _ := den.NewQuery[Book](db).WithFetchLinks("author").First(ctx)
+
+den.Marshal(book)  // {"_id":"…","author":{"_id":"…","name":"Ursula"}}
+json.Marshal(book) //  {"_id":"…","author":"…"}   (unchanged: bare id)
+```
+
+`den.Marshal` behaves exactly like `json.Marshal`, except that any **loaded** link anywhere in the value graph — including documents nested inside an envelope or slice — is emitted as its resolved `Value`. Unloaded links and every other field are byte-identical to the standard library, so you can swap it in at a single JSON-encoding seam. The set of loaded links is exactly the set that expands, so pair it with selective fetching (below).
+
+!!! note
+    Objects that actually contain an expanded link are re-encoded from a map, so their JSON keys come out sorted rather than in struct-declaration order (JSON objects are unordered). Values with no loaded link are returned untouched.
+
+### Listing a type's relations: `den.LinkFields`
+
+`den.LinkFields[T](db)` enumerates a type's link fields — JSON name, target collection, single-vs-slice, and eager flag — so you can validate or allowlist expandable relations without hand-rolling reflection:
+
+```go
+for _, lf := range must(den.LinkFields[Book](db)) {
+    // lf.JSONName == "author", lf.TargetCollection == "author", lf.Slice == false
+}
+```
+
 ## Creating Links
 
 Use `NewLink` to create a link from an existing document:
@@ -155,6 +181,14 @@ houses[0].Windows[0].Value // *Window{X: 100, Y: 50}
 `.All(ctx)` drains the result first, then runs **one batched `WHERE _id IN (…)` query per target type per nesting level**. IDs are deduplicated, so a hot target referenced by many parents is fetched once and the decoded pointer is shared across all matching slots — `houses[0].Door.Value == houses[1].Door.Value` when they point at the same ID. `AllWithCount` and `Search` use the same batched path.
 
 `.WithFetchLinks().Iter(ctx)` routes through the same resolver, but resolves per yielded row so streaming stays incremental. Recursion depth is identical to `.All`'s — only the batching shape differs. Prefer `.All` when the result set fits in memory so the per-target-type batches deduplicate across rows; use `.Iter` only when materializing the slice would be too expensive.
+
+Pass one or more JSON field names to hydrate only those links — handy for an `?expand=` API that resolves just the relations the client asked for:
+
+```go
+den.NewQuery[House](db).WithFetchLinks("door").All(ctx) // Door loaded, Windows left as IDs
+```
+
+Named hydration applies to the top-level link fields; the no-argument form hydrates everything. Combine with `den.Marshal` (above) to render exactly the expanded relations in the response.
 
 === "SQLite"
 

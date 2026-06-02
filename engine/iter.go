@@ -57,7 +57,7 @@ func (qs QuerySet[T]) Iter(ctx context.Context) iter.Seq2[*T, error] {
 			}
 
 			if hydrate {
-				if err := batchResolveLinks(ctx, qs.scope.db(), qs.scope.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode); err != nil {
+				if err := batchResolveLinks(ctx, qs.scope.db(), qs.scope.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 					yield(nil, fmt.Errorf("fetch links: %w", err))
 					return
 				}

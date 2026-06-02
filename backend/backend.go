@@ -13,6 +13,7 @@ package backend
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/oliverandrich/den/where"
 )
@@ -198,6 +199,19 @@ type FieldMeta struct {
 	Unique    bool
 	FTS       bool
 	IsPointer bool
+}
+
+// LinkFieldMeta describes a single Link[T] / []Link[T] relation field on a
+// document type. Link fields are not part of [CollectionMeta.Fields] (they
+// reference other collections rather than storing scalar data); enumerate
+// them with den.LinkFields to validate or allowlist expandable relations.
+type LinkFieldMeta struct {
+	JSONName         string       // JSON key of the field
+	GoName           string       // Go struct field name
+	Slice            bool         // true for []Link[T], false for Link[T]
+	Eager            bool         // true when tagged den:"eager"
+	TargetCollection string       // collection of T; "" if T is not registered
+	TargetType       reflect.Type // T in Link[T]
 }
 
 // SortDirection specifies ascending or descending sort order.

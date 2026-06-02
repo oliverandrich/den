@@ -22,18 +22,20 @@ import (
 // except the batched path doesn't surface a dangling-link error (the IN
 // query simply produces no row for that id). Callers that need strict
 // dangling-link detection should stick to the streaming .Iter() path.
-func batchResolveLinks[T any](ctx context.Context, db *DB, rw ReadWriter, docs []*T, depth int, mode fetchMode) error {
+// fields is the JSON-name allowlist consulted only when mode is fetchNamed
+// (from WithFetchLinks(fields...)); nil for every other mode.
+func batchResolveLinks[T any](ctx context.Context, db *DB, rw ReadWriter, docs []*T, depth int, mode fetchMode, fields map[string]bool) error {
 	if depth <= 0 || len(docs) == 0 || mode == fetchNone {
 		return nil
 	}
-	return batchResolveLinksReflect(ctx, db, rw, reflect.ValueOf(docs), depth, mode)
+	return batchResolveLinksReflect(ctx, db, rw, reflect.ValueOf(docs), depth, mode, fields)
 }
 
 // batchResolveLinksReflect is the reflective worker so recursive resolution
 // at depth > 1 can operate on slices whose element type is only known via
 // reflect.Type (the loaded-target slice of one level becomes the input of
 // the next).
-func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, depth int, mode fetchMode) error {
+func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, depth int, mode fetchMode, fields map[string]bool) error {
 	if depth <= 0 || docsVal.Len() == 0 || mode == fetchNone {
 		return nil
 	}
@@ -43,7 +45,10 @@ func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVa
 		if lf.skipForMode(mode) {
 			continue
 		}
-		if err := batchResolveField(ctx, db, rw, docsVal, lf, depth, mode); err != nil {
+		if mode == fetchNamed && !fields[linkFieldJSONName(elemType, lf)] {
+			continue
+		}
+		if err := batchResolveField(ctx, db, rw, docsVal, lf, depth, mode, fields); err != nil {
 			return err
 		}
 	}
@@ -53,7 +58,7 @@ func batchResolveLinksReflect(ctx context.Context, db *DB, rw ReadWriter, docsVa
 // batchResolveField resolves a single link field across docsVal in one
 // IN-query to the target collection. Shared IDs produce a single decode
 // whose pointer is stored in every matching parent slot.
-func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, lf linkFieldInfo, depth int, mode fetchMode) error {
+func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal reflect.Value, lf linkFieldInfo, depth int, mode fetchMode, fields map[string]bool) error {
 	slotsByID := make(map[string][]reflect.Value)
 	for i := range docsVal.Len() {
 		docV := docsVal.Index(i).Elem() // *T → T (addressable)
@@ -131,7 +136,10 @@ func batchResolveField(ctx context.Context, db *DB, rw ReadWriter, docsVal refle
 	}
 
 	if depth > 1 && loaded.Len() > 0 {
-		return batchResolveLinksReflect(ctx, db, rw, loaded, depth-1, mode)
+		// fetchNamed selects by the root type's JSON names; nested types have
+		// their own names, so passing the same set down naturally scopes named
+		// hydration to one level.
+		return batchResolveLinksReflect(ctx, db, rw, loaded, depth-1, mode, fields)
 	}
 	return nil
 }

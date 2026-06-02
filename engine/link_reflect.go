@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/oliverandrich/den/internal/util"
@@ -168,3 +169,14 @@ func forEachLinkField(ctx context.Context, doc any, fn func(elem reflect.Value, 
 
 // parseJSONTagName delegates to util.ParseJSONTagName.
 var parseJSONTagName = util.ParseJSONTagName
+
+// linkFieldJSONName returns the JSON key used to address a link field — the
+// json tag name, falling back to the lowercased Go field name. This is the
+// name WithFetchLinks(fields...) and FetchLink match against.
+func linkFieldJSONName(t reflect.Type, lf linkFieldInfo) string {
+	f := t.Field(lf.index)
+	if name := parseJSONTagName(f.Tag.Get("json")); name != "" {
+		return name
+	}
+	return strings.ToLower(f.Name)
+}

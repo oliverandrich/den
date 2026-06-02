@@ -1,26 +1,17 @@
 # zizmor configuration — https://docs.zizmor.sh/configuration/
 #
 # Known accepted risks:
-#   - release.yml uses a `workflow_run` trigger so the release job runs
-#     only after CI succeeds. zizmor flags `workflow_run` as dangerous
-#     because it runs in the context of the default branch with write
-#     permissions. The mitigations here are: (a) the ref is pinned to
-#     the tag that triggered CI (passed via the VERSION env so no shell
-#     interpolation), (b) permissions are limited to `contents: write`,
-#     and (c) the job only runs when `head_branch` starts with `v`.
 #   - ci.yml's test/lint/coverage jobs cache mise tool installs
 #     (`jdx/mise-action` with `cache: true`). zizmor flags this as a
 #     cache-poisoning vector because the file also publishes a GitHub
-#     Release. The mitigation: the only publishing job (`release`) sets
-#     `cache: false` so it never restores a cache, and the cached jobs
-#     produce no release artifacts — GitHub's per-ref cache scoping keeps
-#     a PR branch's cache out of the protected main/tag refs the release
-#     runs on. There is no path from a poisoned cache to a trusted build.
+#     Release (the inline `release` job, gated on a `v*` tag push). The
+#     mitigation: that release job sets `cache: false` so it never
+#     restores a cache, and the cached jobs produce no release artifacts
+#     — GitHub's per-ref cache scoping keeps a PR branch's cache out of
+#     the protected main/tag refs the release runs on. There is no path
+#     from a poisoned cache to a trusted build.
 
 rules:
-  dangerous-triggers:
-    ignore:
-      - release.yml
   cache-poisoning:
     ignore:
       - ci.yml

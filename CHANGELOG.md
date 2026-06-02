@@ -6,6 +6,7 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Added
 
+- **`den.Replace` and `den.PreserveServerFields`.** `Replace` is a full-content replace (PUT) that overwrites a stored row with a client document while preserving Den's server-owned fields (`_id`, `_created_at`, `_rev`, soft-delete audit fields); `PreserveServerFields` exposes that field-copy as a building block. Consumers no longer hand-derive which fields Den owns.
 - **`QuerySet.SearchRaw` and `den.LiteralFTS5`.** `SearchRaw` passes the term straight to the backend's native FTS mechanism (FTS5 query syntax on SQLite, `plainto_tsquery` on PostgreSQL) for callers who want operators. `LiteralFTS5` exposes the literal-terms transform for composing safe strings by hand.
 - **`mise run clean` and `mise run clean-all` tasks.** `clean` removes build artifacts and generated files (coverage outputs, `site/`, generated doc pages); `clean-all` additionally wipes local SQLite test DBs (`*.db`, `*.db-shm`, `*.db-wal`) anywhere in the tree. `clean-all` depends on `clean` to avoid copy-paste drift.
 

@@ -53,6 +53,24 @@ func RefreshAll[T any](ctx context.Context, s Scope, docs []*T, opts ...CRUDOpti
 	return engine.RefreshAll(ctx, s, docs, opts...)
 }
 
+// Replace performs a full-content replace (PUT semantics): fresh's
+// client-owned fields overwrite the stored row — omitted fields reset to
+// zero — while Den's server-owned identity, audit, and soft-delete fields
+// are preserved from the existing record. Last-writer-wins (adopts the
+// stored revision); does not resurrect soft-deleted documents. Returns
+// ErrNotFound if no row matches fresh's ID, ErrValidation if it has none.
+func Replace[T any](ctx context.Context, s Scope, fresh *T, opts ...CRUDOption) error {
+	return engine.Replace(ctx, s, fresh, opts...)
+}
+
+// PreserveServerFields copies Den's server-owned fields (_id, _created_at,
+// _updated_at, _rev, and the soft-delete audit fields) from src onto dst,
+// leaving client-owned fields untouched. The building block behind Replace,
+// for callers that load and persist the existing record themselves.
+func PreserveServerFields[T any](db *DB, dst, src *T) error {
+	return engine.PreserveServerFields(db, dst, src)
+}
+
 // IsChanged reports whether the document has changed since it was loaded.
 // Returns false if the document has no snapshot (never loaded or not Trackable).
 func IsChanged[T any](db *DB, doc *T) (bool, error) {

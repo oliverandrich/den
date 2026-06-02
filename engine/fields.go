@@ -52,3 +52,13 @@ const (
 	// SoftDeleteReason CRUDOption on the soft-delete path.
 	FieldDeleteReason = "_delete_reason"
 )
+
+// serverOwnedFieldNames is the canonical set of JSON fields Den owns on
+// every write: clients must never author them, and Replace /
+// PreserveServerFields preserve them across a full-content replace. The
+// transient document.Tracked snapshot is intentionally excluded — it is
+// never persisted (Save recaptures it).
+var serverOwnedFieldNames = []string{
+	FieldID, FieldCreatedAt, FieldUpdatedAt, FieldRev,
+	FieldDeletedAt, FieldDeletedBy, FieldDeleteReason,
+}

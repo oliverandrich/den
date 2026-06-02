@@ -80,6 +80,20 @@ err := den.Save(ctx, db, product, den.IgnoreRevision())
 
 For atomic single-field changes without a separate read, use [UpdateOne](#updateone) instead.
 
+## Replace
+
+`Replace` is a full-content replace (PUT semantics): the client-supplied document overwrites the stored row — fields omitted from it reset to their zero value — while Den's **server-owned** fields are preserved from the existing record. Those are `_id`, `_created_at`, `_rev`, and the soft-delete audit fields (`_deleted_at` / `_deleted_by` / `_delete_reason`); `_updated_at` is re-stamped by the save.
+
+```go
+fresh := &Product{Name: "Renamed"} // Price omitted -> resets to 0
+fresh.ID = existingID
+err := den.Replace(ctx, db, fresh)
+```
+
+`Replace` loads the existing record, carries its server-owned fields onto `fresh`, and saves — all in one transaction. It returns `ErrNotFound` if no row matches the ID and `ErrValidation` if the document has none. It is **last-writer-wins** (it adopts the stored revision, so a revisioned type round-trips without conflict); for optimistic concurrency, use the read-modify-write pattern above. It does **not** resurrect soft-deleted documents — replacing a soft-deleted row leaves it soft-deleted.
+
+For the field-copy alone — when you load and persist the existing record yourself — use `den.PreserveServerFields(db, dst, src)`, the building block behind `Replace`.
+
 ## Bulk Update via QuerySet
 
 Update specific fields on all documents matching a query. Returns the number of modified documents:

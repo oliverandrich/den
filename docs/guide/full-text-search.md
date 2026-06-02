@@ -31,6 +31,18 @@ articles, err := den.NewQuery[Article](db).Limit(20).Search(ctx, "golang embedde
 
 `Search` is a terminal method -- it executes the query and returns `([]*T, error)` directly. Results are ranked by relevance (FTS5 `rank` on SQLite, `ts_rank` on PostgreSQL).
 
+`Search` treats the term as **literal words ANDed together**: FTS5 operators and punctuation (`AND`/`OR`/`NEAR`, `col:term` scoping, prefix `*`, stray quotes) are neutralised, so raw user input from a search box or API is safe to pass straight through on both backends. A blank or whitespace-only term returns no rows. An all-blank term yields an empty result without touching the database.
+
+### Raw query syntax
+
+To use a backend's native FTS query language instead, call `SearchRaw`:
+
+```go
+articles, err := den.NewQuery[Article](db).SearchRaw(ctx, "golang AND embedded*")
+```
+
+`SearchRaw` passes the term straight through: an FTS5 query expression on SQLite (operators, column filters, and prefix `*` all honored -- and **raw user input unsafe**), and `plainto_tsquery` on PostgreSQL. To build a safe literal string yourself -- e.g. to compose a trusted operator with untrusted words -- use `den.LiteralFTS5(term)`, the same transform `Search` applies internally.
+
 ### Combined FTS + Conditions
 
 Full-text search can be combined with regular where conditions and query options:

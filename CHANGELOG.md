@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.17.0 — 2026-06-02
+
 ### Added
 
 - **`den.Marshal`, `den.LinkFields`, and selective `WithFetchLinks(fields...)`.** `den.Marshal` is an output JSON marshaller that emits hydrated `Link[T]` values as their nested object anywhere in the value graph (unloaded links and `json.Marshal` stay the bare id — the storage format is unchanged). `den.LinkFields[T]` enumerates a type's relation fields (JSON name, target collection, slice, eager). `WithFetchLinks` now takes optional field names to hydrate only the chosen links. Together they make relation-expansion (`?expand=`) a thin layer for consumers.

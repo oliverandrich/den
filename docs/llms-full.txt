@@ -4314,6 +4314,8 @@ Every CRUD function below takes a `Scope` parameter. `Scope` is a sealed interfa
 |---|---|---|
 | `Save[T]` | `Save[T](ctx context.Context, s Scope, doc *T, opts ...CRUDOption) error` | Persist a single document. Empty-ID docs take the insert path (ULID assigned); ID-bearing docs take the update path. Hooks fire on whichever branch runs |
 | `SaveAll[T]` | `SaveAll[T](ctx context.Context, s Scope, docs []*T, opts ...CRUDOption) error` | Persist every doc in the slice in a single transaction. Mixed batches (some empty-ID, some not) are supported. Fail-fast: any per-doc error rolls back the transaction |
+| `Replace[T]` | `Replace[T](ctx context.Context, s Scope, fresh *T, opts ...CRUDOption) error` | Full-content replace (PUT): `fresh`'s client fields overwrite the stored row (omitted fields reset to zero) while Den's server-owned fields (`_id`, `_created_at`, `_rev`, soft-delete audit) are preserved from the existing record. Last-writer-wins; does not resurrect soft-deleted rows. `ErrNotFound` if the ID is absent, `ErrValidation` if `fresh` has none |
+| `PreserveServerFields[T]` | `PreserveServerFields[T](db *DB, dst, src *T) error` | Copy Den's server-owned fields from `src` onto `dst` — the building block behind `Replace`. `ErrNotRegistered` if T is unregistered |
 
 ### Read
 
@@ -4363,7 +4365,7 @@ All chainable methods return `QuerySet[T]` and can be composed in any order.
 | `Skip` | `Skip(n int) QuerySet[T]` | Skip the first n results (offset-based pagination) |
 | `After` | `After(id string) QuerySet[T]` | Cursor-based pagination: fetch results after this ID |
 | `Before` | `Before(id string) QuerySet[T]` | Cursor-based pagination: fetch results before this ID |
-| `WithFetchLinks` | `WithFetchLinks() QuerySet[T]` | Eagerly resolve all `Link[T]` fields on results |
+| `WithFetchLinks` | `WithFetchLinks(fields ...string) QuerySet[T]` | Eagerly resolve `Link[T]` fields on results. No arguments resolves every link field; passing JSON field names resolves only those (selective `?expand=`-style hydration) |
 | `WithNestingDepth` | `WithNestingDepth(n int) QuerySet[T]` | Override max link-fetching depth for this query |
 | `IncludeDeleted` | `IncludeDeleted() QuerySet[T]` | Include soft-deleted documents in results |
 | `ForUpdate` | `ForUpdate(opts ...LockOption) QuerySet[T]` | Acquire row-level locks on every matching row. Requires `*Tx` scope — terminal methods return `ErrLockRequiresTransaction` otherwise |
@@ -4388,7 +4390,10 @@ Every terminal takes `ctx context.Context` as its first argument, so the same `Q
 | `GetOrCreate` | `GetOrCreate(ctx context.Context, defaults *T) (*T, bool, error)` | Find-or-create with no post-find update. Equivalent to `UpsertOne(ctx, defaults, SetFields{})` |
 | `Delete` | `Delete(ctx context.Context, opts ...CRUDOption) (int64, error)` | Delete every matching row and return the count. Drains the iterator before issuing per-row writes so cursor pinning on PostgreSQL is safe. Soft-delete routing and `HardDelete` apply per row |
 | `BackLinks` | `BackLinks(linkField string, targetID string) QuerySet[T]` | Chainable: narrow the QuerySet to documents that reference `targetID` via the named link field. Compose with `WithFetchLinks` / `IncludeDeleted` / `Sort` / `Limit` etc. and dispatch with any terminal |
-| `Search` | `Search(ctx context.Context, query string) ([]*T, error)` | Full-text search using FTS5 (SQLite) or tsvector (PostgreSQL). Returns `ErrFTSNotSupported` when the backend does not implement `FTSProvider` |
+| `Search` | `Search(ctx context.Context, term string) ([]*T, error)` | Literal-terms full-text search (FTS5 on SQLite, tsvector on PostgreSQL): the term is treated as plain words ANDed together with FTS5 operators/punctuation neutralised, so raw user input is safe on both backends. Blank term returns no rows. `ErrFTSNotSupported` when the backend lacks FTS |
+| `SearchRaw` | `SearchRaw(ctx context.Context, term string) ([]*T, error)` | Like `Search` but passes the term to the backend's native FTS mechanism (FTS5 query syntax on SQLite; `plainto_tsquery` on PostgreSQL). Raw user input is unsafe on SQLite — use `Search` for that |
+
+> **Note:** `den.LiteralFTS5(term string) string` exposes the literal-terms transform `Search` applies — use it to build a safe FTS5 string by hand for composing with `SearchRaw`.
 
 ---
 
@@ -4434,6 +4439,8 @@ err := den.NewQuery[Product](db).GroupBy("category.name").Into(ctx, &results)
 | `FetchLink[T]` | `FetchLink[T](ctx context.Context, s Scope, doc *T, field string) error` | Fetch and resolve a single link field on a document |
 | `FetchAllLinks[T]` | `FetchAllLinks[T](ctx context.Context, s Scope, doc *T) error` | Fetch and resolve all link fields on a document |
 | `WithLinkRule` | `WithLinkRule(rule LinkRule) CRUDOption` | Set cascade behavior for insert/update/delete of linked documents |
+| `LinkFields[T]` | `LinkFields[T](db *DB) ([]LinkFieldMeta, error)` | Enumerate a type's `Link[T]` / `[]Link[T]` relation fields (JSON name, target collection, single-vs-slice, eager) — e.g. to allowlist expandable relations. `ErrNotRegistered` if T is unregistered |
+| `Marshal` | `Marshal(v any) ([]byte, error)` | Output JSON marshaller: emits hydrated (`Loaded`) links as their nested object anywhere in the value graph; unloaded links and `json.Marshal` stay the bare id (storage format unchanged). Pair with `WithFetchLinks` for `?expand=`-style responses |
 
 Reverse queries live on `QuerySet`: `den.NewQuery[House](db).BackLinks("door", doorID).All(ctx)` — see the [Terminal Methods](#terminal-methods) table.
 
@@ -4625,6 +4632,7 @@ Located in the `dentest` sub-package (`github.com/oliverandrich/den/dentest`).
 | `CRUDOption` | Functional option for write operations (e.g., `WithLinkRule`) |
 | `FieldChange` | Represents a changed field with `Before` and `After` values |
 | `CollectionMeta` | Metadata about a collection: fields, indexes, links, settings |
+| `LinkFieldMeta` | Describes one `Link[T]` relation field: JSON name, Go name, slice/eager flags, target collection and type. Returned by `LinkFields` |
 | `IndexDefinition` | Index specification: name, fields, unique flag |
 
 ---

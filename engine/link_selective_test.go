@@ -54,6 +54,32 @@ func TestWithFetchLinks_Selective(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, none, 1)
 			assert.False(t, none[0].Door.IsLoaded())
+
+			// The selection is honored by every hydrating terminal, not just
+			// All — First, AllWithCount and Iter route through the same
+			// resolver (Search too, via the identical batchResolveLinks call).
+			first, err := engine.NewQuery[House](db).WithFetchLinks("door").First(ctx)
+			require.NoError(t, err)
+			assert.True(t, first.Door.IsLoaded(), "First honors named hydration")
+			require.Len(t, first.Windows, 1)
+			assert.False(t, first.Windows[0].IsLoaded())
+
+			withCount, _, err := engine.NewQuery[House](db).WithFetchLinks("door").AllWithCount(ctx)
+			require.NoError(t, err)
+			require.Len(t, withCount, 1)
+			assert.True(t, withCount[0].Door.IsLoaded(), "AllWithCount honors named hydration")
+			require.Len(t, withCount[0].Windows, 1)
+			assert.False(t, withCount[0].Windows[0].IsLoaded())
+
+			seen := 0
+			for h, err := range engine.NewQuery[House](db).WithFetchLinks("door").Iter(ctx) {
+				require.NoError(t, err)
+				seen++
+				assert.True(t, h.Door.IsLoaded(), "Iter honors named hydration")
+				require.Len(t, h.Windows, 1)
+				assert.False(t, h.Windows[0].IsLoaded())
+			}
+			assert.Equal(t, 1, seen)
 		})
 	}
 }

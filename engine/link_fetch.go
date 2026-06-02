@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 // FetchLink resolves a single named link field on a document. The scope
@@ -59,7 +58,7 @@ func FetchLinkField[T any](ctx context.Context, s Scope, link *Link[T]) error {
 // recursion is available; FetchAllLinks fixes it at one hop because the
 // API has no place to thread a depth knob.
 func FetchAllLinks[T any](ctx context.Context, s Scope, doc *T) error {
-	return batchResolveLinks(ctx, s.db(), s.readWriter(), []*T{doc}, 1, fetchAll)
+	return batchResolveLinks(ctx, s.db(), s.readWriter(), []*T{doc}, 1, fetchAll, nil)
 }
 
 // fetchLinkByName resolves one named link field. The rw parameter carries
@@ -76,12 +75,7 @@ func fetchLinkByName(ctx context.Context, db *DB, rw ReadWriter, doc any, fieldN
 	t := v.Type()
 
 	for _, lf := range getLinkFields(t) {
-		field := t.Field(lf.index)
-		name := parseJSONTagName(field.Tag.Get("json"))
-		if name == "" {
-			name = strings.ToLower(field.Name)
-		}
-		if name != fieldName {
+		if linkFieldJSONName(t, lf) != fieldName {
 			continue
 		}
 

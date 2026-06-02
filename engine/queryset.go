@@ -24,14 +24,17 @@ import (
 // Calling terminal methods on a zero-value QuerySet panics because the
 // scope reference is nil.
 type QuerySet[T any] struct {
-	scope          Scope
-	conditions     []where.Condition
-	sortFields     []SortEntry
-	limitN         int
-	skipN          int
-	afterID        string
-	beforeID       string
-	fetchMode      fetchMode
+	scope      Scope
+	conditions []where.Condition
+	sortFields []SortEntry
+	limitN     int
+	skipN      int
+	afterID    string
+	beforeID   string
+	fetchMode  fetchMode
+	// fetchFields holds the JSON names to hydrate when fetchMode is
+	// fetchNamed (set by WithFetchLinks(fields...)). nil for every other mode.
+	fetchFields    map[string]bool
 	nestDepth      int
 	includeDeleted bool
 	// lock is set by ForUpdate. Only meaningful when scope is *Tx; terminal
@@ -139,18 +142,34 @@ const (
 	fetchDefault fetchMode = iota
 	fetchAll
 	fetchNone
+	fetchNamed
 )
 
-// WithFetchLinks hydrates every Link[T] field on the returned documents,
-// regardless of whether the field is tagged with `den:"eager"`.
+// WithFetchLinks hydrates Link[T] fields on the returned documents.
+//
+// Called with no arguments it hydrates every link field, regardless of the
+// `den:"eager"` tag. Called with one or more JSON field names it hydrates
+// only those named top-level link fields, leaving the rest unloaded — useful
+// for an `?expand=` API that resolves only the relations the client asked
+// for. Names are matched as the field's JSON key (falling back to the
+// lowercased Go name for untagged fields). Unknown names are ignored.
 //
 // Honored only by terminals that return *T values: All, AllWithCount, First,
 // Iter, and Search. Every other terminal — counts, aggregates, projections,
 // GroupBy.Into, and bulk Update — ignores it because it has no documents to
 // attach the resolved links to. See Update's godoc for the hook-visibility
 // caveat that follows from this rule.
-func (qs QuerySet[T]) WithFetchLinks() QuerySet[T] {
-	qs.fetchMode = fetchAll
+func (qs QuerySet[T]) WithFetchLinks(fields ...string) QuerySet[T] {
+	if len(fields) == 0 {
+		qs.fetchMode = fetchAll
+		qs.fetchFields = nil
+		return qs
+	}
+	qs.fetchMode = fetchNamed
+	qs.fetchFields = make(map[string]bool, len(fields))
+	for _, f := range fields {
+		qs.fetchFields[f] = true
+	}
 	return qs
 }
 
@@ -175,6 +194,8 @@ func (qs QuerySet[T]) shouldHydrate() bool {
 		return true
 	case fetchNone:
 		return false
+	case fetchNamed:
+		return len(qs.fetchFields) > 0
 	case fetchDefault:
 		var zero T
 		return hasEagerLinkFields(reflect.TypeOf(zero))
@@ -303,7 +324,7 @@ func (qs QuerySet[T]) allBatched(ctx context.Context) ([]*T, error) {
 		return nil, err
 	}
 
-	if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode); err != nil {
+	if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -400,7 +421,7 @@ func (qs QuerySet[T]) AllWithCount(ctx context.Context) ([]*T, int64, error) {
 		}
 
 		if qs.shouldHydrate() {
-			if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode); err != nil {
+			if err := batchResolveLinks(ctx, db, rw, results, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 				return nil, 0, err
 			}
 		}
@@ -667,7 +688,7 @@ func (qs QuerySet[T]) UpdateOne(ctx context.Context, fields SetFields) (*T, erro
 		if err := updateCore(ctx, tx.parent, tx.tx, doc); err != nil {
 			return nil, err
 		}
-		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode); err != nil {
+		if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{doc}, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 			return nil, err
 		}
 		return doc, nil
@@ -733,7 +754,7 @@ func (qs QuerySet[T]) upsertOne(ctx context.Context, defaults *T, fields SetFiel
 			if err := updateCore(ctx, tx.parent, tx.tx, existing); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, qs.nestDepth, qs.fetchMode); err != nil {
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{existing}, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 				return upsertResult[T]{}, err
 			}
 			return upsertResult[T]{doc: existing, inserted: false}, nil
@@ -745,7 +766,7 @@ func (qs QuerySet[T]) upsertOne(ctx context.Context, defaults *T, fields SetFiel
 			if err := insertCore(ctx, tx.parent, tx.tx, defaults); err != nil {
 				return upsertResult[T]{}, err
 			}
-			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, qs.nestDepth, qs.fetchMode); err != nil {
+			if err := batchResolveLinks(ctx, db, tx.readWriter(), []*T{defaults}, qs.nestDepth, qs.fetchMode, qs.fetchFields); err != nil {
 				return upsertResult[T]{}, err
 			}
 			return upsertResult[T]{doc: defaults, inserted: true}, nil

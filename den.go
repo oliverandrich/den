@@ -76,6 +76,24 @@ func Collections(db *DB) []string {
 	return engine.Collections(db)
 }
 
+// LinkFields enumerates the Link[T] / []Link[T] relation fields of the
+// registered document type T (JSON name, target collection, single-vs-slice,
+// eager). Returns ErrNotRegistered if T is not registered. Use it to validate
+// or allowlist expandable relations without re-implementing reflection.
+func LinkFields[T any](db *DB) ([]LinkFieldMeta, error) {
+	return engine.LinkFields[T](db)
+}
+
+// Marshal is Den's output JSON marshaller: like json.Marshal, but any
+// hydrated (Loaded) Link[T] anywhere in the value graph is emitted as its
+// resolved object instead of the bare id. Unloaded links and all other
+// fields marshal identically to the standard library — the default wire
+// format (and Den's storage encoding) is unchanged. Hydrate the links you
+// want expanded with QuerySet.WithFetchLinks, then Marshal for the response.
+func Marshal(v any) ([]byte, error) {
+	return engine.Marshal(v)
+}
+
 // RegisterBackend registers a backend opener under the given URL scheme.
 // Called from backend packages' init() functions; not typically called
 // by application code.

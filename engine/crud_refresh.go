@@ -34,7 +34,7 @@ func Refresh[T any](ctx context.Context, s Scope, document *T, opts ...CRUDOptio
 	}
 
 	o := applyCRUDOpts(opts)
-	return batchResolveLinks(ctx, db, rw, []*T{document}, defaultNestingDepth, crudFetchMode(o))
+	return batchResolveLinks(ctx, db, rw, []*T{document}, defaultNestingDepth, crudFetchMode(o), nil)
 }
 
 // RefreshAll re-reads every doc in docs by routing each through Refresh.

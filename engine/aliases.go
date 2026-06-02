@@ -37,6 +37,7 @@ type (
 	RecordedIndex   = backend.RecordedIndex
 	CollectionMeta  = backend.CollectionMeta
 	FieldMeta       = backend.FieldMeta
+	LinkFieldMeta   = backend.LinkFieldMeta
 )
 
 const (

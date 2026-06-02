@@ -41,10 +41,7 @@ func TestSearch_SQLite(t *testing.T) {
 // after the MATCH/@@ predicate, and an Or() sibling must not absorb the
 // MATCH via SQL AND > OR precedence.
 func TestSearch_OrAndComposition(t *testing.T) {
-	dbs := map[string]*engine.DB{
-		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
-		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
-	}
+	dbs := ftsBackends(t, nil)
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -70,10 +67,7 @@ func TestSearch_OrAndComposition(t *testing.T) {
 // fire on the same connection; PostgreSQL's tsvector + GIN see same-tx
 // writes via MVCC. Both backends share the contract.
 func TestSearch_HonorsScopeInTx(t *testing.T) {
-	dbs := map[string]*engine.DB{
-		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
-		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
-	}
+	dbs := ftsBackends(t, nil)
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -107,10 +101,7 @@ func TestSearch_HonorsScopeInTx(t *testing.T) {
 // rolls back, the in-tx-Searchable doc never reaches committed state and
 // is invisible to a fresh DB-bound Search.
 func TestSearch_RollbackHidesDocs(t *testing.T) {
-	dbs := map[string]*engine.DB{
-		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
-		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
-	}
+	dbs := ftsBackends(t, nil)
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -145,10 +136,7 @@ func TestSearch_RollbackHidesDocs(t *testing.T) {
 // alongside Search on a tx-bound QuerySet also operate on tx-local data —
 // the whole query travels through the tx connection, not just the FTS bit.
 func TestSearch_TxBoundWhereSeesTxLocal(t *testing.T) {
-	dbs := map[string]*engine.DB{
-		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
-		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
-	}
+	dbs := ftsBackends(t, nil)
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -284,10 +272,7 @@ func TestSearch_Postgres_WithLimit(t *testing.T) {
 // default order is overridden with an explicit Sort("_id") so the cursor
 // semantics are predictable across backends.
 func TestSearch_HonorsAfterCursor(t *testing.T) {
-	dbs := map[string]*engine.DB{
-		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
-		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
-	}
+	dbs := ftsBackends(t, nil)
 	for name, db := range dbs {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -308,6 +293,142 @@ func TestSearch_HonorsAfterCursor(t *testing.T) {
 			assert.Equal(t, first[2].ID, rest[1].ID)
 		})
 	}
+}
+
+// ftsBackends returns a fresh SQLite + PostgreSQL DB pair seeded with the
+// same articles, for tests that assert both backends agree.
+func ftsBackends(t *testing.T, seed []*FTSArticle) map[string]*engine.DB {
+	t.Helper()
+	dbs := map[string]*engine.DB{
+		"sqlite":   dentest.MustOpen(t, &FTSArticle{}),
+		"postgres": dentest.MustOpenPostgres(t, dentest.PostgresURL(), &FTSArticle{}),
+	}
+	if len(seed) > 0 {
+		for _, db := range dbs {
+			require.NoError(t, engine.SaveAll(context.Background(), db, seed))
+		}
+	}
+	return dbs
+}
+
+// TestSearch_MultiTokenANDs pins that a multi-word literal term matches only
+// documents containing every token (implicit AND), identically on both
+// backends.
+func TestSearch_MultiTokenANDs(t *testing.T) {
+	dbs := ftsBackends(t, []*FTSArticle{
+		{Title: "both", Body: "red green together"},
+		{Title: "red only", Body: "red alone"},
+		{Title: "green only", Body: "green alone"},
+	})
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			hits, err := engine.NewQuery[FTSArticle](db).Search(ctx, "red green")
+			require.NoError(t, err)
+			require.Len(t, hits, 1, "only the doc with both tokens matches")
+			assert.Equal(t, "both", hits[0].Title)
+		})
+	}
+}
+
+// TestSearch_OperatorNeutralized_NoSyntaxError pins the core safety win:
+// FTS5 operators and punctuation in raw user input never raise a syntax
+// error on either backend (previously the SQLite MATCH path would).
+func TestSearch_OperatorNeutralized_NoSyntaxError(t *testing.T) {
+	dbs := ftsBackends(t, []*FTSArticle{{Title: "x", Body: "red green blue"}})
+	nasty := []string{
+		"red OR yellow", // boolean operator
+		"gre*",          // prefix expansion
+		"title:red",     // column scoping
+		`red"green`,     // stray double quote
+		"NEAR(red green)",
+	}
+	for name, db := range dbs {
+		for _, term := range nasty {
+			t.Run(name+"/"+term, func(t *testing.T) {
+				_, err := engine.NewQuery[FTSArticle](db).Search(context.Background(), term)
+				require.NoError(t, err, "raw operator input must not error")
+			})
+		}
+	}
+}
+
+// TestSearch_OperatorNeutralized_NoBooleanOr pins that `red OR yellow` is not
+// interpreted as a boolean OR: a doc matching only one of the words is never
+// pulled in. Asserted per-backend (the exact hit set differs by stemming, an
+// inherent backend gap) but the exclusion holds on both.
+func TestSearch_OperatorNeutralized_NoBooleanOr(t *testing.T) {
+	dbs := ftsBackends(t, []*FTSArticle{
+		{Title: "redonly", Body: "red apple"},
+		{Title: "yellowonly", Body: "yellow banana"},
+		{Title: "both", Body: "red yellow plum"},
+	})
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			hits, err := engine.NewQuery[FTSArticle](db).Search(context.Background(), "red OR yellow")
+			require.NoError(t, err)
+			got := titlesOf(hits)
+			assert.NotContains(t, got, "redonly", "boolean OR must not pull in red-only doc")
+			assert.NotContains(t, got, "yellowonly", "boolean OR must not pull in yellow-only doc")
+		})
+	}
+}
+
+// TestSearch_OperatorNeutralized_NoPrefix pins that a trailing * is a literal
+// character, not an FTS5 prefix operator: `gre*` must not match `green`.
+func TestSearch_OperatorNeutralized_NoPrefix(t *testing.T) {
+	dbs := ftsBackends(t, []*FTSArticle{{Title: "greendoc", Body: "green meadow"}})
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			hits, err := engine.NewQuery[FTSArticle](db).Search(context.Background(), "gre*")
+			require.NoError(t, err)
+			assert.NotContains(t, titlesOf(hits), "greendoc", "* must not prefix-match green")
+		})
+	}
+}
+
+// titlesOf extracts titles for set-membership assertions (IDs differ per
+// backend; titles are the shared identity here).
+func titlesOf(articles []*FTSArticle) []string {
+	titles := make([]string, len(articles))
+	for i, a := range articles {
+		titles[i] = a.Title
+	}
+	return titles
+}
+
+// TestSearch_BlankReturnsEmpty pins that an all-blank term short-circuits to
+// an empty, non-nil result without touching the backend.
+func TestSearch_BlankReturnsEmpty(t *testing.T) {
+	dbs := ftsBackends(t, []*FTSArticle{{Title: "x", Body: "red green"}})
+	for name, db := range dbs {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			for _, blank := range []string{"", "   ", "\t\n"} {
+				hits, err := engine.NewQuery[FTSArticle](db).Search(ctx, blank)
+				require.NoError(t, err)
+				assert.Empty(t, hits)
+				assert.NotNil(t, hits, "blank search returns a non-nil empty slice")
+			}
+		})
+	}
+}
+
+// TestSearchRaw_AllowsRawFTS5 pins that SearchRaw reaches FTS5 query syntax
+// on SQLite (a prefix query matches) while Search neutralises the same input
+// to a literal that matches nothing — proving the two terminals differ.
+func TestSearchRaw_AllowsRawFTS5(t *testing.T) {
+	db := dentest.MustOpen(t, &FTSArticle{})
+	ctx := context.Background()
+	require.NoError(t, engine.Save(ctx, db, &FTSArticle{Title: "Go", Body: "golang rocks"}))
+
+	raw, err := engine.NewQuery[FTSArticle](db).SearchRaw(ctx, "gola*")
+	require.NoError(t, err)
+	require.Len(t, raw, 1, "SearchRaw must honor the FTS5 prefix operator")
+
+	literal, err := engine.NewQuery[FTSArticle](db).Search(ctx, "gola*")
+	require.NoError(t, err)
+	assert.Empty(t, literal, `Search quotes "gola*" as a literal token, matching nothing`)
 }
 
 func TestSearch_Postgres_NoResults(t *testing.T) {

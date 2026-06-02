@@ -4,8 +4,18 @@ import (
 	"context"
 
 	"github.com/oliverandrich/den/engine"
+	"github.com/oliverandrich/den/search"
 	"github.com/oliverandrich/den/where"
 )
+
+// LiteralFTS5 builds a literal-terms FTS5 MATCH string from a raw term:
+// whitespace-separated tokens become double-quoted literals ANDed together,
+// neutralising FTS5 operators and punctuation. QuerySet.Search applies this
+// automatically, so most callers never need it directly — reach for it only
+// to compose a safe literal core with QuerySet.SearchRaw.
+func LiteralFTS5(term string) string {
+	return search.LiteralFTS5(term)
+}
 
 // NewQuery creates a new chainable query for type T. Scope is `*DB`
 // (outside a transaction) or `*Tx` (inside one). The context is supplied

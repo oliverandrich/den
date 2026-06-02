@@ -6,7 +6,12 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ### Added
 
+- **`QuerySet.SearchRaw` and `den.LiteralFTS5`.** `SearchRaw` passes the term straight to the backend's native FTS mechanism (FTS5 query syntax on SQLite, `plainto_tsquery` on PostgreSQL) for callers who want operators. `LiteralFTS5` exposes the literal-terms transform for composing safe strings by hand.
 - **`mise run clean` and `mise run clean-all` tasks.** `clean` removes build artifacts and generated files (coverage outputs, `site/`, generated doc pages); `clean-all` additionally wipes local SQLite test DBs (`*.db`, `*.db-shm`, `*.db-wal`) anywhere in the tree. `clean-all` depends on `clean` to avoid copy-paste drift.
+
+### Changed
+
+- **`QuerySet.Search` is now literal-by-default.** The term is treated as plain words ANDed together, with FTS5 operators/punctuation neutralised, so raw user input is safe on both backends (matching PostgreSQL's existing `plainto_tsquery` behaviour). On SQLite this means FTS5 query operators in the term are no longer interpreted — use the new `SearchRaw` for those.
 
 ## 0.16.1 — 2026-05-23
 

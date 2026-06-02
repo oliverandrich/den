@@ -14,9 +14,34 @@ package search
 
 import (
 	"context"
+	"strings"
 
 	"github.com/oliverandrich/den/backend"
 )
+
+// LiteralFTS5 turns a raw user term into a literal-terms FTS5 MATCH
+// expression: each whitespace-separated token becomes a double-quoted
+// literal (embedded quotes doubled), tokens joined by spaces so FTS5 ANDs
+// them. This neutralises FTS5 operators and punctuation (AND/OR/NEAR,
+// col:term scoping, prefix *, stray quotes) that would otherwise raise a
+// syntax error or let a client scope columns. An all-blank term yields "".
+//
+// The same string is safe to feed to PostgreSQL plainto_tsquery, which
+// discards the quotes as punctuation and ANDs the surviving lexemes — so
+// QuerySet.Search applies this once and dispatches the result to either
+// backend unchanged.
+func LiteralFTS5(term string) string {
+	var b strings.Builder
+	for tok := range strings.FieldsSeq(term) {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteByte('"')
+		b.WriteString(strings.ReplaceAll(tok, `"`, `""`))
+		b.WriteByte('"')
+	}
+	return b.String()
+}
 
 // FTSSearcher is the read-side full-text search contract. Both backends and
 // transactions implement it so QuerySet.Search honors the caller's scope:

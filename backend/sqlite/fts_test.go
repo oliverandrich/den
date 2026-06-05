@@ -22,6 +22,71 @@ func TestEnsureFTS(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// searchIDs runs an FTS search over the articles collection and collects
+// the matching ids in iteration order.
+func searchIDs(t *testing.T, fts den.FTSProvider, term string) []string {
+	t.Helper()
+	ctx := context.Background()
+
+	iter, err := fts.Search(ctx, "articles", term, &den.Query{Collection: "articles"})
+	require.NoError(t, err)
+	defer iter.Close()
+
+	var ids []string
+	for iter.Next() {
+		ids = append(ids, iter.ID())
+	}
+	require.NoError(t, iter.Err())
+	return ids
+}
+
+func TestEnsureFTS_BackfillsExistingRows(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "articles", den.CollectionMeta{}))
+
+	// Rows exist before FTS is enabled — the schema-upgrade scenario.
+	require.NoError(t, b.Put(ctx, "articles", "a1", []byte(`{"title":"Go Programming","body":"Learn Go"}`)))
+	require.NoError(t, b.Put(ctx, "articles", "a2", []byte(`{"title":"Python Basics","body":"Learn Python"}`)))
+
+	fts := b.(den.FTSProvider)
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"title", "body"}))
+
+	assert.Equal(t, []string{"a1"}, searchIDs(t, fts, "Go"))
+}
+
+func TestEnsureFTS_SecondCallNoErrorNoDuplicates(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "articles", den.CollectionMeta{}))
+	fts := b.(den.FTSProvider)
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"title"}))
+
+	require.NoError(t, b.Put(ctx, "articles", "a1", []byte(`{"title":"Go Programming"}`)))
+
+	// Re-registering must not error and must not re-backfill rows the
+	// triggers already indexed.
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"title"}))
+
+	assert.Equal(t, []string{"a1"}, searchIDs(t, fts, "Go"))
+}
+
+func TestEnsureFTS_BackfillsNestedField(t *testing.T) {
+	b := openTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, b.EnsureCollection(ctx, "articles", den.CollectionMeta{}))
+
+	require.NoError(t, b.Put(ctx, "articles", "a1", []byte(`{"profile":{"bio":"mechanical computation"}}`)))
+
+	fts := b.(den.FTSProvider)
+	require.NoError(t, fts.EnsureFTS(ctx, "articles", []string{"profile.bio"}))
+
+	assert.Equal(t, []string{"a1"}, searchIDs(t, fts, "mechanical"))
+}
+
 func TestSearch_Basic(t *testing.T) {
 	b := openTestDB(t)
 	ctx := context.Background()

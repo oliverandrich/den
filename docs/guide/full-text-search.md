@@ -82,7 +82,7 @@ Cursor + offset (`After`/`Before` combined with `Skip`) is rejected with `ErrInc
     );
     ```
 
-    Den automatically creates triggers to keep the FTS index in sync on insert, update, and delete. Synchronization is fully atomic with the document write.
+    Den automatically creates triggers to keep the FTS index in sync on insert, update, and delete. Synchronization is fully atomic with the document write. When the FTS table is first created for an already-populated collection — such as after adding `den:"fts"` tags to an existing type — Den backfills the index from the existing rows in the same transaction.
 
     **Generated search query:**
 

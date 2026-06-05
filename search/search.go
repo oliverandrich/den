@@ -57,6 +57,11 @@ type FTSSearcher interface {
 // Backends implement the full interface; transactions implement only
 // [FTSSearcher] because index/trigger creation is a one-time setup
 // operation that does not belong on a transactional path.
+//
+// EnsureFTS must be idempotent, and after it returns, rows that existed in
+// the collection before the first call must be searchable — first-time
+// setup backfills the index from existing data rather than indexing only
+// subsequent writes.
 type FTSProvider interface {
 	FTSSearcher
 	EnsureFTS(ctx context.Context, collection string, fields []string) error

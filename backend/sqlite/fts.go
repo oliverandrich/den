@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -9,7 +10,16 @@ import (
 	"github.com/oliverandrich/den/internal/util"
 )
 
-// EnsureFTS creates an FTS5 virtual table and sync triggers for the collection.
+// execer abstracts *sql.DB and *sql.Tx so the FTS trigger setup can run
+// either bare or inside the first-creation transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// EnsureFTS creates an FTS5 virtual table and sync triggers for the
+// collection. On first creation it also backfills the index from rows
+// that already exist — without this, documents saved before the fts tag
+// was added would stay invisible to Search until their next write.
 func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []string) error {
 	ftsTable := collection + "_fts"
 
@@ -28,42 +38,95 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 	}
 	fieldList := strings.Join(columnNames, ", ")
 
+	var exists bool
+	err := b.db.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
+		ftsTable,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check FTS5 table existence: %w", err)
+	}
+
+	if exists {
+		// Idempotent re-registration: the index is already in sync via
+		// the triggers; just make sure they are present.
+		return createFTSTriggers(ctx, b.db, collection, fieldList, jsonPaths)
+	}
+
+	// First creation: table, triggers and backfill commit atomically. The
+	// table's existence is the only skip-backfill signal future Register
+	// calls have, so a partial failure must not leave the table behind.
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin FTS setup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// No IF NOT EXISTS: absence was just checked, and a concurrent
+	// Register losing the race must error and roll back rather than
+	// backfill twice.
 	createFTS := fmt.Sprintf(
-		"CREATE VIRTUAL TABLE IF NOT EXISTS %q USING fts5(%s, content=%q, content_rowid=rowid)",
+		"CREATE VIRTUAL TABLE %q USING fts5(%s, content=%q, content_rowid=rowid)",
 		ftsTable, fieldList, collection,
 	)
-	if _, err := b.db.ExecContext(ctx, createFTS); err != nil {
+	if _, err := tx.ExecContext(ctx, createFTS); err != nil {
 		return fmt.Errorf("create FTS5 table: %w", err)
 	}
 
-	// Triggers to keep FTS in sync
-	// INSERT trigger
-	insertExprs := make([]string, len(fields))
-	for i, p := range jsonPaths {
-		insertExprs[i] = fmt.Sprintf("json_extract(NEW.data, '$.%s')", p)
+	if err := createFTSTriggers(ctx, tx, collection, fieldList, jsonPaths); err != nil {
+		return err
 	}
+
+	// Backfill pre-existing rows using the same extraction expressions as
+	// the insert trigger, against the stored column instead of NEW.data.
+	backfill := fmt.Sprintf( //nolint:gosec // table/column names from internal registration
+		"INSERT INTO %q(rowid, %s) SELECT rowid, %s FROM %q",
+		ftsTable, fieldList, ftsExtractExprs("data", jsonPaths), collection,
+	)
+	if _, err := tx.ExecContext(ctx, backfill); err != nil {
+		return fmt.Errorf("backfill FTS index: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// ftsExtractExprs renders the comma-joined json_extract expressions for the
+// given source column (data, NEW.data, OLD.data). Triggers and backfill share
+// it so their extraction expressions cannot drift apart.
+func ftsExtractExprs(src string, jsonPaths []string) string {
+	exprs := make([]string, len(jsonPaths))
+	for i, p := range jsonPaths {
+		exprs[i] = fmt.Sprintf("json_extract(%s, '$.%s')", src, p)
+	}
+	return strings.Join(exprs, ", ")
+}
+
+// createFTSTriggers installs the insert/delete/update sync triggers that
+// keep the FTS index aligned with the collection table.
+func createFTSTriggers(ctx context.Context, db execer, collection, fieldList string, jsonPaths []string) error {
+	ftsTable := collection + "_fts"
+	insertExprs := ftsExtractExprs("NEW.data", jsonPaths)
+	deleteExprs := ftsExtractExprs("OLD.data", jsonPaths)
+
+	// INSERT trigger
 	insertTrigger := fmt.Sprintf( //nolint:gosec // table/column names from internal registration
 		`CREATE TRIGGER IF NOT EXISTS %q AFTER INSERT ON %q BEGIN
 			INSERT INTO %q(rowid, %s) VALUES (NEW.rowid, %s);
 		END`,
-		collection+"_fts_insert", collection, ftsTable, fieldList, strings.Join(insertExprs, ", "),
+		collection+"_fts_insert", collection, ftsTable, fieldList, insertExprs,
 	)
-	if _, err := b.db.ExecContext(ctx, insertTrigger); err != nil {
+	if _, err := db.ExecContext(ctx, insertTrigger); err != nil {
 		return fmt.Errorf("create FTS insert trigger: %w", err)
 	}
 
 	// DELETE trigger
-	deleteExprs := make([]string, len(fields))
-	for i, p := range jsonPaths {
-		deleteExprs[i] = fmt.Sprintf("json_extract(OLD.data, '$.%s')", p)
-	}
 	deleteTrigger := fmt.Sprintf( //nolint:gosec // table/column names from internal registration
 		`CREATE TRIGGER IF NOT EXISTS %q BEFORE DELETE ON %q BEGIN
 			INSERT INTO %q(%q, rowid, %s) VALUES ('delete', OLD.rowid, %s);
 		END`,
-		collection+"_fts_delete", collection, ftsTable, ftsTable, fieldList, strings.Join(deleteExprs, ", "),
+		collection+"_fts_delete", collection, ftsTable, ftsTable, fieldList, deleteExprs,
 	)
-	if _, err := b.db.ExecContext(ctx, deleteTrigger); err != nil {
+	if _, err := db.ExecContext(ctx, deleteTrigger); err != nil {
 		return fmt.Errorf("create FTS delete trigger: %w", err)
 	}
 
@@ -74,10 +137,10 @@ func (b *backend) EnsureFTS(ctx context.Context, collection string, fields []str
 			INSERT INTO %q(rowid, %s) VALUES (NEW.rowid, %s);
 		END`,
 		collection+"_fts_update", collection,
-		ftsTable, ftsTable, fieldList, strings.Join(deleteExprs, ", "),
-		ftsTable, fieldList, strings.Join(insertExprs, ", "),
+		ftsTable, ftsTable, fieldList, deleteExprs,
+		ftsTable, fieldList, insertExprs,
 	)
-	if _, err := b.db.ExecContext(ctx, updateTrigger); err != nil {
+	if _, err := db.ExecContext(ctx, updateTrigger); err != nil {
 		return fmt.Errorf("create FTS update trigger: %w", err)
 	}
 

@@ -441,3 +441,71 @@ func TestSearch_Postgres_NoResults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
+
+// ftsUpgradeArticleV1/V2 simulate adding den:"fts" to an already-populated
+// collection: both map to the same collection name, V1 predates the tag.
+type ftsUpgradeArticleV1 struct {
+	document.Base
+	Title string `json:"title"`
+}
+
+func (ftsUpgradeArticleV1) DenSettings() engine.Settings {
+	return engine.Settings{CollectionName: "fts_upgrade_articles"}
+}
+
+type ftsUpgradeArticleV2 struct {
+	document.Base
+	Title string `json:"title" den:"fts"`
+}
+
+func (ftsUpgradeArticleV2) DenSettings() engine.Settings {
+	return engine.Settings{CollectionName: "fts_upgrade_articles"}
+}
+
+// TestSearch_FTSAddedToExistingCollection pins the schema-upgrade path on
+// SQLite: documents saved before the fts tag existed must be searchable
+// after the first Register with the tag — EnsureFTS backfills the index on
+// first creation. PostgreSQL is unaffected by design (the generated
+// tsvector column backfills at ALTER time).
+func TestSearch_FTSAddedToExistingCollection(t *testing.T) {
+	ctx := context.Background()
+	dsn := "sqlite:///" + t.TempDir() + "/fts_upgrade.db"
+
+	db, err := engine.OpenURL(ctx, dsn, engine.WithTypes(&ftsUpgradeArticleV1{}))
+	require.NoError(t, err)
+	require.NoError(t, engine.SaveAll(ctx, db, []*ftsUpgradeArticleV1{
+		{Title: "Go Programming"},
+		{Title: "Python Basics"},
+	}))
+	require.NoError(t, db.Close())
+
+	db, err = engine.OpenURL(ctx, dsn, engine.WithTypes(&ftsUpgradeArticleV2{}))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	results, err := engine.NewQuery[ftsUpgradeArticleV2](db).Search(ctx, "Go")
+	require.NoError(t, err)
+	require.Len(t, results, 1, "pre-existing rows must be searchable after the fts upgrade")
+	assert.Equal(t, "Go Programming", results[0].Title)
+}
+
+// TestSearch_FTSAddedToExistingCollection_Postgres pins the same upgrade
+// contract on PostgreSQL: the generated tsvector column backfills at ALTER
+// time today, and this must keep holding if the implementation ever changes.
+func TestSearch_FTSAddedToExistingCollection_Postgres(t *testing.T) {
+	ctx := context.Background()
+
+	db := dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ftsUpgradeArticleV1{})
+	require.NoError(t, engine.SaveAll(ctx, db, []*ftsUpgradeArticleV1{
+		{Title: "Go Programming"},
+		{Title: "Python Basics"},
+	}))
+	require.NoError(t, db.Close())
+
+	db = dentest.MustOpenPostgres(t, dentest.PostgresURL(), &ftsUpgradeArticleV2{})
+
+	results, err := engine.NewQuery[ftsUpgradeArticleV2](db).Search(ctx, "Go")
+	require.NoError(t, err)
+	require.Len(t, results, 1, "pre-existing rows must be searchable after the fts upgrade")
+	assert.Equal(t, "Go Programming", results[0].Title)
+}

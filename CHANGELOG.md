@@ -4,6 +4,8 @@ All notable changes to Den are documented here. The format is based on [Keep a C
 
 ## Unreleased
 
+## 0.17.1 — 2026-06-05
+
 ### Fixed
 
 - **SQLite: enabling FTS on an already-populated collection now backfills the index.** Rows saved before the first `den:"fts"` registration were invisible to `Search` until re-saved; first-time FTS setup now indexes existing rows atomically with the table creation. PostgreSQL was never affected.
